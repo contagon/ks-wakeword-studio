@@ -22,6 +22,8 @@ function parent(device: Device): string { return device.leader_id ? `Parent ${de
 function sync(): void { emit("changed", [...registry.devices.value]); }
 async function add(): Promise<void> {
   const token = tokenInput.value?.value ?? "";
+  // Clear the DOM field before awaiting so a slow network request never retains a submitted secret.
+  if (tokenInput.value) tokenInput.value.value = "";
   busy.value = "add"; error.value = ""; notice.value = "";
   try {
     await registry.add(url.value, token, role.value);
@@ -29,7 +31,7 @@ async function add(): Promise<void> {
     notice.value = role.value === "leader" ? "Leader added; follower membership was refreshed." : "Standalone kiosk added.";
     sync();
   } catch (cause) { error.value = cause instanceof Error ? cause.message : "Device could not be added."; }
-  finally { if (tokenInput.value) tokenInput.value.value = ""; busy.value = ""; }
+  finally { busy.value = ""; }
 }
 async function refresh(device: Device): Promise<void> {
   busy.value = `refresh:${device.id}`; error.value = "";
@@ -40,10 +42,12 @@ async function refresh(device: Device): Promise<void> {
 async function setCredentials(device: Device): Promise<void> {
   const input = credentialInputs.get(device.id);
   const token = input?.value ?? "";
+  // Clear the DOM field before awaiting so a slow network request never retains a submitted secret.
+  if (input) input.value = "";
   busy.value = `credentials:${device.id}`; error.value = "";
   try { await registry.credentials(device.id, token); notice.value = "Credentials saved server-side."; sync(); }
   catch (cause) { error.value = cause instanceof Error ? cause.message : "Credentials were not saved."; }
-  finally { if (input) input.value = ""; busy.value = ""; }
+  finally { busy.value = ""; }
 }
 onMounted(async () => { await registry.load(); sync(); });
 onBeforeUnmount(() => registry.abort());
