@@ -231,10 +231,8 @@ app.include_router(create_studio_router(STUDIO_RUNTIME))
 # singleton files as a side effect.
 LEGACY_STUDIO_READONLY_PATHS = frozenset({
     "/api/auto_train",
-    "/api/session",
     "/api/samples",
     "/api/data",
-    "/api/train_status",
 })
 
 

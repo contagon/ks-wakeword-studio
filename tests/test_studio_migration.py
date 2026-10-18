@@ -1,4 +1,5 @@
 import io
+import copy
 import json
 import os
 import tempfile
@@ -205,6 +206,57 @@ class MigrationTests(unittest.TestCase):
         legacy_publish.assert_not_called()
         with self.assertRaisesRegex(RuntimeError, "legacy singleton training is disabled"):
             trainer._start_training_thread("studio_word", "en", True, False, "modern")
+
+    def test_studio_mode_legacy_gets_do_not_mutate_state(self):
+        import trainer_server as trainer
+        from fastapi.testclient import TestClient
+
+        if trainer.TRAINER_LEGACY_MODE:
+            self.skipTest("explicit legacy-mode process")
+
+        safe_read_only_paths = {
+            "/api/auto_train",
+            "/api/samples",
+            "/api/data",
+        }
+        compatibility_paths = (
+            "/api/auto_train",
+            "/api/samples",
+            "/api/data",
+            "/api/session",
+            "/api/train_status",
+        )
+        self.assertEqual(set(trainer.LEGACY_STUDIO_READONLY_PATHS), safe_read_only_paths)
+
+        with trainer.STATE_LOCK:
+            original_state = copy.deepcopy(trainer.STATE)
+            trainer.STATE.update(
+                {
+                    "raw_phrase": "legacy phrase",
+                    "safe_word": "legacy_phrase",
+                    "language": "invalid-language",
+                    "english_accent": "invalid-accent",
+                    "tts_mode": "invalid-mode",
+                }
+            )
+            trainer.STATE["training"].update(
+                {"last_sent_tail": ["previous tail"], "last_log_size": 321}
+            )
+            seeded_state = copy.deepcopy(trainer.STATE)
+
+        try:
+            with TestClient(trainer.app) as client:
+                for path in compatibility_paths:
+                    with self.subTest(path=path):
+                        response = client.get(path)
+                        expected_status = 200 if path in safe_read_only_paths else 409
+                        self.assertEqual(response.status_code, expected_status)
+                        with trainer.STATE_LOCK:
+                            self.assertEqual(trainer.STATE, seeded_state)
+        finally:
+            with trainer.STATE_LOCK:
+                trainer.STATE.clear()
+                trainer.STATE.update(original_state)
 
     def test_every_legacy_mutation_is_conflicted_in_studio_and_not_conflicted_in_legacy_mode(self):
         import trainer_server as trainer
