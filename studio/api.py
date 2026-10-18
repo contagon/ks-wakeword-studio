@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict
 from studio.models import (CollectionRun, Conflict, CredentialsRequired, Device, IdentityMismatch, SourceMapping,
                            RemoteRejected, RemoteUnavailable, NotFound, Page, Recording, Sample, SampleQuery,
                            ValidationError, Wakeword, WakewordUpdate, Job, Schedule, WorkerHealth, Dataset,
-                           Batch, GenerationRecipe)
+                           Batch, GenerationRecipe, TrainingSettings, RunManifest, ModelVersion)
 from studio.runtime import StudioRuntime
 from studio.storage import AUDIO_MIMES
 
@@ -127,6 +127,12 @@ class BatchSelectionBody(BaseModel):
     batch_ids: list[str]
 
 
+class TrainingSettingsBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    training_steps: int
+    train_openwakeword: bool
+
+
 def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
                  label: str | None = None, device_id: str | None = None,
                  near_miss: bool | None = None, source: str | None = None,
@@ -136,6 +142,34 @@ def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=1
 
 def create_router(runtime: StudioRuntime) -> APIRouter:
     router = APIRouter(prefix="/api/studio", route_class=StudioRoute)
+
+    @router.get('/wakewords/{word_id}/training/settings', response_model=TrainingSettings)
+    def training_settings(word_id: str):
+        return runtime.training.settings(word_id)
+
+    @router.put('/wakewords/{word_id}/training/settings', response_model=TrainingSettings)
+    def save_training_settings(word_id: str, body: TrainingSettingsBody):
+        return runtime.training.save_settings(word_id, TrainingSettings(**body.model_dump()))
+
+    @router.get('/wakewords/{word_id}/training/counts', response_model=dict[str, int])
+    def training_counts(word_id: str):
+        return runtime.training.counts(word_id)
+
+    @router.post('/wakewords/{word_id}/training/jobs', response_model=Job, status_code=201)
+    def train(word_id: str):
+        return runtime.training.enqueue(word_id, 'manual')
+
+    @router.get('/wakewords/{word_id}/training/runs', response_model=Page[Job])
+    def training_runs(word_id: str, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+        return runtime.training.runs(word_id, offset, limit)
+
+    @router.get('/wakewords/{word_id}/training/runs/{run_id}', response_model=RunManifest)
+    def training_manifest(word_id: str, run_id: str):
+        return runtime.training.get_manifest(word_id, run_id)
+
+    @router.get('/wakewords/{word_id}/models', response_model=Page[ModelVersion])
+    def models(word_id: str, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+        return runtime.training.versions(word_id, offset, limit)
 
     @router.get('/generation/catalog')
     def generation_catalog():

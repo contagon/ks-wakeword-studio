@@ -5,6 +5,14 @@ PROGPATH=$(realpath "$0")
 PROGDIR=$(dirname "${PROGPATH}")
 CLIDIR="${PROGDIR}/cli"
 
+# Explicit retained-input mode is independent of legacy shell defaults and TTS.
+# Keep all setup/preprocessing children in this queue-owned process group.
+for argument in "$@"; do
+    if [[ "$argument" == --input-manifest=* ]]; then
+        exec python3 "${CLIDIR}/studio_train.py" "$@"
+    fi
+done
+
 KNOWN_ARGS=( samples batch-size training-steps data-dir cleanup-work-dir language english-accent tts-mode tts-voice-count artifact-slug )
 source "${CLIDIR}/shell.functions"
 WAKE_WORD=${POSITIONAL_ARGS[0]}

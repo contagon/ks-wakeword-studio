@@ -4,7 +4,7 @@ set -e
 PROGPATH=$(realpath "$0")
 PROGDIR=$(dirname "${PROGPATH}")
 
-KNOWN_ARGS=( training-steps samples data-dir language artifact-slug dataset-manifest )
+KNOWN_ARGS=( training-steps samples data-dir tool-data-dir language artifact-slug dataset-manifest stable-model-id )
 source "${PROGDIR}/shell.functions"
 WAKE_WORD="${POSITIONAL_ARGS[0]}"
 
@@ -39,6 +39,7 @@ EOF
 fi
 
 WORK_DIR="${DATA_DIR}/work"
+TOOL_DATA_DIR="${TOOL_DATA_DIR:-${DATA_DIR}}"
 TRAINING_DS="${DATA_DIR}/training_datasets"
 if [ -n "${DATASET_MANIFEST:-}" ]; then
     DATASET_MANIFEST="$(realpath "${DATASET_MANIFEST}")"
@@ -55,7 +56,7 @@ if [ -z "$WAKE_WORD_TITLE" ] ; then
 fi
 
 # shellcheck source=/dev/null
-source "${DATA_DIR}/.venv/bin/activate"
+source "${TOOL_DATA_DIR}/.venv/bin/activate"
 
 # Keep copies so we can restore/preserve across retries and fallback.
 ORIG_XLA_FLAGS="${XLA_FLAGS:-}"
@@ -273,11 +274,11 @@ rm -rf "${WORK_DIR}/trained_models/wakeword"
 
 if [ "${IS_BLACKWELL}" = "true" ] && [ "${BLACKWELL_TF_MODE}" != "disabled" ]; then
   BLACKWELL_SETUP="${PROGDIR}/setup_blackwell_venv"
-  BLACKWELL_PYTHON="${DATA_DIR}/.venv-blackwell/bin/python"
+  BLACKWELL_PYTHON="${TOOL_DATA_DIR}/.venv-blackwell/bin/python"
 
   if [ -x "${BLACKWELL_SETUP}" ] && command -v python3.13 >/dev/null 2>&1; then
     echo "↪️  Preparing Blackwell-native TensorFlow training environment."
-    if "${BLACKWELL_SETUP}" --data-dir="${DATA_DIR}"; then
+    if "${BLACKWELL_SETUP}" --data-dir="${TOOL_DATA_DIR}"; then
       PYTHON_BIN="${BLACKWELL_PYTHON}"
       BLACKWELL_TF_ACTIVE="true"
       echo "✅ Blackwell TensorFlow training enabled: ${PYTHON_BIN}"
@@ -305,6 +306,13 @@ wake_word_filename="$(
 )"
 if [ -z "${wake_word_filename}" ]; then
   wake_word_filename="wakeword_$(printf '%s' "${WAKE_WORD}" | sha256sum | cut -c1-8)"
+fi
+if [ -n "${STABLE_MODEL_ID:-}" ]; then
+  if ! [[ "${STABLE_MODEL_ID}" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]]; then
+    echo "Invalid stable model ID" >&2
+    exit 1
+  fi
+  wake_word_filename="${STABLE_MODEL_ID}"
 fi
 
 OUTPUT_DIR="${DATA_DIR}/output/$(date +'%Y-%m-%d-%H-%M-%S')-${wake_word_filename}-${SAMPLES}-${TRAINING_STEPS}"

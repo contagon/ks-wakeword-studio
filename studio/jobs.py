@@ -393,6 +393,7 @@ class WorkerPool:
         self.queue, self.clock, self.schedules = queue, clock, schedules
         self.runner = runner or ProcessRunner()
         self.handlers = {}
+        self.completion_hooks = {}
         self.stop_event = threading.Event()
         self.threads = []
         self._health_lock = threading.Lock()
@@ -434,6 +435,14 @@ class WorkerPool:
             raise Conflict('Register handlers before starting workers')
         self.handlers[kind] = handler
 
+    def register_completion(self, kind, callback):
+        """Post-commit seam for publication. Failure cannot invalidate training."""
+        if kind not in self.handlers or not callable(callback):
+            raise ValidationError('Invalid completion hook')
+        if self.threads:
+            raise Conflict('Register completion hooks before starting workers')
+        self.completion_hooks[kind] = callback
+
     def run_once(self, resource):
         if self.stop_event.is_set():
             return False
@@ -447,7 +456,12 @@ class WorkerPool:
             result = self.handlers[job.kind](job, context)
             if self.stop_event.is_set():
                 self.queue.cancel(job.id)
-            self.queue.finish(job.id, result or {})
+            completed = self.queue.finish(job.id, result or {})
+            if completed.status == 'complete' and job.kind in self.completion_hooks:
+                try:
+                    self.completion_hooks[job.kind](completed)
+                except Exception:
+                    context.log('completion_hook_failed')
         except Exception:
             context.log('handler_failed')
             try:

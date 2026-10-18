@@ -116,6 +116,64 @@ class Batch:
 
 
 @dataclass(frozen=True)
+class TrainingSettings:
+    training_steps: int = 40000
+    train_openwakeword: bool = False
+
+
+@dataclass(frozen=True)
+class TrainingAudio:
+    audio_id: str
+    original_hash: str
+    normalized_hash: str
+    family_id: str
+    path: str
+    label: str
+    split: str
+    sample_id: str | None = None
+    revision: int | None = None
+    batch_id: str | None = None
+
+
+@dataclass(frozen=True)
+class RunManifest:
+    schema_version: int
+    run_id: str
+    word_id: str
+    model_id: str
+    phrase: str
+    language: str
+    config: TrainingSettings
+    seed: int
+    audio: tuple[TrainingAudio, ...]
+    datasets: tuple[DatasetInput, ...]
+    selected_batches: tuple[str, ...]
+    fingerprint: str
+    created_at: str
+
+
+@dataclass(frozen=True)
+class TrainingResult:
+    artifacts: dict[str, str]
+    checksums: dict[str, str]
+    metrics: dict
+    validated: bool
+
+
+@dataclass(frozen=True)
+class ModelVersion:
+    id: str
+    word_id: str
+    model_id: str
+    run_id: str
+    trained_at: str
+    path: str
+    fingerprint: str
+    checksums: dict[str, str]
+    metrics: dict
+
+
+@dataclass(frozen=True)
 class LoopHealth:
     component: str
     status: str = 'pending'

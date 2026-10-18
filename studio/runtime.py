@@ -14,6 +14,7 @@ from studio.schedules import ScheduleService
 from studio.models import WorkerHealth
 from studio.datasets import DatasetService
 from studio.generation import GenerationService
+from studio.training import TrainingService
 
 
 class StudioRuntime:
@@ -32,6 +33,7 @@ class StudioRuntime:
         self._workers: WorkerPool | None = None
         self._datasets: DatasetService | None = None
         self._generation: GenerationService | None = None
+        self._training: TrainingService | None = None
 
     def startup(self) -> None:
         with self._lock:
@@ -49,11 +51,13 @@ class StudioRuntime:
                 self._jobs = JobQueue(store, clock=self.clock, groups=self.groups)
                 self._datasets = DatasetService(store, self._jobs)
                 self._generation = GenerationService(store, blobs, self._jobs, clock=self.clock)
+                self._training = TrainingService(store, blobs, self._jobs, self._datasets, clock=self.clock)
                 self._schedules = ScheduleService(store, self._jobs, clock=self.clock)
                 self._workers = WorkerPool(self._jobs, clock=self.clock, runner=self.runner, schedules=self._schedules)
                 self._workers.register('scrape', 'collection', self._collect_job)
                 self._workers.register('download', 'download', self._datasets.execute)
                 self._workers.register('generation', 'gpu', self._generation.handle)
+                self._workers.register('train', 'gpu', self._training.handle)
                 self._jobs.recover()
                 self._store = store
             except BaseException:
@@ -66,6 +70,12 @@ class StudioRuntime:
         assert self._collection is not None
         result = self._collection.run(job.payload.get('device_ids'))
         return {'run_id': result.id, 'status': result.status}
+
+    @property
+    def training(self) -> TrainingService:
+        self.startup()
+        assert self._training is not None
+        return self._training
 
     @property
     def generation(self) -> GenerationService:
@@ -153,3 +163,4 @@ class StudioRuntime:
                 self._workers = None
                 self._datasets = None
                 self._generation = None
+                self._training = None

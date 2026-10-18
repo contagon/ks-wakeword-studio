@@ -269,9 +269,11 @@ class DatasetService:
             except (zipfile.BadZipFile, OSError, RuntimeError) as exc:
                 raise ValidationError('Invalid dataset archive') from exc
 
-    def snapshot(self, word_id: str) -> list[DatasetInput]:
-        WorkspaceService(self.store).get(word_id)
-        with self.store.transaction() as db:
+    def snapshot(self, word_id: str, *, _db=None) -> list[DatasetInput]:
+        from contextlib import nullcontext
+        if _db is None:
+            WorkspaceService(self.store).get(word_id)
+        with (self.store.transaction() if _db is None else nullcontext(_db)) as db:
             rows = db.execute('SELECT s.dataset_id,i.manifest_json FROM studio_dataset_selections s LEFT JOIN studio_dataset_installations i ON i.dataset_id=s.dataset_id WHERE s.word_id=? ORDER BY s.dataset_id', (word_id,)).fetchall()
             result = []
             for row in rows:

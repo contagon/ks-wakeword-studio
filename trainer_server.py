@@ -2947,31 +2947,8 @@ def _training_venv_health(python: Path) -> Tuple[bool, str]:
 
 def _training_subprocess_environment() -> Tuple[Dict[str, str], List[str]]:
     """Remove recorder-only CUDA libraries without disturbing other paths."""
-    env = os.environ.copy()
-    library_path = env.get("LD_LIBRARY_PATH", "")
-    if not library_path:
-        return env, []
-
-    recorder_venv = (DATA_DIR / ".recorder-venv").resolve()
-    kept: List[str] = []
-    removed: List[str] = []
-    for entry in library_path.split(os.pathsep):
-        try:
-            is_recorder_path = bool(entry) and Path(entry).resolve().is_relative_to(
-                recorder_venv
-            )
-        except (OSError, RuntimeError, ValueError):
-            is_recorder_path = False
-        if is_recorder_path:
-            removed.append(entry)
-        else:
-            kept.append(entry)
-
-    if kept:
-        env["LD_LIBRARY_PATH"] = os.pathsep.join(kept)
-    else:
-        env.pop("LD_LIBRARY_PATH", None)
-    return env, removed
+    from studio.legacy_training import training_environment
+    return training_environment(DATA_DIR)
 
 
 def _ensure_training_venv(log_path: Path) -> None:
