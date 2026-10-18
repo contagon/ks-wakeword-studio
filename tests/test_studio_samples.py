@@ -1,4 +1,5 @@
 import io
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -105,6 +106,18 @@ class SampleTests(unittest.TestCase):
         self.assertTrue(sample.recording.near_miss)
         imported = self.service.import_audio(self.word.id, 'negative', io.BytesIO(wav()))
         self.assertIsNone(imported.recording)
+
+    def test_public_metadata_only_contains_bounded_diagnostic_numbers(self):
+        metadata = {'duration': 1.5, 'sample_rate': 16000, 'channels': 1,
+                    'duration_ms': -1, 'duration_s': {'token': 'nested-secret'},
+                    'frames': 10 ** 100, 'token': 'top-secret',
+                    'unknown': {'Authorization': 'Bearer deep-secret'}}
+        recording = self.service.ingest('a', DiagnosticClip(id='1', metadata=metadata), io.BytesIO(wav()), None)
+        self.assertEqual(recording.metadata, {'duration': 1.5, 'sample_rate': 16000, 'channels': 1})
+        with self.store.transaction() as db:
+            retained = json.loads(db.execute('SELECT metadata FROM recordings WHERE id=?', (recording.id,)).fetchone()[0])
+        self.assertEqual(retained, metadata)
+        self.assertEqual(self.service.unmapped(SampleQuery()).items[0].metadata, recording.metadata)
 
     def test_families_normalization_trim_and_retained_blobs(self):
         sample = self.service.import_audio(self.word.id, 'positive', io.BytesIO(wav(rate=8000, channels=2)))
@@ -263,6 +276,38 @@ class SampleAPITests(unittest.TestCase):
         url = self.base + '/samples/' + sample_id
         self.assertEqual(self.client.post(url + '/label', json={'label': 'skip', 'expected_revision': 0}).status_code, 422)
         self.assertEqual(self.client.post(url + '/label', json={'label': 'negative', 'expected_revision': True}).status_code, 422)
+
+    def test_raw_metadata_secrets_never_reach_unmapped_queue_or_library(self):
+        secret = 'private-admin-token-should-not-leak'
+        metadata = {'duration': 1, 'token': secret, 'unrecognized_future_key': secret,
+                    'nested': {'credentials': [{'authorization': secret}]},
+                    'sample_rate': {'token': secret}, 'channels': [secret],
+                    'frames': secret, 'duration_s': secret}
+        recording = self.runtime.samples.ingest('a', DiagnosticClip(id='1', metadata=metadata), io.BytesIO(wav()), None)
+        unmapped = self.client.get('/api/studio/recordings/unmapped')
+        self.assertEqual(unmapped.status_code, 200, unmapped.text)
+        self.assertEqual(unmapped.json()['items'][0]['metadata'], {'duration': 1})
+        assigned = self.client.post(f'/api/studio/recordings/{recording.id}/assign', json={'word_id': self.word.id})
+        self.assertEqual(assigned.status_code, 200, assigned.text)
+        sample_id = assigned.json()['id']
+        responses = [assigned, self.client.get(self.base + '/queue'),
+                     self.client.get(self.base + '/samples'),
+                     self.client.get(self.base + '/samples/' + sample_id),
+                     self.client.post(self.base + '/samples/' + sample_id + '/label',
+                                      json={'label': 'positive', 'expected_revision': 0}),
+                     self.client.get(self.base + '/samples?label=positive')]
+        for response in [unmapped] + responses:
+            with self.subTest(url=str(response.request.url)):
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertNotIn(secret, response.text)
+                self.assertNotIn('unrecognized_future_key', response.text)
+        for response in responses:
+            payload = response.json()
+            sample = payload['items'][0] if 'items' in payload else payload
+            self.assertEqual(sample['recording']['metadata'], {'duration': 1})
+        with self.runtime.samples.store.transaction() as db:
+            raw = db.execute('SELECT metadata FROM recordings WHERE id=?', (recording.id,)).fetchone()[0]
+        self.assertEqual(json.loads(raw), metadata)
 
 
 if __name__ == '__main__':

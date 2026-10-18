@@ -30,6 +30,23 @@ RECORDING_SELECT = """SELECT r.*, a.original_hash, a.normalized_hash, a.family_i
     FROM recordings r JOIN audio_records a ON a.id=r.audio_id"""
 
 
+def _public_metadata(raw: object) -> dict[str, object]:
+    """Project retained provenance onto numeric diagnostics safe for public records.
+
+    No arbitrary strings, nested structures, or unknown keys are public, even
+    under a recognized field name. Apply on reads so existing records are safe
+    without rewriting their immutable raw provenance.
+    """
+    bounds = {"duration": (0, 600), "duration_s": (0, 600),
+              "duration_ms": (0, 600000), "sample_rate": (1, 192000),
+              "channels": (1, 8), "frames": (0, 115200000)}
+    if not isinstance(raw, dict):
+        return {}
+    return {key: value for key, (minimum, maximum) in bounds.items()
+            if type(value := raw.get(key)) in (int, float)
+            and minimum <= value <= maximum and math.isfinite(value)}
+
+
 def _sample(db: sqlite3.Connection, row: sqlite3.Row) -> Sample:
     values = {f.name: row[f.name] for f in fields(Sample) if f.name != "recording"}
     recording = None
@@ -40,8 +57,8 @@ def _sample(db: sqlite3.Connection, row: sqlite3.Row) -> Sample:
 
 def _recording(row: sqlite3.Row) -> Recording:
     values = {f.name: row[f.name] for f in fields(Recording)}
-    for name in ("scores", "metadata"):
-        values[name] = json.loads(values[name])
+    values["scores"] = json.loads(values["scores"])
+    values["metadata"] = _public_metadata(json.loads(values["metadata"]))
     for name in ("near_miss", "quarantined"):
         values[name] = bool(values[name])
     return Recording(**values)
