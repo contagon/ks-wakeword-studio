@@ -5,6 +5,7 @@ from pathlib import Path
 
 from studio.db import Store
 from studio.storage import BlobStore
+from studio.samples import SampleService
 from studio.workspaces import WorkspaceService
 
 
@@ -15,6 +16,7 @@ class StudioRuntime:
         self._store: Store | None = None
         self._workspaces: WorkspaceService | None = None
         self._blobs: BlobStore | None = None
+        self._samples: SampleService | None = None
 
     def startup(self) -> None:
         with self._lock:
@@ -26,10 +28,17 @@ class StudioRuntime:
                 blobs.recover()
                 self._blobs = blobs
                 self._workspaces = WorkspaceService(store)
+                self._samples = SampleService(store, blobs)
                 self._store = store
             except BaseException:
                 store.close()
                 raise
+
+    @property
+    def samples(self) -> SampleService:
+        self.startup()
+        assert self._samples is not None
+        return self._samples
 
     @property
     def workspaces(self) -> WorkspaceService:
@@ -49,4 +58,5 @@ class StudioRuntime:
                 self._store.close()
                 self._store = None
                 self._workspaces = None
+                self._samples = None
                 self._blobs = None

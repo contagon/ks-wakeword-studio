@@ -1,15 +1,104 @@
 """Bounded, content-addressed blobs with atomic durable publication."""
 
 import hashlib
+import io
 import os
 import re
+import shutil
 import stat
+import subprocess
+import tempfile
+import wave
 from contextlib import contextmanager
 from pathlib import Path
 from typing import BinaryIO, Iterator
 from uuid import uuid4
 
 from studio.models import BlobRef, ValidationError
+
+
+MAX_AUDIO_SECONDS = 600
+AUDIO_MIMES = frozenset({"audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave",
+                         "audio/mpeg", "audio/mp3", "audio/ogg", "application/ogg",
+                         "audio/flac", "audio/x-flac", "audio/webm", "video/webm",
+                         "audio/mp4", "video/mp4", "audio/aac", "application/octet-stream"})
+
+
+def canonical_wav(data: bytes) -> bytes:
+    """Validate decoded PCM and strip container metadata for stable content identity."""
+    try:
+        with wave.open(io.BytesIO(data), "rb") as source:
+            channels, width, rate, frames, compression, _ = source.getparams()
+            if (channels, width, rate, compression) != (1, 2, 16000, "NONE"):
+                raise ValidationError("Audio needs conversion")
+            if not 0 < frames <= rate * MAX_AUDIO_SECONDS:
+                raise ValidationError("Invalid audio duration")
+            pcm = source.readframes(frames)
+            if len(pcm) != frames * width:
+                raise ValidationError("Truncated audio")
+    except (wave.Error, EOFError, ValueError) as exc:
+        raise ValidationError("Invalid WAV audio") from exc
+    output = io.BytesIO()
+    with wave.open(output, "wb") as target:
+        target.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+        target.writeframes(pcm)
+    return output.getvalue()
+
+
+def normalize_audio(data: bytes, max_bytes: int) -> bytes:
+    """Same ffmpeg PCM target as legacy uploads, without importing legacy workers.
+
+    Inputs are sniffed, never interpreted as filenames/playlists. Conversion is
+    bounded and local-only; neither uploaded names nor decoder diagnostics escape.
+    """
+    if not data or len(data) > max_bytes:
+        raise ValidationError("Invalid audio size")
+    if data.startswith(b"RIFF") and data[8:12] == b"WAVE":
+        try:
+            with wave.open(io.BytesIO(data), "rb") as source:
+                channels, width, rate, frames, compression, _ = source.getparams()
+                if not 0 < rate <= 192000 or not 1 <= channels <= 8 or not 1 <= width <= 4:
+                    raise ValidationError("Invalid WAV parameters")
+                if not 0 < frames <= rate * MAX_AUDIO_SECONDS:
+                    raise ValidationError("Invalid audio duration")
+                if len(source.readframes(frames)) != frames * channels * width:
+                    raise ValidationError("Truncated audio")
+            if (channels, width, rate, compression) == (1, 2, 16000, "NONE"):
+                return canonical_wav(data)
+        except (wave.Error, EOFError, ValueError) as exc:
+            raise ValidationError("Invalid WAV audio") from exc
+        container = "wav"
+    elif data.startswith(b"fLaC"):
+        container = "flac"
+    elif data.startswith(b"OggS"):
+        container = "ogg"
+    elif data.startswith(b"\x1aE\xdf\xa3"):
+        container = "matroska"
+    elif len(data) >= 12 and data[4:8] == b"ftyp":
+        container = "mov"
+    elif data.startswith(b"ID3") or (len(data) > 1 and data[0] == 255 and data[1] & 224 == 224):
+        container = "aac" if data[0] == 255 and data[1] & 246 == 240 else "mp3"
+    else:
+        raise ValidationError("Unsupported audio content")
+    executable = shutil.which("ffmpeg")
+    if executable is None:
+        raise ValidationError("Audio conversion unavailable")
+    temp_root = "/tmp/opencode" if Path("/tmp/opencode").is_dir() else None
+    with tempfile.TemporaryDirectory(prefix="studio-audio-", dir=temp_root) as directory:
+        source = Path(directory) / "source.audio"
+        target = Path(directory) / "normalized.wav"
+        source.write_bytes(data)
+        command = [executable, "-nostdin", "-v", "error", "-y", "-protocol_whitelist", "file,pipe",
+                   "-f", container, "-i", str(source), "-map", "0:a:0", "-vn", "-ac", "1",
+                   "-ar", "16000", "-c:a", "pcm_s16le", "-t", str(MAX_AUDIO_SECONDS + 1),
+                   "-fs", str(max_bytes + 1), str(target)]
+        try:
+            result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ValidationError("Audio conversion failed") from exc
+        if result.returncode or not target.exists() or target.stat().st_size > max_bytes:
+            raise ValidationError("Audio conversion failed")
+        return canonical_wav(target.read_bytes())
 
 
 @contextmanager

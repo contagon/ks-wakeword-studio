@@ -43,21 +43,28 @@ class Store:
             connection.execute("PRAGMA synchronous = FULL")
             with store.transaction() as db:
                 version = db.execute("PRAGMA user_version").fetchone()[0]
-                if version > 1:
+                if version > 2:
                     raise ValidationError("Unsupported studio schema version")
                 if version == 0:
                     # execute complete statements individually: executescript commits implicitly.
-                    statement = ""
-                    for line in Path(__file__).with_name("schema.sql").read_text().splitlines(True):
-                        statement += line
-                        if sqlite3.complete_statement(statement):
-                            db.execute(statement)
-                            statement = ""
+                    store._apply_schema(db, "schema.sql")
                     db.execute("PRAGMA user_version = 1")
+                if version < 2:
+                    store._apply_schema(db, "schema_samples.sql")
+                    db.execute("PRAGMA user_version = 2")
             return store
         except BaseException:
             store.close()
             raise
+
+    @staticmethod
+    def _apply_schema(db: sqlite3.Connection, filename: str) -> None:
+        statement = ""
+        for line in Path(__file__).with_name(filename).read_text().splitlines(True):
+            statement += line
+            if sqlite3.complete_statement(statement):
+                db.execute(statement)
+                statement = ""
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
