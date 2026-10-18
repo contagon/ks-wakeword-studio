@@ -224,6 +224,24 @@ class CommitResult:
 
 
 @dataclass(frozen=True)
+class Publication:
+    word_id: str
+    device_id: str
+    desired_version: str
+    revision: int
+    state: str
+    attempts: int
+    next_retry: str | None
+    manifest_state: str
+    refresh_state: str
+    runtime_state: str
+    error_code: str | None
+    updated_at: str
+    cache_effect: str = ('Refresh restarts detection, clears downloaded model caches for all engines and may '
+                         're-download other selected remote models; selections are unchanged.')
+
+
+@dataclass(frozen=True)
 class Wakeword:
     id: str
     phrase: str

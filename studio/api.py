@@ -3,14 +3,14 @@
 from collections.abc import Callable
 from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict
 
 from studio.models import (CollectionRun, Conflict, CredentialsRequired, Device, IdentityMismatch, SourceMapping,
                            RemoteRejected, RemoteUnavailable, NotFound, Page, Recording, Sample, SampleQuery,
                            ValidationError, Wakeword, WakewordUpdate, Job, Schedule, WorkerHealth, Dataset,
-                           Batch, GenerationRecipe, TrainingSettings, RunManifest, ModelVersion)
+                           Batch, GenerationRecipe, TrainingSettings, RunManifest, ModelVersion, Publication)
 from studio.runtime import StudioRuntime
 from studio.storage import AUDIO_MIMES
 
@@ -133,6 +133,11 @@ class TrainingSettingsBody(BaseModel):
     train_openwakeword: bool
 
 
+class PublishBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    version_id: str
+
+
 def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
                  label: str | None = None, device_id: str | None = None,
                  near_miss: bool | None = None, source: str | None = None,
@@ -170,6 +175,43 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.get('/wakewords/{word_id}/models', response_model=Page[ModelVersion])
     def models(word_id: str, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
         return runtime.training.versions(word_id, offset, limit)
+
+    @router.get('/wakewords/{word_id}/models/{version_id}', response_model=ModelVersion)
+    def model_version(word_id: str, version_id: str):
+        return runtime.deployment.version(version_id, word_id)
+
+    @router.get('/wakewords/{word_id}/models/{version_id}/archive')
+    def model_archive(word_id: str, version_id: str):
+        chunks = runtime.deployment.archive(version_id, word_id)
+        return StreamingResponse(chunks, media_type='application/zip',
+                                 headers={'Content-Disposition': 'attachment; filename="model-archive.zip"'})
+
+    @router.get('/wakewords/{word_id}/models/{version_id}/archive/{name}')
+    def model_file(word_id: str, version_id: str, name: str):
+        version = runtime.deployment.version(version_id, word_id)
+        # Serve only validated deployable basenames, never arbitrary server paths.
+        artifacts = runtime.deployment.artifacts(version)
+        if name not in artifacts:
+            raise NotFound('Artifact not found')
+        return Response(artifacts[name], media_type='application/octet-stream',
+                               headers={'Content-Disposition': f'attachment; filename="{name}"'})
+
+    @router.get('/wakewords/{word_id}/deployment/status', response_model=list[Publication])
+    def publication_status(word_id: str):
+        return runtime.deployment.status(word_id)
+
+    @router.get('/wakewords/{word_id}/deployment/history', response_model=Page[Publication])
+    def publication_history(word_id: str, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+        return runtime.deployment.history(word_id, offset, limit)
+
+    @router.post('/wakewords/{word_id}/deployment/publish', response_model=list[Publication])
+    def publish_version(word_id: str, body: PublishBody):
+        runtime.deployment.version(body.version_id, word_id)
+        return runtime.deployment.publish(body.version_id)
+
+    @router.post('/wakewords/{word_id}/deployment/rollback', response_model=list[Publication])
+    def rollback_version(word_id: str, body: PublishBody):
+        return runtime.deployment.rollback(word_id, body.version_id)
 
     @router.get('/generation/catalog')
     def generation_catalog():

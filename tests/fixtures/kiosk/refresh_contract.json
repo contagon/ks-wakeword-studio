@@ -1,0 +1,55 @@
+{
+  "source_commit": "d46bc0caf276aeaadd0a04a5ef2eefb3bef12931",
+  "refresh_command": "clearWakeWordModels",
+  "refresh_response": {"ok": true, "data": {"removed": 3, "bytesFreed": 100, "restarted": true}},
+  "cache_directories": ["vsww_models", "mww_models", "oww_models"],
+  "source_evidence": {
+    "wake_word/wake_word_manager.dart": [
+      "final changed = _config != config || _released || _failed;",
+      "if (changed && _engine.running)",
+      "final running = _engine.running;",
+      "if (running) await _engine.stop();",
+      "final removed = await WakeModelCache.clear();",
+      "'restarted': running && _engine.running,",
+      "if (shouldRun && !_engine.running)",
+      "await _engine.start("
+    ],
+    "wake_word/model_cache.dart": [
+      "static const dirNames = ['vsww_models', 'mww_models', 'oww_models'];",
+      "await entry.delete();"
+    ],
+    "wake_word/model_source.dart": [
+      "bool isLocalModel(String url) => url.startsWith('file:');",
+      "if (isLocalModel(url))",
+      ").readAsBytes();"
+    ],
+    "wake_word/mww/mww_engine.dart": [
+      "final model = await _store.fetch(ref.manifestUrl);"
+    ],
+    "wake_word/mww/mww_model_store.dart": [
+      "final manifestJson = await readModelText(manifestUrl);",
+      "if (isStoredModel(url)) return readModelBytes(url);"
+    ],
+    "wake_word/isolate_engine.dart": [
+      "final payload = await loadModels(config);",
+      "_running = false;",
+      "_isolate?.kill(priority: Isolate.beforeNextEvent);"
+    ],
+    "voice/voice_manager.dart": [
+      "onChanged: _customChanged,",
+      "void _customChanged()",
+      "unawaited(_sync());",
+      "await _wakeWord.configure(config, source: 'native satellite');"
+    ],
+    "voice/custom_wake_models.dart": [
+      "if (added.isNotEmpty) await _reload();",
+      "url: File('${dir.path}/$main').uri.toString(),",
+      "if (notify) onChanged();",
+      "out['$folder/$name'] = (await sha256.bind(f.openRead()).first)"
+    ],
+    "wake_word/engine.dart": [
+      "other.manifestUrl == manifestUrl &&",
+      "_listEquals(other.models, models);"
+    ]
+  }
+}

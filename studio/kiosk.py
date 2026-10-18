@@ -192,7 +192,8 @@ class KioskClient:
             raise RemoteRejected("Invalid kiosk audio") from None
 
     def stage_model(self, device: Device, name: str, content: BinaryIO) -> None:
-        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,199}", name):
+        if (not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,199}", name)
+                or '.' not in name or name.rsplit('.', 1)[1].lower() not in ('json', 'tflite', 'onnx')):
             raise ValidationError("Invalid model filename")
         body = content.read(self.max_upload + 1)
         if not isinstance(body, bytes) or not body or len(body) > self.max_upload:
@@ -223,3 +224,16 @@ class KioskClient:
                 and re.fullmatch(r"[a-f0-9]{64}", v) for k, v in files.items()):
             raise RemoteRejected("Invalid kiosk manifest")
         return files
+
+    def refresh_models(self, device: Device) -> dict:
+        """User-authorized cache-only deletion/restart, not custom-model deletion.
+
+        Caller must verify the desired content manifest first, including on
+        followers. Acknowledgement is not evidence of which bytes inference used.
+        """
+        self._verify(device)
+        data = self.command(device, 'clearWakeWordModels', {})
+        if (type(data.get('restarted')) is not bool or
+                any(type(data.get(k)) is not int or data[k] < 0 for k in ('removed', 'bytesFreed'))):
+            raise RemoteRejected('Invalid model refresh response')
+        return {k: data[k] for k in ('removed', 'bytesFreed', 'restarted')}

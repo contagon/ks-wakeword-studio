@@ -1,5 +1,7 @@
 # Task 9 — blocked at selected stable-ID refresh contract
 
+**2026-10-18 update: the user authorized cache refresh; the historical blocker below is resolved. Task 9 is now implemented. See the appended implementation/verification report.**
+
 ## Outcome
 
 **Task 9 is not implemented.** Stopped at the brief's explicit compatibility gate before adding upload/retry/API/lifecycle code. No LAN requests, satellite modifications, agents, reviewers, branches, or worktree operations. No inference-success claim.
@@ -57,3 +59,104 @@ No live-device test was attempted; neither device credentials nor a separate mut
 Either explicitly permit the existing global **cache-only** deletion/restart command (and accept its unrelated-cache/re-download consequences, with a source/fixture test and optional separately opted-in disposable live test), or separately authorize a satellite-side non-deleting refresh/invalidation capability. Satellite changes are outside this task's authorization. The ordinary commit-only path is insufficient; the task must not be marked complete on that basis.
 
 Only this requested report is committed. Production code remains unchanged.
+
+---
+
+## Resumed Task 9 — implemented with the authorized cache refresh
+
+The user explicitly approved `clearWakeWordModels` after its effects were explained ("yeah doing teh cache-refresh is fine"). Reread the refreshed exact brief and amended authoritative spec. This is an authorization change, **not** a satellite change. Preserved the historical investigation above and included the parent's tracked plan/spec amendments in the scoped implementation commit. Review base remains **12082db**; **b8f4b66** was report-only.
+
+### Outcome and interfaces
+
+- Implemented `studio/deployment.py`, additive schema **v9** `studio/schema_deployment.sql`, `Publication`, runtime construction/completion/retry integration, kiosk refresh/filename validation, model archive/publication HTTP routes, and 23 deployment tests (22 passing, one deliberately skipped live test). Baseline 281 + 23 = **304 tests**, final full suite **OK (skipped=1)**.
+- `DeploymentService(store, devices, training, *, clock=utc_now)` exposes required `publish(version_id)`, `retry_due(now)`, `rollback(word_id, version_id)`, `status(word_id)`; also `reconcile()` (no network), `version(version_id, word_id=None)`, paginated `history`, validated `artifacts`, and complete ZIP `archive` stream. Runtime property: `runtime.deployment`.
+- `Publication` carries word/device, desired version, monotonic intent revision, publication state, attempt count/next retry, **separate** manifest/refresh/runtime states, fixed sanitized error code, update timestamp, and user-visible `cache_effect` warning. No credentials or raw remote failure strings are persisted/reflected.
+- `KioskClient.refresh_models(device)` pins identity, calls the authorized command, and validates actual `removed`, `bytesFreed`, `restarted` fields. It does not assert loaded-version inference from `restarted`. Filename validation now rejects non-model extensions before transport.
+- `CommitResult` continues to preserve actual remote `added` engine/ID models and named rejected files; no fictional accepted-file list is synthesized. Service checks every required accepted engine/stem, refuses domain rejection even under successful transport, and separately verifies all expected remote file hashes.
+
+### Safety and lifecycle
+
+1. **Completion gate/outbox:** `JobQueue._finish` inserts a training version's deployment event in the **same SQLite transaction** as Job `complete`, after child cleanup. Cancelled/failed/interrupted archives never get this success event. Startup/periodic reconciliation also discovers successful pre-v9 archives or a missed callback, in archive-row order. Consumed events never overwrite a later manual rollback. A backlog coalesces to the newest desired version per word; superseded archives remain retained.
+2. **Desired intent:** one global per-word desired version/revision, mirrored atomically to every registered target, including followers and missing-credential targets. New registry targets enroll into the existing desired revision; formerly inactive/profile-excluded targets become pending when eligibility changes. New publication/rollback resets retry state and increments revision, even for the same version.
+3. **Serialization:** filesystem `flock` intent gate spans intent claim and network mutations; per-target flocks cover the shared remote staging area across wakewords. These locks are not merely Python thread locks and release on process death. Revision/current role/identity are rechecked before mutations, including follower refresh. Rollback waits for any already-running operation, then atomically claims its revision; no old retry/refresh may execute afterward. This deliberately favors correctness over parallel kiosk throughput. No SQL transaction spans network/credential calls.
+4. **Recoverable in-flight phases:** attempt claims persist as `pending` before remote work; verified-but-unacknowledged refresh persists as a due `refresh_pending` state. Both survive a crash. A crash after remote acknowledgement but before local acknowledgement may repeat the authorized refresh (at-least-once remote semantics), not strand it or claim inference success.
+5. **Upload boundary:** validate **all archived checksums** before any upload, then verify exact in-memory upload buffers again. Only stable MWW `<model_id>.json` + `<model_id>.tflite`, plus optional distinct-stem `<model_id>.oww.onnx`, are sent. OWW JSON/bundle/config/log/archive files are **not** sent to remote model staging. MWW manifest must reference its real uploaded stable basename. Raw file POSTs precede commit. No custom-model-delete, selection, engine, threshold, profile-edit, fleet-file-delete or diagnostics-clear command is issued.
+6. **Direct targets:** only active leader/standalone uploads, with live pinned identity/role checks on each stage/commit boundary. Existing same-stem replacement is kiosk-owned; unrelated direct-target models are untouched. If files already match after a crash/refresh failure, skip re-upload and proceed to hash-gated refresh.
+7. **Followers:** **never upload**. Only eligible active followers with their own credentials are observed. Require the leader's verified matching desired version and the follower's own exact expected hashes before refresh; reread the manifest immediately before refresh. Missing credentials/offline/sync lag/profile exclusion are not success. Loss of previously synced bytes resets manifest state to `unverified`. Existing leader fleet propagation/settings/profile authority remains unchanged; this code does not perform fleet mirroring.
+8. **Retry bounds:** six network attempts per target/desired revision, exponential backoff starting 30 seconds (cap one hour), persisted ISO UTC due times; exhausted targets remain explicitly exhausted/pending refresh with fixed cause. Missing stored credentials are an administrative waiting state polled every five minutes without network or attempt consumption. Manual publish/rollback explicitly retries by claiming a new revision. Role/identity drift is blocked for explicit reconciliation, not silently converted into a standalone.
+9. **Worker lifecycle:** startup reconciliation performs no network. Existing post-completion hook attempts due publication only after durable completion. Existing scheduler worker invokes retry maintenance; shutdown joins existing workers before closing SQLite. No independent scheduler/daemon/process pool was added and no legacy STT/Tater path is enabled.
+10. **Observation honesty:** direct final state `published`, follower final state `synced`; these require hash verification and refresh acknowledgement. `manifest_state='verified'`, `refresh_state='acknowledged'` remain distinct from `runtime_state='unverified'`. The current API does not attest the digest loaded into inference, so runtime-version proof is deliberately not invented. `refresh_pending`, `sync_pending`, `credentials_required`, `offline`, `not_covered`, `role_changed`, `hash_mismatch`, `rejected`, `archive_invalid`, `inactive`, `exhausted` provide actionable non-success states.
+
+### HTTP contract
+
+Under `/api/studio/wakewords/{word_id}`:
+
+- Existing `GET /models?offset=&limit=` remains successful-only model history.
+- `GET /models/{version_id}` returns the completed immutable version, with workspace ownership checked.
+- `GET /models/{version_id}/archive` streams a complete checksum-validated ZIP (including provenance/config/logs/metadata), using an anonymous temporary file and bounded-memory chunks; closes after streaming. `GET /models/{version_id}/archive/{name}` serves only validated deployable basenames.
+- `GET /deployment/status` returns current per-target Publication records and cache-refresh side-effect warning.
+- `GET /deployment/history?offset=&limit=` returns retained revision/attempt/observation history, normal Page limits 1–100.
+- `POST /deployment/publish` and `POST /deployment/rollback`, body **exactly** `{"version_id":"..."}`, return updated publication records. Cross-workspace rollback is 409; incomplete version is 409; bad/missing record follows existing sanitized 422/404 handling. No tokens in these bodies/responses.
+
+### Source/fixture and live test contract
+
+Added `tests/fixtures/kiosk/refresh_contract.json`, pinned to the inspected sibling commit. Default tests use only local in-memory protocol fixtures, **loopback HTTP**, and read-only sibling source. Source test can use `STUDIO_KIOSK_SOURCE`; it skips that cross-check only if sibling source is absent. Here it ran and passed.
+
+Source verification extends the original chain: `wake_word/isolate_engine.dart` stop clears running state/kills its isolate; fresh start calls `loadModels(config)`; `mww/mww_engine.dart` calls `_store.fetch(ref.manifestUrl)`; `mww/mww_model_store.dart` rereads the manifest and bypasses downloaded caches for local models; `model_source.dart` reads local file bytes anew. Refresh handler stops → cache-clears → syncs, without settings writes. Cache deletion directories exclude `custom_wake_words`. Source/fixture checks are evidence about source control flow, **not execution of Dart/native inference**.
+
+Live contract is present but **not executed**. All of the following are required: `STUDIO_TEST_KIOSK_URL`, `STUDIO_TEST_KIOSK_TOKEN`, **separate** `STUDIO_TEST_KIOSK_MUTATE=1`, `STUDIO_TEST_KIOSK_MODEL_DIR`, `STUDIO_TEST_KIOSK_MODEL_ID`. Operator must already select a disposable changed MWW model and configure both slots; test refuses a follower upload and never changes selections or cleans up by deleting the model. It checks commit results, exact remote hashes, refresh restart, before/after slot+engine preservation, `getWakeWordState` listening/local model reference/precision. Those runtime fields are restart/load evidence, not loaded-digest attestation. No LAN device was contacted and no real cache refresh/upload occurred in this session.
+
+### Actual RED → GREEN commands/output
+
+All commands use:
+
+```sh
+env DATA_DIR=/tmp/opencode/wakeword-studio-baseline /tmp/opencode/wakeword-studio-venv/bin/python -m unittest discover -s tests
+```
+
+Each log below corresponds to the suffix shown, with `-v` and `> /tmp/opencode/<log> 2>&1`.
+
+| Log | Pattern / actual result |
+| --- | --- |
+| `task-9-red.log` | `-p 'test_studio_deployment.py'`: RED, missing `studio.deployment`, 1 import error |
+| `task-9-green-initial.log` | Initial implementation attempt first failed 8 tests because the new test fixture lacked mandatory positive audio; fixture corrected using existing sample ingestion. Rerun overwrote this log: 8 tests **OK**. This was a test-setup error, not claimed production RED evidence. |
+| `task-9-integration-red.log` | `-p 'test_studio_deployment.py'`: 13 tests, RED 2 failures: ZIP archive route absent (404), newly eligible follower remained `not_covered` |
+| `task-9-studio-integration-red.log` | `-p 'test_studio*.py'`: 189 tests, 5 failures/1 error: old migration expectations still said v8, reconstructed-v3 fixture retained v9 tables; narrowly updated expected schema version and fixture table removal |
+| `task-9-contract-red.log` | `-p 'test_studio_deployment_contract.py'`: 4 tests, RED 1 failure/1 live skip: adapter accepted `.zip` filename |
+| `task-9-observation-red.log` | `-p 'test_studio_deployment.py'`: 15 tests, RED 1 failure: follower lost files while refresh pending but retained stale `verified` manifest marker |
+| `task-9-deployment-green.log` | `-p 'test_studio_deployment.py'`: 17 tests **OK** before final crash-window additions |
+| `task-9-focused-green.log` | `-p 'test_studio_deployment*.py'`: 21 tests **OK (skipped=1)** before crash-window additions |
+| `task-9-devices-green.log` | `-p 'test_studio_devices.py'`: 15 tests **OK** |
+| `task-9-crash-red.log` | `-p 'test_studio_deployment.py'`: 19 tests, RED 2 failures: process death during a retry claim stranded `offline` with no due time; death after hash verification stranded a pending refresh as terminal publication |
+| `task-9-final-focused-green.log` | `-p 'test_studio_deployment*.py'`: **23 tests in 2.629s, OK (skipped=1)** |
+
+The requested full-suite command was run **twice**, not once: first 302 tests passed, then self-inspection found the two crash-window gaps above. Added failing regressions, corrected durable phase state, reran focused tests and the full suite rather than leaving unverified changes. Initial output is `/tmp/opencode/task-9-full-tests.log`: `Ran 302 tests in 26.025s`, `OK (skipped=1)`.
+
+Final full command:
+
+```sh
+env DATA_DIR=/tmp/opencode/wakeword-studio-baseline /tmp/opencode/wakeword-studio-venv/bin/python -m unittest discover -s tests -v > /tmp/opencode/task-9-final-full-tests.log 2>&1
+```
+
+Actual exit **0**; all 349 output lines read:
+
+```text
+Ran 304 tests in 27.188s
+OK (skipped=1)
+```
+
+Only skipped test is the explicitly mutation-opted-in live contract. Existing-style `ResourceWarning: unclosed <socket.socket [closed] ...>` occurred during `test_inactive_credentials_route_still_rejects_identity_mismatch_and_bad_token`; that test passed. Existing fixture TTS/setup progress remains. Warnings were not suppressed or claimed fixed. No production/test modifications after final full verification; only this report/staging/commit operations follow.
+
+### Risks / limits
+
+- No satellite changes, real-device requests, native/Dart runtime execution, GPU/model/provider/corpus download, accuracy claim, agents/reviewers, or branch/worktree operations. Authorization to implement cache refresh was **not** treated as permission to run live mutations.
+- Cache refresh can interrupt detection/audio streaming and clear **all downloaded-model caches**, possibly requiring network re-download of unrelated selected remote models. Custom uploaded files/settings/credentials/diagnostics are not deleted. User-facing Publication warning exposes the cache/restart consequences. Failed or disabled inference remains unverified even after a successful refresh command.
+- Coarse intent serialization means a slow bounded HTTP attempt delays unrelated targets and manual rollback until it finishes. Per-target locks cannot exclude an independent remote UI/admin or another trainer using a different data root. Concurrent external remote mutations can invalidate observations; hashes are reread before refresh, but there is no remote atomic compare-and-refresh API.
+- Remote operations are at-least-once across process death, not exactly-once; repeated cache refresh after a lost acknowledgement is possible. Retried already-matching content is not re-uploaded. Exhaustion/role drift requires operator action or explicit publish to claim a fresh revision; no unlimited mutation loop.
+- Status/history record observations at their timestamps, not permanent truth or digest-attested inference. History and retained archives currently have no GC/quota policy. ZIP export uses temporary disk proportional to archive size; artifact checks/read buffers assume Task-8 immutable archives and do not protect against a hostile concurrent same-UID filesystem writer.
+- Deployment consumes the existing registry; existing collection/manual fleet refresh remains responsible for discovering membership/profile changes. It does not invent follower credentials, change fleet profiles, or mirror/delete follower files itself.
+- Existing older migration tests were changed only to expect v9 and remove v9 tables from their reconstructed old-schema fixture; their preservation assertions remain intact. Added a real v8→v9 preservation test.
+
+### Commit
+
+Scoped implementation commit uses the requested subject `feat: publish archived models safely through fleet leaders with rollback`; includes parent plan/spec authorization amendments and this tracked report. Commit ID is supplied in the final status message.

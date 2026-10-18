@@ -15,6 +15,7 @@ from studio.models import WorkerHealth
 from studio.datasets import DatasetService
 from studio.generation import GenerationService
 from studio.training import TrainingService
+from studio.deployment import DeploymentService
 
 
 class StudioRuntime:
@@ -34,6 +35,7 @@ class StudioRuntime:
         self._datasets: DatasetService | None = None
         self._generation: GenerationService | None = None
         self._training: TrainingService | None = None
+        self._deployment: DeploymentService | None = None
 
     def startup(self) -> None:
         with self._lock:
@@ -52,13 +54,17 @@ class StudioRuntime:
                 self._datasets = DatasetService(store, self._jobs)
                 self._generation = GenerationService(store, blobs, self._jobs, clock=self.clock)
                 self._training = TrainingService(store, blobs, self._jobs, self._datasets, clock=self.clock)
+                self._deployment = DeploymentService(store, self._devices, self._training, clock=self.clock)
                 self._schedules = ScheduleService(store, self._jobs, clock=self.clock)
-                self._workers = WorkerPool(self._jobs, clock=self.clock, runner=self.runner, schedules=self._schedules)
+                self._workers = WorkerPool(self._jobs, clock=self.clock, runner=self.runner, schedules=self._schedules,
+                                           maintenance=self._deployment.retry_due)
                 self._workers.register('scrape', 'collection', self._collect_job)
                 self._workers.register('download', 'download', self._datasets.execute)
                 self._workers.register('generation', 'gpu', self._generation.handle)
                 self._workers.register('train', 'gpu', self._training.handle)
+                self._workers.register_completion('train', lambda job: self._deployment.retry_due(self.clock()))
                 self._jobs.recover()
+                self._deployment.reconcile()
                 self._store = store
             except BaseException:
                 store.close()
@@ -70,6 +76,12 @@ class StudioRuntime:
         assert self._collection is not None
         result = self._collection.run(job.payload.get('device_ids'))
         return {'run_id': result.id, 'status': result.status}
+
+    @property
+    def deployment(self) -> DeploymentService:
+        self.startup()
+        assert self._deployment is not None
+        return self._deployment
 
     @property
     def training(self) -> TrainingService:
@@ -164,3 +176,4 @@ class StudioRuntime:
                 self._datasets = None
                 self._generation = None
                 self._training = None
+                self._deployment = None

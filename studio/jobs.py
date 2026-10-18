@@ -263,6 +263,11 @@ class JobQueue:
                 status = 'cancelled' if row['status'] == 'cancelling' else status
                 db.execute('UPDATE studio_jobs SET status=?,result=?,finished_at=? WHERE id=?',
                            (status, encoded, aware_utc(self.clock()).isoformat(), job_id))
+                if status == 'complete' and row['kind'] == 'train':
+                    # Durable outbox in the same transaction as success. A
+                    # crashed/failed completion callback is recovered on startup.
+                    db.execute('INSERT OR IGNORE INTO deployment_events(version_id) '
+                               'SELECT id FROM model_versions WHERE run_id=?', (job_id,))
                 job = self._record(self._row(db, job_id))
             self._release(job_id)
             return job
@@ -389,9 +394,10 @@ class WorkerPool:
     Unknown future kinds stay queued until their owning service registers a
     handler. No synthetic generation/training/download implementation lives here.
     """
-    def __init__(self, queue, *, clock=utc_now, runner=None, schedules=None):
+    def __init__(self, queue, *, clock=utc_now, runner=None, schedules=None, maintenance=None):
         self.queue, self.clock, self.schedules = queue, clock, schedules
         self.runner = runner or ProcessRunner()
+        self.maintenance = maintenance
         self.handlers = {}
         self.completion_hooks = {}
         self.stop_event = threading.Event()
@@ -489,6 +495,8 @@ class WorkerPool:
         while not self.stop_event.is_set():
             try:
                 self.schedules.tick(self.clock())
+                if self.maintenance is not None:
+                    self.maintenance(self.clock())
             except Exception:
                 self._record_loop_result('scheduler', failed=True)
             else:

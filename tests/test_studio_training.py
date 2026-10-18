@@ -243,7 +243,7 @@ class TrainingTests(unittest.TestCase):
             store = Store.open(root)
             try:
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 8)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 9)
                     self.assertEqual(db.execute('SELECT phrase FROM wakewords').fetchone()[0], 'Old')
             finally:
                 store.close()
