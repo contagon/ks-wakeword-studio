@@ -72,7 +72,8 @@ describe("compact studio workspace", () => {
     expect(requests.some(r => r.path === '/api/train_status')).toBe(true);
     expect(legacy.findAll('button').map(b => b.text())).toContain('Start training');
     await ui.get('[data-page="samples"]').trigger('click'); await flushPromises();
-    expect(ui.get('[data-legacy-trainer]').text()).toContain('Current Training Samples');
+    expect(ui.get('h1').text()).toBe('Samples');
+    expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
     await ui.get('[data-page="deploy"]').trigger('click'); await flushPromises();
     expect(ui.get('[data-legacy-trainer]').text()).toContain('Trained Wake Words');
     expect(ui.get('nav').findAll('a')).toHaveLength(8);

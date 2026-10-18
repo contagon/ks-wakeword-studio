@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { pages, useStudioRoutes, type PageId } from "../routes";
 import { createWorkspace, workspaceKey } from "../workspace";
 import WakewordsPage from "../pages/WakewordsPage.vue";
+import ClassifyPage from "../pages/ClassifyPage.vue";
+import SamplesPage from "../pages/SamplesPage.vue";
 import LegacyTrainer from "../../LegacyTrainer.vue";
 import type { ViewName } from "../../types";
 
@@ -16,12 +18,10 @@ const toggle = ref<HTMLButtonElement>();
 const content = ref<HTMLElement>();
 const current = computed(() => pages.find(page => page.id === routes.page.value)!);
 // Existing trainer workflows stay reachable until each Studio replacement is wired.
-const legacyViews: Record<Exclude<PageId, "wakewords">, ViewName> = {
+const legacyViews: Partial<Record<Exclude<PageId, "wakewords">, ViewName>> = {
   "negative-datasets": "data",
   artificial: "trainer",
   scrape: "captured",
-  classify: "captured",
-  samples: "samples",
   train: "trainer",
   deploy: "firmware",
 };
@@ -83,6 +83,8 @@ onBeforeUnmount(() => {
         <div v-if="error" class="studio-note" role="alert">{{ error }}</div>
         <p v-if="loading" role="status">Loading workspaces…</p>
         <WakewordsPage v-if="current.id === 'wakewords'" />
+        <ClassifyPage v-else-if="current.id === 'classify'" />
+        <SamplesPage v-else-if="current.id === 'samples'" />
         <template v-else>
           <section :key="`${current.id}:${selectedId}`">
             <h1>{{ current.name }}</h1>
