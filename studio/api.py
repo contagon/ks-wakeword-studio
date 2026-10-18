@@ -7,7 +7,8 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict
 
-from studio.models import (Conflict, NotFound, Page, Recording, Sample, SampleQuery,
+from studio.models import (Conflict, CredentialsRequired, Device, IdentityMismatch,
+                           RemoteRejected, RemoteUnavailable, NotFound, Page, Recording, Sample, SampleQuery,
                            ValidationError, Wakeword, WakewordUpdate)
 from studio.runtime import StudioRuntime
 from studio.storage import AUDIO_MIMES
@@ -27,6 +28,14 @@ class StudioRoute(APIRoute):
                 return JSONResponse({"detail": "Studio record not found"}, status_code=404)
             except Conflict:
                 return JSONResponse({"detail": "Studio record conflict"}, status_code=409)
+            except IdentityMismatch:
+                return JSONResponse({"detail": "Kiosk identity changed"}, status_code=409)
+            except CredentialsRequired:
+                return JSONResponse({"detail": "Kiosk admin credentials required"}, status_code=403)
+            except RemoteRejected:
+                return JSONResponse({"detail": "Kiosk rejected request"}, status_code=502)
+            except RemoteUnavailable:
+                return JSONResponse({"detail": "Kiosk unavailable"}, status_code=503)
 
         return sanitized
 
@@ -36,6 +45,16 @@ class CreateWakeword(BaseModel):
     phrase: str
     language: str
     model_id: str
+
+
+class DeviceCredentials(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    token: str
+
+
+class AddDevice(DeviceCredentials):
+    url: str
+    role: str
 
 
 class UpdateWakeword(BaseModel):
@@ -72,6 +91,22 @@ def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=1
 
 def create_router(runtime: StudioRuntime) -> APIRouter:
     router = APIRouter(prefix="/api/studio", route_class=StudioRoute)
+
+    @router.get("/devices", response_model=list[Device])
+    def list_devices() -> list[Device]:
+        return runtime.devices.list()
+
+    @router.post("/devices", response_model=Device, status_code=201)
+    def add_device(body: AddDevice) -> Device:
+        return runtime.devices.add(body.url, body.token, body.role)
+
+    @router.post("/devices/{device_id}/refresh", response_model=list[Device])
+    def refresh_devices(device_id: str) -> list[Device]:
+        return runtime.devices.refresh_fleet(device_id)
+
+    @router.post("/devices/{device_id}/credentials", response_model=Device)
+    def device_credentials(device_id: str, body: DeviceCredentials) -> Device:
+        return runtime.devices.set_credentials(device_id, body.token)
 
     @router.post("/wakewords", response_model=Wakeword, status_code=201)
     def create_word(body: CreateWakeword) -> Wakeword:

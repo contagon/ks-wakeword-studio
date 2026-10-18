@@ -4,6 +4,7 @@ import threading
 from pathlib import Path
 
 from studio.db import Store
+from studio.devices import DeviceService
 from studio.storage import BlobStore
 from studio.samples import SampleService
 from studio.workspaces import WorkspaceService
@@ -17,6 +18,7 @@ class StudioRuntime:
         self._workspaces: WorkspaceService | None = None
         self._blobs: BlobStore | None = None
         self._samples: SampleService | None = None
+        self._devices: DeviceService | None = None
 
     def startup(self) -> None:
         with self._lock:
@@ -29,10 +31,17 @@ class StudioRuntime:
                 self._blobs = blobs
                 self._workspaces = WorkspaceService(store)
                 self._samples = SampleService(store, blobs)
+                self._devices = DeviceService(store)
                 self._store = store
             except BaseException:
                 store.close()
                 raise
+
+    @property
+    def devices(self) -> DeviceService:
+        self.startup()
+        assert self._devices is not None
+        return self._devices
 
     @property
     def samples(self) -> SampleService:

@@ -16,6 +16,54 @@ class ValidationError(Exception):
     pass
 
 
+class CredentialsRequired(Exception):
+    pass
+
+
+class IdentityMismatch(Exception):
+    pass
+
+
+class RemoteRejected(Exception):
+    pass
+
+
+class RemoteUnavailable(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class Device:
+    # The stable kiosk identity, never an address or display name.
+    id: str
+    url: str
+    role: str
+    active: bool = True
+    leader_id: str | None = None
+    credentials_status: str = "credentials_required"
+    profile_id: str | None = None
+    model_eligible: bool = False
+
+
+@dataclass(frozen=True)
+class KioskIdentity:
+    id: str
+    leader: bool
+    follows: bool
+
+
+@dataclass(frozen=True)
+class DiagnosticListing:
+    enabled: bool
+    clips: list["DiagnosticClip"]
+
+
+@dataclass(frozen=True)
+class CommitResult:
+    added: list[dict[str, str]]
+    rejected: list[dict[str, str]]
+
+
 @dataclass(frozen=True)
 class Wakeword:
     id: str
