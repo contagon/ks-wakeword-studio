@@ -75,7 +75,8 @@ describe("compact studio workspace", () => {
     expect(ui.get('h1').text()).toBe('Samples');
     expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
     await ui.get('[data-page="deploy"]').trigger('click'); await flushPromises();
-    expect(ui.get('[data-legacy-trainer]').text()).toContain('Trained Wake Words');
+    expect(ui.get('h1').text()).toBe('Deploy');
+    expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
     expect(ui.get('nav').findAll('a')).toHaveLength(8);
     await ui.get('[data-page="wakewords"]').trigger('click'); await flushPromises();
     expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);

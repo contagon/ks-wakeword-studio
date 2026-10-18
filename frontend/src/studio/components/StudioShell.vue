@@ -5,6 +5,8 @@ import { createWorkspace, workspaceKey } from "../workspace";
 import WakewordsPage from "../pages/WakewordsPage.vue";
 import ClassifyPage from "../pages/ClassifyPage.vue";
 import SamplesPage from "../pages/SamplesPage.vue";
+import ScrapePage from "../pages/ScrapePage.vue";
+import DeployPage from "../pages/DeployPage.vue";
 import LegacyTrainer from "../../LegacyTrainer.vue";
 import type { ViewName } from "../../types";
 
@@ -21,9 +23,7 @@ const current = computed(() => pages.find(page => page.id === routes.page.value)
 const legacyViews: Partial<Record<Exclude<PageId, "wakewords">, ViewName>> = {
   "negative-datasets": "data",
   artificial: "trainer",
-  scrape: "captured",
   train: "trainer",
-  deploy: "firmware",
 };
 const legacyView = computed(() => current.value.id === "wakewords" ? null : legacyViews[current.value.id]);
 const navigationHidden = computed(() => narrow.value && !navigationOpen.value);
@@ -85,6 +85,8 @@ onBeforeUnmount(() => {
         <WakewordsPage v-if="current.id === 'wakewords'" />
         <ClassifyPage v-else-if="current.id === 'classify'" />
         <SamplesPage v-else-if="current.id === 'samples'" />
+        <ScrapePage v-else-if="current.id === 'scrape'" />
+        <DeployPage v-else-if="current.id === 'deploy'" />
         <template v-else>
           <section :key="`${current.id}:${selectedId}`">
             <h1>{{ current.name }}</h1>

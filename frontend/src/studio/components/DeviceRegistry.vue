@@ -1,0 +1,72 @@
+<script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref, type ComponentPublicInstance } from "vue";
+import { useDeviceRegistry } from "../devices";
+import type { Device } from "../types";
+
+const props = defineProps<{ surface: "scrape" | "deploy" }>();
+const emit = defineEmits<{ changed: [Device[]] }>();
+const registry = useDeviceRegistry();
+const url = ref("");
+const role = ref<"leader" | "standalone">("standalone");
+const tokenInput = ref<HTMLInputElement>();
+const credentialInputs = new Map<string, HTMLInputElement>();
+const busy = ref("");
+const notice = ref("");
+const error = ref("");
+
+function recordInput(id: string, element: Element | ComponentPublicInstance | null): void {
+  if (element instanceof HTMLInputElement) credentialInputs.set(id, element);
+  else credentialInputs.delete(id);
+}
+function parent(device: Device): string { return device.leader_id ? `Parent ${device.leader_id}` : "Direct registry target"; }
+function sync(): void { emit("changed", [...registry.devices.value]); }
+async function add(): Promise<void> {
+  const token = tokenInput.value?.value ?? "";
+  busy.value = "add"; error.value = ""; notice.value = "";
+  try {
+    await registry.add(url.value, token, role.value);
+    url.value = "";
+    notice.value = role.value === "leader" ? "Leader added; follower membership was refreshed." : "Standalone kiosk added.";
+    sync();
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : "Device could not be added."; }
+  finally { if (tokenInput.value) tokenInput.value.value = ""; busy.value = ""; }
+}
+async function refresh(device: Device): Promise<void> {
+  busy.value = `refresh:${device.id}`; error.value = "";
+  try { await registry.refresh(device.id); notice.value = "Fleet membership refreshed."; sync(); }
+  catch (cause) { error.value = cause instanceof Error ? cause.message : "Fleet refresh failed."; }
+  finally { busy.value = ""; }
+}
+async function setCredentials(device: Device): Promise<void> {
+  const input = credentialInputs.get(device.id);
+  const token = input?.value ?? "";
+  busy.value = `credentials:${device.id}`; error.value = "";
+  try { await registry.credentials(device.id, token); notice.value = "Credentials saved server-side."; sync(); }
+  catch (cause) { error.value = cause instanceof Error ? cause.message : "Credentials were not saved."; }
+  finally { if (input) input.value = ""; busy.value = ""; }
+}
+onMounted(async () => { await registry.load(); sync(); });
+onBeforeUnmount(() => registry.abort());
+</script>
+
+<template>
+  <section class="studio-card" data-device-registry>
+    <div class="flex flex-wrap items-start justify-between gap-3"><div><h2>Fleet setup</h2><p class="studio-muted">Register one fleet leader or standalone kiosks. A leader is authoritative: its existing mirror can propagate selections and remove follower-only models. This studio never edits enabled selections or uploads directly to followers.</p></div><button type="button" :disabled="registry.loading.value" @click="registry.load(true)">Refresh registry</button></div>
+    <p v-if="notice" class="studio-note" role="status">{{ notice }}</p><p v-if="error || registry.error.value" class="studio-note" role="alert">{{ error || registry.error.value }}</p>
+    <form data-device-add class="grid gap-3 mt-3" @submit.prevent="add">
+      <label>Address<input v-model="url" required name="url" autocomplete="url" placeholder="http://kiosk.local:8789"></label>
+      <label>Role<select v-model="role" name="role"><option value="standalone">Standalone</option><option value="leader">Fleet leader</option></select></label>
+      <label>Admin token<input ref="tokenInput" required name="token" type="password" autocomplete="new-password"></label>
+      <button type="submit" class="studio-primary" :disabled="busy === 'add'">Add device</button>
+    </form>
+    <p v-if="registry.loading.value" class="studio-muted mt-3">Loading registered devices…</p>
+    <div v-else class="mt-4 grid gap-2">
+      <article v-for="device in registry.devices.value" :key="device.id" class="studio-device-row" :data-device-id="device.id">
+        <div><strong>{{ device.id }}</strong> <span class="studio-status" :class="device.role === 'follower' ? 'studio-status-muted' : 'studio-status-neutral'">{{ device.role === 'follower' ? 'Follower' : device.role }}</span><p class="studio-muted text-xs">{{ parent(device) }} · {{ device.active ? device.url : 'Inactive member' }}</p></div>
+        <div class="flex flex-wrap gap-2 items-center"><span class="studio-status" :class="device.credentials_status === 'ready' ? 'studio-status-neutral' : 'studio-status-warning'">{{ device.credentials_status === 'ready' ? 'Credentials ready' : 'Credentials required' }}</span><span class="studio-status" :class="device.model_eligible ? 'studio-status-neutral' : 'studio-status-warning'">{{ device.model_eligible ? 'Profile covered' : 'Not covered' }}</span><button v-if="device.role === 'leader'" type="button" :disabled="busy === `refresh:${device.id}`" @click="refresh(device)">Refresh followers</button><form v-if="device.role === 'follower' && device.credentials_status !== 'ready'" class="flex gap-2" @submit.prevent="setCredentials(device)"><input :ref="element => recordInput(device.id, element)" :name="`credentials-${device.id}`" type="password" autocomplete="new-password" aria-label="Follower admin token"><button type="submit" :disabled="busy === `credentials:${device.id}`">Save credentials</button></form></div>
+      </article>
+      <p v-if="!registry.devices.value.length" class="studio-muted">No kiosks registered yet.</p>
+    </div>
+    <p v-if="props.surface === 'deploy'" class="studio-muted text-xs mt-3">Publication staging prerequisite: upload staging must start clean and no concurrent manual uploads may occur while the trainer owns a publication. This condition cannot be checked automatically.</p>
+  </section>
+</template>
