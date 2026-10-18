@@ -67,9 +67,13 @@ class DeviceService:
 
     def _token(self, device: Device) -> str:
         with self.store.transaction() as db:
-            row = db.execute("SELECT credential_ref FROM devices WHERE id = ?", (device.id,)).fetchone()
+            row = db.execute("SELECT credential_ref, active FROM devices WHERE id = ?", (device.id,)).fetchone()
         if row is None:
             raise CredentialsRequired("Kiosk admin credentials required")
+        # A caller may still hold a pre-refresh Device snapshot. Consult current
+        # registry activity before using retained credentials for any request.
+        if not row["active"]:
+            raise RemoteRejected("Kiosk is inactive")
         return self.credentials.get(row[0])
 
     def get(self, device_id: str) -> Device:
@@ -161,17 +165,21 @@ class DeviceService:
                 seen.add(device_id)
                 host = f"[{address}]" if ":" in address else address
                 url = normalize_url(f"http://{host}:{port}")
-                rows.append((device_id, url, profile_id, profiles[profile_id]))
+                # fleetStatus retains invitation/left rows in its roster. Only
+                # these nonmember phases disable actions; offline/error/update
+                # phases still describe members and must remain retryable.
+                active = follower.get("phase") not in ("left", "pending", "declined")
+                rows.append((device_id, url, profile_id, profiles[profile_id], active))
         except (KeyError, TypeError, ValueError, ValidationError):
             raise RemoteRejected("Invalid fleet roster") from None
         with self.store.transaction() as db:
             db.execute("UPDATE devices SET active=0 WHERE role='follower' AND leader_id=?", (leader_id,))
-            for device_id, url, profile_id, eligible in rows:
-                db.execute("""INSERT INTO devices (id,url,role,leader_id,profile_id,model_eligible)
-                              VALUES (?,?,'follower',?,?,?) ON CONFLICT(id) DO UPDATE SET
-                              url=excluded.url, role='follower', active=1, leader_id=excluded.leader_id,
+            for device_id, url, profile_id, eligible, active in rows:
+                db.execute("""INSERT INTO devices (id,url,role,leader_id,profile_id,model_eligible,active)
+                              VALUES (?,?,'follower',?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+                              url=excluded.url, role='follower', active=excluded.active, leader_id=excluded.leader_id,
                               profile_id=excluded.profile_id, model_eligible=excluded.model_eligible""",
-                           (device_id, url, leader_id, profile_id, eligible))
+                           (device_id, url, leader_id, profile_id, eligible, active))
         return [self.get(row[0]) for row in rows]
 
     def publication_targets(self) -> list[Device]:

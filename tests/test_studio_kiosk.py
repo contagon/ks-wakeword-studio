@@ -57,6 +57,17 @@ class KioskTests(unittest.TestCase):
             self.client.stage_model(self.device, "a.onnx", io.BytesIO(b"a"))
         self.assertFalse(any("upload" in r[0] for r in self.server.requests))
 
+    def test_inactive_device_cannot_trigger_transport_requests(self):
+        device = replace(self.device, active=False)
+        for operation in (lambda: self.client.diagnostics(device),
+                          lambda: self.client.audio(device, "clip-1"),
+                          lambda: self.client.stage_model(device, "a.onnx", io.BytesIO(b"a")),
+                          lambda: self.client.commit_models(device),
+                          lambda: self.client.command(device, "fleetStatus", {})):
+            with self.subTest(operation=operation), self.assertRaises(RemoteRejected):
+                operation()
+        self.assertEqual(self.server.requests, [])
+
     def test_domain_failure_redirect_and_remote_errors_never_reflect_secrets(self):
         for response in ({"ok": False, "error": TOKEN},
                          (302, {"Location": f"http://127.0.0.1:1/{TOKEN}"}, TOKEN.encode()),

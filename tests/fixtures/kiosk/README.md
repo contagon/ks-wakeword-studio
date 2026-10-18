@@ -8,6 +8,11 @@ Derived read-only from `/home/contagon/PersonalProjects/kiosk-satellite`:
   `follows` is a **leader name**, not a leader ID; only its presence is used.
   Native `fleet/FleetDiscovery.kt:179` supplies Android `ANDROID_ID`, falling
   back to `unknown`; the fallback is deliberately rejected as an unsafe pin.
+  `phaseOf:2466–2481` retains nonmembers as `declined`, `pending`, or `left`;
+  these rows must remain inactive even with separately saved admin credentials.
+  `_pollStatus:818–825` clears the fleet token after 401/403 without deleting
+  the row. Other phases (`offline`, `updating`, `error`, `version`, `synced`,
+  `syncing`) still describe members, not departures.
 - `app/lib/managers/remote/remote_manager.dart`: POST commands (814, 1012),
   raw POST wake-model upload query parameter `name` (788).
 - `app/lib/managers/wake_word/wake_word_manager.dart`: listing (1142),

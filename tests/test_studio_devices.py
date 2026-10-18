@@ -64,6 +64,48 @@ class DeviceTests(unittest.TestCase):
         self.assertEqual(follower.role, "follower")
         self.assertEqual([d.id for d in self.service.publication_targets()], [leader.id])
 
+    def test_retained_nonmember_rows_disable_credentialed_follower_without_losing_history(self):
+        leader = self.service.add(self.server.url, TOKEN, "leader")
+        self.service.refresh_fleet(leader.id)
+        self.server.identity["data"].update(id="kiosk-follower", leader=False)
+        cached = self.service.add(self.server.url, TOKEN, "standalone")
+        self.assertEqual(cached.credentials_status, "ready")
+        with self.store.transaction() as db:
+            ref = db.execute("SELECT credential_ref FROM devices WHERE id=?", (cached.id,)).fetchone()[0]
+        self.server.identity["data"].update(id=leader.id, leader=True)
+        for phase in ("left", "pending", "declined"):
+            with self.subTest(phase=phase):
+                self.server.fleet["data"]["followers"][0]["phase"] = phase
+                followers = self.service.refresh_fleet(leader.id)
+                retained = self.service.get(cached.id)
+                self.assertIn(retained, followers)
+                self.assertFalse(retained.active)
+                self.assertEqual((retained.role, retained.credentials_status, retained.leader_id),
+                                 ("follower", "ready", leader.id))
+                with self.store.transaction() as db:
+                    self.assertEqual(db.execute("SELECT credential_ref FROM devices WHERE id=?", (cached.id,)).fetchone()[0], ref)
+                self.assertEqual([d.id for d in self.service.publication_targets()], [leader.id])
+                request_count = len(self.server.requests)
+                for device in (retained, cached):
+                    for operation in (lambda: self.service.client.diagnostics(device),
+                                      lambda: self.service.client.audio(device, "clip-1")):
+                        with self.assertRaises(RemoteRejected):
+                            operation()
+                self.assertEqual(len(self.server.requests), request_count)
+        # Rediscovery as an actual member reactivates the same retained record.
+        self.server.fleet["data"]["followers"][0]["phase"] = "synced"
+        self.service.refresh_fleet(leader.id)
+        self.assertTrue(self.service.get(cached.id).active)
+        self.assertEqual(self.service.get(cached.id).credentials_status, "ready")
+
+    def test_member_phases_remain_active_even_offline_or_in_error(self):
+        leader = self.service.add(self.server.url, TOKEN, "leader")
+        for phase in ("offline", "updating", "error", "version", "synced", "syncing"):
+            with self.subTest(phase=phase):
+                self.server.fleet["data"]["followers"][0].update(phase=phase, online=False)
+                followers = self.service.refresh_fleet(leader.id)
+                self.assertTrue(followers[0].active)
+
     def test_standalone_and_leader_shared_registry_and_secure_credentials_restart(self):
         leader = self.service.add(self.server.url, TOKEN, "leader")
         self.server.identity["data"].update(id="standalone", leader=False)

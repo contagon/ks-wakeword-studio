@@ -78,6 +78,8 @@ class KioskClient:
         self.max_upload = max_upload
 
     def _request(self, device: Device, path: str, body: bytes) -> dict:
+        if not device.active:
+            raise RemoteRejected("Kiosk is inactive")
         token = validate_token(self.credentials(device))
         parsed = urlsplit(normalize_url(device.url))
         connection = None
