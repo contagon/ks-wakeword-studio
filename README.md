@@ -81,6 +81,51 @@ If you change `REC_PORT`, open that port instead and use the same port in the sa
 
 ---
 
+## Kiosk Studio setup and deployment safety
+
+Studio publication uploads archived models only to the configured fleet leader and
+standalone kiosks. Followers receive models through existing fleet synchronization;
+eligible followers need their own admin credentials for hash verification and the
+authorized cache refresh. Publication does not change either selected slot, engine,
+thresholds, or fleet profiles, and does not delete custom models.
+
+**Before enrolling a publication target, arrange initially clean kiosk upload
+staging. Do not perform concurrent external/manual model uploads during
+trainer-owned publication**, including retries and rollback. This is a required
+operational boundary, not an automatic cleanliness check. The kiosk API exposes
+no remote staging-list, staging-discard, or staging-lock operation; installed-file
+hashes do not reveal staged files. Uncoordinated admin-client safety cannot be
+guaranteed. Coordinate other upload clients before enabling automatic publication.
+
+Trainer-owned interrupted uploads are journaled and restored to current desired
+versions before later commits. Unknown external staged files, however, may be
+committed **before** unexpected acceptance is detected. The trainer then quarantines
+the target (`staging_blocked`, cause `staging_unowned`) and stops further automatic
+commits/refreshes; quarantine does not undo those unknown changes. Stop external
+uploads and arrange separately authorized operator cleanup and review of any
+unexpectedly accepted models. There is no automatic cleanup/quarantine-release
+endpoint, and republishing does not bypass quarantine. A journaled optional file
+with no current desired replacement also blocks publication rather than deleting
+it or committing obsolete bytes.
+
+After verified publication/synchronization, cache refresh restarts detection and
+clears all engines' downloaded-model caches. Other selected remote models may need
+to be downloaded again. Custom uploads and settings remain intact. File verification
+and refresh acknowledgement are **not** proof of the version used by inference;
+offline, uncredentialed, excluded, and lagging followers are not reported as success.
+
+Read-only API help (available even before any model is published):
+
+- `GET /api/studio/deployment/capabilities`: typed staging prerequisites, unavailable
+  remote safeguards, quarantine consequences, and operator-action notices. This
+  endpoint does not contact kiosks or claim that staging is clean.
+- `GET /api/studio/wakewords/{word_id}/deployment/status`: per-target publication,
+  manifest, refresh and unverified-runtime states.
+- `GET /api/studio/wakewords/{word_id}/deployment/history`: paginated observations.
+- `POST /api/studio/wakewords/{word_id}/deployment/publish` or `/rollback` with
+  `{"version_id":"<archived-version-id>"}`: claim a new desired revision under the
+  same staging prerequisites; these are real mutation endpoints, not setup checks.
+
 ## What The UI Does
 
 - The entire interface is reactive Vue 3 + TypeScript, following the same typed component pattern as Tater's newer UI surfaces.

@@ -224,6 +224,25 @@ class CommitResult:
 
 
 @dataclass(frozen=True)
+class DeploymentCapabilities:
+    requires_initially_clean_staging: bool = True
+    requires_exclusive_staging: bool = True
+    automatic_clean_check: bool = False
+    remote_staging_inspection: bool = False
+    remote_staging_discard: bool = False
+    remote_staging_lock: bool = False
+    notice: str = ('Supported publication requires initially clean kiosk upload staging and no concurrent '
+                   'external/manual uploads during trainer-owned publication. These are operator prerequisites, '
+                   'not automatically verified conditions; uncoordinated admin-client safety is not guaranteed.')
+    quarantine_notice: str = ('Unknown staged files may be committed before detection through unexpected accepted '
+                              'models. The target is then quarantined as staging_blocked/staging_unowned; '
+                              'this does not undo the unknown changes.')
+    operator_action: str = ('Stop external uploads and arrange separately authorized operator cleanup and review '
+                            'of unexpectedly accepted models. The trainer cannot inspect/discard remote staging '
+                            'or automatically release quarantine; republishing does not bypass it.')
+
+
+@dataclass(frozen=True)
 class Publication:
     word_id: str
     device_id: str

@@ -238,3 +238,36 @@ The conservative v9 migration can also block when an old optional staged filenam
 ### Commit
 
 Scoped round-1 fix commit is reported in the final message; includes this report, deployment persistence/reconciliation changes, new regressions/client contract, and narrow migration-fixture expectations only.
+
+---
+
+## Controller ruling — staging operational boundary documented
+
+Round-1 fix was committed as **5715d1a**. The controller has now resolved the operational-policy question above: **supported publication requires initially clean kiosk upload staging and no concurrent external/manual uploads during trainer-owned publication**, including retries/rollback. This does not add a technical remote guarantee. The API cannot list/discard/lock staging, and unknown external files can be committed before unexpected acceptance triggers quarantine; separately authorized operator cleanup/review is required. No new user permission question or actual device action is needed for documenting that boundary.
+
+Implemented documentation/help only, without changing publication, selected slots, deletion behavior or quarantine recovery:
+
+- Typed immutable `DeploymentCapabilities` record in `studio/models.py` and read-only `GET /api/studio/deployment/capabilities`. Explicit booleans state both prerequisites and the absence of automatic cleanliness checking, remote staging inspection, remote discard and remote lock. Notice strings explain uncoordinated-client risk, post-commit quarantine, and required operator action. It is static help, not a successful clean check or a device probe; it is available before any model/status exists.
+- Deployment status OpenAPI help points to that capabilities endpoint without changing the existing list response shape.
+- `README.md` now has Kiosk Studio setup/deployment guidance: initially clean/exclusive staging, trainer-owned recovery vs unowned ambiguity, `staging_blocked` / `staging_unowned`, no automatic cleanup/quarantine release or republish bypass, optional-companion blocking, cache-refresh effects, follower policy, separate manifest/refresh/runtime observations, and help/status/history/publish/rollback route references. No fictional staging cleanup command is suggested.
+- Added a contract test asserting typed OpenAPI help, all capability flags/notices, and **zero kiosk calls**. No new agent, satellite modification or LAN mutation occurred.
+
+Actual TDD commands use the same requested Python/DATA_DIR prefix as above:
+
+```sh
+env DATA_DIR=/tmp/opencode/wakeword-studio-baseline /tmp/opencode/wakeword-studio-venv/bin/python -m unittest discover -s tests -p 'test_studio_deployment.py' -v > /tmp/opencode/task-9-boundary-red.log 2>&1
+```
+
+RED exit **1**: `Ran 30 tests in 2.688s`, `FAILED (failures=1)`; the new help route returned **404 instead of 200**.
+
+```sh
+env DATA_DIR=/tmp/opencode/wakeword-studio-baseline /tmp/opencode/wakeword-studio-venv/bin/python -m unittest discover -s tests -p 'test_studio_deployment*.py' -v > /tmp/opencode/task-9-boundary-green.log 2>&1
+```
+
+GREEN exit **0**: `Ran 35 tests in 4.212s`, `OK (skipped=1)`.
+
+```sh
+env DATA_DIR=/tmp/opencode/wakeword-studio-baseline /tmp/opencode/wakeword-studio-venv/bin/python -m unittest discover -s tests -v > /tmp/opencode/task-9-boundary-full-tests.log 2>&1
+```
+
+Full suite exit **0**: **`Ran 316 tests in 27.998s`, `OK (skipped=1)`**. Only the explicitly opted-in live mutation test was skipped; existing socket ResourceWarning appeared during the passing `test_inactive_credentials_route_still_rejects_identity_mismatch_and_bad_token`. `git diff --check` passed. No production/test changes after these runs; only this report and scoped commit operations follow. The new commit/head is returned in the final status.

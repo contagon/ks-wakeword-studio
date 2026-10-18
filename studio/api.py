@@ -10,7 +10,8 @@ from pydantic import BaseModel, ConfigDict
 from studio.models import (CollectionRun, Conflict, CredentialsRequired, Device, IdentityMismatch, SourceMapping,
                            RemoteRejected, RemoteUnavailable, NotFound, Page, Recording, Sample, SampleQuery,
                            ValidationError, Wakeword, WakewordUpdate, Job, Schedule, WorkerHealth, Dataset,
-                           Batch, GenerationRecipe, TrainingSettings, RunManifest, ModelVersion, Publication)
+                           Batch, GenerationRecipe, TrainingSettings, RunManifest, ModelVersion, Publication,
+                           DeploymentCapabilities)
 from studio.runtime import StudioRuntime
 from studio.storage import AUDIO_MIMES
 
@@ -148,6 +149,11 @@ def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=1
 def create_router(runtime: StudioRuntime) -> APIRouter:
     router = APIRouter(prefix="/api/studio", route_class=StudioRoute)
 
+    @router.get('/deployment/capabilities', response_model=DeploymentCapabilities)
+    def deployment_capabilities():
+        """Static operational prerequisites, not a remote staging-cleanliness probe."""
+        return DeploymentCapabilities()
+
     @router.get('/wakewords/{word_id}/training/settings', response_model=TrainingSettings)
     def training_settings(word_id: str):
         return runtime.training.settings(word_id)
@@ -196,7 +202,10 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
         return Response(artifacts[name], media_type='application/octet-stream',
                                headers={'Content-Disposition': f'attachment; filename="{name}"'})
 
-    @router.get('/wakewords/{word_id}/deployment/status', response_model=list[Publication])
+    @router.get('/wakewords/{word_id}/deployment/status', response_model=list[Publication],
+                description='Publication observations, not proof of clean upload staging. '
+                            'See GET /api/studio/deployment/capabilities for required staging ownership '
+                            'and quarantine/operator-action notices.')
     def publication_status(word_id: str):
         return runtime.deployment.status(word_id)
 

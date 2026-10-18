@@ -95,6 +95,29 @@ class FixtureKiosk(KioskClient):
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_capabilities_help_exposes_staging_boundary_without_probe_or_mutation(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from studio.api import create_router
+        app = FastAPI()
+        app.include_router(create_router(self.runtime))
+        with TestClient(app) as api:
+            response = api.get('/api/studio/deployment/capabilities')
+            self.assertEqual(response.status_code, 200)
+            help = response.json()
+            self.assertTrue(help['requires_initially_clean_staging'])
+            self.assertTrue(help['requires_exclusive_staging'])
+            self.assertFalse(help['automatic_clean_check'])
+            self.assertFalse(help['remote_staging_inspection'])
+            self.assertFalse(help['remote_staging_discard'])
+            self.assertFalse(help['remote_staging_lock'])
+            self.assertIn('manual uploads', help['notice'])
+            self.assertIn('before detection', help['quarantine_notice'])
+            self.assertIn('operator', help['operator_action'])
+            schema = api.get('/openapi.json').json()
+            self.assertIn('DeploymentCapabilities', schema['components']['schemas'])
+        self.assertEqual(self.client.calls, [])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.now = datetime(2026, 10, 18, tzinfo=timezone.utc)
