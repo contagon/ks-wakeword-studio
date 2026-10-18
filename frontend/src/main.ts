@@ -1,6 +1,6 @@
 import { createApp } from "vue";
 import TrainerApp from "./TrainerApp.vue";
-import "./trainer.css";
+import "./studio/studio.css";
 
 const root = document.getElementById("trainer-app");
 
