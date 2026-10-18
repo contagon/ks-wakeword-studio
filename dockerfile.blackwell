@@ -45,6 +45,9 @@ COPY --chown=root:root --chmod=0755 \
 
 COPY --chown=root:root --chmod=0644 tts_config.py /root/mww-scripts/tts_config.py
 
+# Studio package and migration resources
+COPY --chown=root:root studio/ /root/mww-scripts/studio/
+
 # CLI folder
 COPY --chown=root:root cli/ /root/mww-scripts/cli/
 
