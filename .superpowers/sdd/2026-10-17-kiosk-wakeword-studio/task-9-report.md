@@ -160,3 +160,81 @@ Only skipped test is the explicitly mutation-opted-in live contract. Existing-st
 ### Commit
 
 Scoped implementation commit uses the requested subject `feat: publish archived models safely through fleet leaders with rollback`; includes parent plan/spec authorization amendments and this tracked report. Commit ID is supplied in the final status message.
+
+---
+
+## Task 9 review fix — round 1
+
+Verified both Important findings against production code and sibling `custom_wake_models.dart:227–255,271–320`: uploaded staging files persist across process death, and **every** later commit consumes the entire staging folder, not merely the caller's uploaded subset. Existing process locks and installed-file hash checks did not neutralize stale persistent bytes. Also verified that terminal `synced` rows were skipped after profile/member removal. No satellite changes, agents, LAN calls, or real uploads/cache refreshes were used for this fix.
+
+### Changes
+
+- Additive **v10**, `studio/schema_deployment_staging.sql`: `deployment_staging(device_id,word_id,filenames,claimed_revision)` durably owns the entire possible filename set **before the first upload**. Intent/rollback updates never delete this journal. Existing v9 stores conservatively seed ownership using every retained deployable artifact name for each previously enrolled word/target, so pre-fix trainer-owned staging is not silently treated as clean after upgrading. A real v9→v10 migration regression simulates a persisted old attempt and verifies recovery.
+- `DeploymentService._commit_current` executes under the existing global current-intent gate and per-target lock. It resolves **all dirty words on that target** to their **current** desired revisions, validates all affected archives before any upload, journals the complete filename sets, overwrites every affected staged model with the current desired pair/companion, and only then performs the target-wide commit. Recovery is required even when installed hashes already match and even when another dirty word's ordinary retry is not due. No stale recorded version is replayed.
+- Commit acceptance must exactly equal the required engine/stem set (including cardinality); a superset is no longer success. All affected installed hashes must match before ownership is cleared. Recovered other words are durably scheduled `refresh_pending` **before** clearing the journal, so interruption cannot lose their refresh obligation. Failures/crashes retain ownership for future recovery.
+- Known journaled filenames with **no counterpart in the current desired archive** (for example a staged optional OWW companion removed by rollback) produce terminal `staging_blocked`, cause `staging_artifact_not_desired`, before any upload/commit/refresh. There is no fabricated delete/discard/invalid-placeholder workaround. Another word cannot bypass this block with its own commit.
+- Unexpected accepted engine/IDs produce durable per-target `deployment_staging_blocks` quarantine, cause `staging_unowned`. No subsequent publication revision/word may commit or refresh that target. Reconciliation invalidates its existing terminal direct-target successes as well. Actual client commit results continue to preserve unexpected accepted entries and named rejected files, rather than filtering evidence away.
+- `DeploymentService._enroll` now reconciles **terminal rows too**. Inactive/removed members become `inactive`; followers losing Voice Satellite coverage become `not_covered`. Their manifest/runtime observations are reset to `unverified`, refresh to `pending`, due mutation is cleared, and the transition is recorded in history. This is local SQLite/registry work with **zero network calls**. Existing re-eligibility logic reopens only genuinely eligible active rows; exhausted normal remote retries remain bounded.
+- Older migration tests were updated only for latest version **10** and to remove the two new staging tables when reconstructing v3. Existing data-preservation assertions remain. Public service/API signatures are unchanged, with the additional truthful `staging_blocked` state/cause codes.
+
+### Regression coverage
+
+Added 11 tests (10 deployment service cases, one real loopback HTTP client case):
+
+1. Stage version B, die before commit, rollback to already-installed A, publish a different word: B cannot be reinstalled.
+2. Die immediately after rollback intent commits; a different word's next publication repairs dirty A to current desired bytes before committing anything.
+3. Assert durable complete staging ownership exists inside the first upload callback.
+4. Unexpected accepted models do not count as success; persistent quarantine prevents later commits.
+5. Previously synced follower becomes profile-excluded: `not_covered`, manifest unverified, no network.
+6. Previously synced follower is removed/inactive: `inactive`, pending refresh, no network.
+7. Optional staged file absent from current desired version blocks both its own and another word's commit without deleting/staging placeholders.
+8. Concurrent repair of another dirty word and rollback serialize under the current desired-intent lock; the final installed bytes belong to the later desired revision.
+9. Quarantine invalidates an older word's terminal target success on reconciliation, without network.
+10. Actual v9→v10 upgrade conservatively recovers unjournaled pre-fix **trainer-owned** staging.
+11. Actual loopback HTTP commit envelope preserves extra accepted engine/IDs and rejected filenames for exact caller validation, while excluding raw rejection secrets.
+
+Existing follower no-upload, source reload/slot preservation, crash/retry, cross-workspace rollback, and live-mutation opt-in tests remain intact.
+
+### Actual RED / GREEN evidence
+
+All unittest commands used the requested prefix:
+
+```sh
+env DATA_DIR=/tmp/opencode/wakeword-studio-baseline /tmp/opencode/wakeword-studio-venv/bin/python -m unittest discover -s tests
+```
+
+Commands add the pattern and `-v`, redirecting stdout/stderr to the log listed.
+
+| Log under `/tmp/opencode/` | Command suffix / observed output |
+| --- | --- |
+| `task-9-round1-red.log` | `-p 'test_studio_deployment.py' -v`: **25 tests; FAILED (failures=5, errors=1)**. Both persistent-staging corruption regressions failed with actual B vs A byte mismatch, terminal follower cases remained `synced`, unexpected accepted model was falsely `published`, ownership table did not exist. |
+| `task-9-round1-initial-green.log` | `-p 'test_studio_deployment.py' -v`: 25 tests, one remaining old-schema assertion failure (`10 != 9`); existing migration expectations were then updated. |
+| `task-9-round1-quarantine-red.log` | `-p 'test_studio_deployment.py' -v`: **28 tests; FAILED (failures=1)**: another word's old terminal target status stayed `published` after unknown-staging quarantine. Added terminal quarantine reconciliation. |
+| `task-9-round1-focused-green.log` | `-p 'test_studio_deployment*.py' -v`: **Ran 34 tests in 4.112s; OK (skipped=1)**. |
+
+One full-suite run for this fix round:
+
+```sh
+env DATA_DIR=/tmp/opencode/wakeword-studio-baseline /tmp/opencode/wakeword-studio-venv/bin/python -m unittest discover -s tests -v > /tmp/opencode/task-9-round1-full-tests.log 2>&1
+```
+
+Exit **0**:
+
+```text
+Ran 315 tests in 27.947s
+OK (skipped=1)
+```
+
+The only skip is the separately opted-in live mutation test. Existing socket `ResourceWarning` appeared during `test_inactive_credentials_route_still_rejects_identity_mismatch_and_bad_token`, which passed; no warning was suppressed. No production/test changes follow the full passing run; only report/staging/commit operations. `git diff --check` passed during focused verification.
+
+### Controller decision still needed: unowned external staging
+
+**The current kiosk API cannot enumerate or safely discard unowned staging before a commit.** The installed-file manifest excludes `.staging`. Exact post-commit acceptance detects unexpected models only **after** that commit may already have installed them; it cannot reconstruct overwritten external bytes or undo unknown effects. Quarantine prevents further automatic commits/refreshes and does not claim that the first external contamination was prevented or repaired. Trainer-owned crash contamination is now repaired before commit; genuinely unowned content is not.
+
+Controller: should publication require exclusive, initially-clean ownership of the kiosk staging directory (with a separately approved operator recovery procedure for unknown staging), or should this remain a blocker pending a separately authorized satellite staging-inspection/recovery capability? **No staging-discard API, external-model deletion, quarantine-release endpoint, or satellite modification has been invented or authorized here.**
+
+The conservative v9 migration can also block when an old optional staged filename has no current desired replacement, even if the actual remote staging happened to be empty. That is an intentional fail-closed ambiguity; automatically committing obsolete companion bytes merely to clear staging would violate desired-version authority. No live cleanup was attempted.
+
+### Commit
+
+Scoped round-1 fix commit is reported in the final message; includes this report, deployment persistence/reconciliation changes, new regressions/client contract, and narrow migration-fixture expectations only.

@@ -272,7 +272,7 @@ class JobTests(unittest.TestCase):
                 self.assertEqual(WorkspaceService(store).get('word').model_id, 'hello')
                 self.assertEqual(JobQueue(store).list().total, 0)
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 9)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 10)
                     self.assertEqual(db.execute("SELECT role FROM devices WHERE id='device'").fetchone()[0], 'standalone')
             finally:
                 store.close()

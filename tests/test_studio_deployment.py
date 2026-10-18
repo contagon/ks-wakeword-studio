@@ -41,6 +41,8 @@ class FixtureKiosk(KioskClient):
         self.loaded = {}
         self.upload_hook = None
         self.refresh_hook = None
+        self.commit_hook = None
+        self.after_upload_hook = None
 
     def _request(self, device, path, body):
         self.calls.append((device.id, path, body))
@@ -51,12 +53,16 @@ class FixtureKiosk(KioskClient):
                 self.upload_hook()
             name = path.split('=', 1)[1]
             self.staged.setdefault(device.id, {})[name] = body
+            if self.after_upload_hook:
+                self.after_upload_hook(device.id, name)
             return {}
         name = path.split('/')[-1]
         if name == 'fleetIdentity':
             leader, follows = self.roles[device.id]
             return {'id': device.id, 'leader': leader, 'follows': follows}
         if name == 'commitCustomWakeModels':
+            if self.commit_hook:
+                self.commit_hook(device.id)
             staged = self.staged.pop(device.id, {})
             if self.reject:
                 return {'added': [], 'rejected': [{'file': n} for n in staged]}
@@ -403,7 +409,7 @@ class DeploymentTests(unittest.TestCase):
             store = Store.open(root)
             try:
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 9)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 10)
                     self.assertEqual(db.execute('SELECT phrase FROM wakewords').fetchone()[0], 'Retained')
                     self.assertEqual(db.execute('SELECT count(*) FROM publications').fetchone()[0], 0)
             finally:
@@ -438,3 +444,196 @@ class DeploymentTests(unittest.TestCase):
         self.service.retry_due(self.now + timedelta(days=1))
         self.assertIn('leader', self.client.loaded)
         self.assertEqual(self.status()['leader'].refresh_state, 'acknowledged')
+
+    def other_version(self):
+        """An actual completed second-word archive, no automatic upload yet."""
+        from studio.models import TrainingResult
+        word = self.runtime.workspaces.create('Other robot', 'en', 'other_robot')
+        class Adapter:
+            def run(self, manifest, root, on_log, cancel):
+                contents = {'other_robot.json': b'{"type":"micro","model":"other_robot.tflite"}',
+                            'other_robot.tflite': b'other-fixture-weights'}
+                for n, b in contents.items():
+                    (root / n).write_bytes(b)
+                return TrainingResult({n: str(root / n) for n in contents}, {n: digest(b) for n, b in contents.items()}, {}, True)
+        self.runtime.training.adapter_factory = lambda context: Adapter()
+        self.runtime.workers.completion_hooks.clear()
+        job = self.runtime.training.enqueue(word.id)
+        self.runtime.workers.run_once('gpu')
+        self.assertEqual(self.runtime.jobs.get(job.id).status, 'complete')
+        return self.runtime.training.successful_version(job.id)
+
+    def stage_new_version_then_crash(self):
+        class Crash(BaseException):
+            pass
+        old = self.train()
+        self.runtime.workers.completion_hooks.clear()
+        new = self.train()
+        def crash(device_id):
+            self.client.commit_hook = None
+            raise Crash()
+        self.client.commit_hook = crash
+        with self.assertRaises(Crash):
+            self.service.publish(new.id)
+        self.assertEqual(self.client.staged['leader']['hello_robot.tflite'],
+                         (Path(new.path) / 'hello_robot.tflite').read_bytes())
+        return old, new
+
+    def test_crash_staging_rollback_then_other_word_commit_cannot_reinstall_newer_bytes(self):
+        old, new = self.stage_new_version_then_crash()
+        # New service, same persisted store: in-memory locks/ownership aren't
+        # enough. Rollback is to bytes that are *already installed*.
+        recovered = DeploymentService(self.runtime.devices.store, self.runtime.devices, self.runtime.training, clock=lambda: self.now)
+        recovered.rollback(self.word.id, old.id)
+        other = self.other_version()
+        recovered.publish(other.id)
+        self.assertEqual(self.client.files['leader']['microwakeword/hello_robot.tflite'],
+                         (Path(old.path) / 'hello_robot.tflite').read_bytes())
+        self.assertEqual(self.status()['leader'].desired_version, old.id)
+        self.assertEqual(self.client.staged.get('leader', {}), {})
+        self.assertEqual(self.client.uploads('follow'), [])
+        self.assertNotEqual(old.id, new.id)
+
+    def test_dirty_other_word_is_recovered_before_next_commit_even_when_its_retry_not_due(self):
+        old, new = self.stage_new_version_then_crash()
+        # Simulate process death immediately after rollback INTENT commit, before
+        # rollback's network phase. The other word is the next publisher.
+        with self.runtime.devices.store.transaction() as db:
+            self.service._intent(db, old)
+        other = self.other_version()
+        self.service.publish(other.id)
+        self.assertEqual(self.client.files['leader']['microwakeword/hello_robot.tflite'],
+                         (Path(old.path) / 'hello_robot.tflite').read_bytes())
+        self.assertNotEqual(old.id, new.id)
+
+    def test_staging_ownership_is_durable_before_first_upload(self):
+        self.runtime.workers.completion_hooks.clear()
+        version = self.train()
+        seen = []
+        def check():
+            with self.runtime.devices.store.transaction() as db:
+                row = db.execute('SELECT filenames FROM deployment_staging WHERE device_id=? AND word_id=?',
+                                 ('leader', self.word.id)).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(set(json.loads(row[0])), {'hello_robot.json', 'hello_robot.tflite'})
+            seen.append(True)
+            self.client.upload_hook = None
+        self.client.upload_hook = check
+        self.service.publish(version.id)
+        self.assertTrue(seen)
+
+    def test_unexpected_accepted_model_is_not_success_and_blocks_further_commits(self):
+        self.runtime.workers.completion_hooks.clear()
+        version = self.train()
+        self.client.staged['leader'] = {'unowned.onnx': b'unowned-external-weights'}
+        self.service.publish(version.id)
+        self.assertEqual(self.status()['leader'].state, 'staging_blocked')
+        self.assertNotIn('leader', self.client.refreshes())
+        before = len([p for d, p, _ in self.client.calls if d == 'leader' and p.endswith('/commitCustomWakeModels')])
+        self.service.publish(version.id)
+        after = len([p for d, p, _ in self.client.calls if d == 'leader' and p.endswith('/commitCustomWakeModels')])
+        self.assertEqual(before, after)
+
+    def test_synced_follower_losing_profile_or_membership_is_no_longer_success_without_network(self):
+        self.train()
+        self.client.files['follow'] = dict(self.client.files['leader'])
+        self.service.retry_due(self.now + timedelta(days=1))
+        self.assertEqual(self.status()['follow'].state, 'synced')
+        with self.runtime.devices.store.transaction() as db:
+            db.execute("UPDATE devices SET model_eligible=0 WHERE id='follow'")
+        self.client.calls.clear()
+        self.service.reconcile()
+        self.assertEqual(self.status()['follow'].state, 'not_covered')
+        self.assertEqual(self.status()['follow'].manifest_state, 'unverified')
+        self.assertEqual(self.client.calls, [])
+        with self.runtime.devices.store.transaction() as db:
+            db.execute("UPDATE devices SET active=0 WHERE id='follow'")
+        self.service.reconcile()
+        self.assertEqual(self.status()['follow'].state, 'inactive')
+        self.assertEqual(self.client.calls, [])
+
+    def test_synced_follower_removed_from_membership_becomes_inactive(self):
+        self.train()
+        self.client.files['follow'] = dict(self.client.files['leader'])
+        self.service.retry_due(self.now + timedelta(days=1))
+        with self.runtime.devices.store.transaction() as db:
+            db.execute("UPDATE devices SET active=0 WHERE id='follow'")
+        self.client.calls.clear()
+        self.service.reconcile()
+        self.assertEqual(self.status()['follow'].state, 'inactive')
+        self.assertEqual(self.status()['follow'].refresh_state, 'pending')
+        self.assertEqual(self.client.calls, [])
+
+    def test_no_discard_workaround_for_owned_optional_file_absent_from_current_desired(self):
+        version = self.train()
+        with self.runtime.devices.store.transaction() as db:
+            db.execute('INSERT INTO deployment_staging VALUES (?,?,?,?)',
+                       ('leader', self.word.id, json.dumps(['hello_robot.oww.onnx']), 1))
+        self.client.staged['leader'] = {'hello_robot.oww.onnx': b'obsolete-companion'}
+        self.client.calls.clear()
+        self.service.publish(version.id)
+        self.assertEqual(self.status()['leader'].state, 'staging_blocked')
+        self.assertEqual(self.status()['leader'].error_code, 'staging_artifact_not_desired')
+        self.assertFalse(any(d == 'leader' and (('upload?' in p) or p.endswith('/commitCustomWakeModels')
+                                              or p.endswith('/clearWakeWordModels')) for d, p, _ in self.client.calls))
+        other = self.other_version()
+        self.service.publish(other.id)
+        self.assertEqual(self.client.staged['leader']['hello_robot.oww.onnx'], b'obsolete-companion')
+        self.assertFalse(any(d == 'leader' and p.endswith('/commitCustomWakeModels') for d, p, _ in self.client.calls))
+
+    def test_recovering_dirty_other_word_holds_current_desired_intent_lock(self):
+        old, new = self.stage_new_version_then_crash()
+        with self.runtime.devices.store.transaction() as db:
+            self.service._intent(db, old)
+        other = self.other_version()
+        entered, release = threading.Event(), threading.Event()
+        def hold():
+            self.client.upload_hook = None
+            entered.set()
+            self.assertTrue(release.wait(5))
+        self.client.upload_hook = hold
+        recovered = DeploymentService(self.runtime.devices.store, self.runtime.devices, self.runtime.training, clock=lambda: self.now)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            repair = pool.submit(recovered.publish, other.id)
+            self.assertTrue(entered.wait(5))
+            newer = pool.submit(self.service.rollback, self.word.id, new.id)
+            release.set()
+            repair.result(5)
+            newer.result(5)
+        self.assertEqual(self.status()['leader'].desired_version, new.id)
+        self.assertEqual(self.client.files['leader']['microwakeword/hello_robot.tflite'],
+                         (Path(new.path) / 'hello_robot.tflite').read_bytes())
+
+    def test_unknown_staging_quarantine_invalidates_terminal_other_word_status(self):
+        self.train()
+        other = self.other_version()
+        self.client.staged['leader'] = {'unowned.onnx': b'unknown'}
+        self.service.publish(other.id)
+        self.client.calls.clear()
+        self.service.reconcile()
+        self.assertEqual(self.status()['leader'].state, 'staging_blocked')
+        self.assertEqual(self.client.calls, [])
+
+    def test_v9_migration_conservatively_recovers_unjournaled_owned_staging(self):
+        import sqlite3
+        old, new = self.stage_new_version_then_crash()
+        with self.runtime.devices.store.transaction() as db:
+            self.service._intent(db, old)
+        root = Path(self.temp.name)
+        self.runtime.shutdown()
+        with sqlite3.connect(root / 'studio/studio.sqlite3') as db:
+            db.execute('DROP TABLE deployment_staging_blocks')
+            db.execute('DROP TABLE deployment_staging')
+            db.execute('PRAGMA user_version=9')
+        self.runtime.startup()
+        self.runtime.devices.client = self.client
+        self.service = self.runtime.deployment
+        with self.runtime.devices.store.transaction() as db:
+            names = db.execute("SELECT filenames FROM deployment_staging WHERE device_id='leader' AND word_id=?", (self.word.id,)).fetchone()
+            self.assertEqual(set(json.loads(names[0])), {'hello_robot.json', 'hello_robot.tflite'})
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 10)
+        other = self.other_version()
+        self.service.publish(other.id)
+        self.assertEqual(self.client.files['leader']['microwakeword/hello_robot.tflite'],
+                         (Path(old.path) / 'hello_robot.tflite').read_bytes())
+        self.assertNotEqual(old.id, new.id)

@@ -14,6 +14,19 @@ FIXTURE = json.loads((Path(__file__).parent / 'fixtures/kiosk/refresh_contract.j
 
 
 class PublicationContractTests(unittest.TestCase):
+    def test_commit_result_retains_unexpected_accepted_models_for_exact_validation(self):
+        server = KioskServer()
+        self.addCleanup(server.close)
+        client = KioskClient(lambda _: TOKEN, timeout=1)
+        device = Device('kiosk-leader', server.url, 'leader')
+        accepted = [{'engine': 'microwakeword', 'id': 'intended'}, {'engine': 'openwakeword', 'id': 'unowned'}]
+        server.responses['/kiosk/api/commands/commitCustomWakeModels'] = {
+            'ok': True, 'data': {'added': accepted, 'rejected': [{'file': 'foreign.json', 'reason': TOKEN}]}}
+        result = client.commit_models(device)
+        self.assertEqual(result.added, accepted)
+        self.assertEqual(result.rejected, [{'file': 'foreign.json'}])
+        self.assertNotIn(TOKEN, json.dumps(result.rejected))
+
     def test_real_http_refresh_envelope_and_malformed_or_domain_rejection(self):
         server = KioskServer()
         self.addCleanup(server.close)
