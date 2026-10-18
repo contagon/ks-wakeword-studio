@@ -224,6 +224,39 @@ STUDIO_RUNTIME = StudioRuntime(
 )
 app.include_router(create_studio_router(STUDIO_RUNTIME))
 
+# Studio owns all writes by default. Keep this intentionally small and
+# explicit: a new legacy endpoint is blocked unless it is added as a genuinely
+# read-only compatibility route. In particular, do not allow legacy audio or
+# model GET routes here because their historical implementations can mutate
+# singleton files as a side effect.
+LEGACY_STUDIO_READONLY_PATHS = frozenset({
+    "/api/auto_train",
+    "/api/session",
+    "/api/samples",
+    "/api/data",
+    "/api/train_status",
+})
+
+
+def _legacy_singleton_rejection() -> JSONResponse:
+    return JSONResponse(
+        {"ok": False,
+         "error": "Legacy singleton actions are disabled in Studio mode. Use /api/studio workspaces and jobs, or restart with TRAINER_LEGACY_MODE=1 for isolated legacy behavior."},
+        status_code=409,
+    )
+
+
+@app.middleware("http")
+async def reject_legacy_singleton_requests_in_studio_mode(request: Request, call_next):
+    path = request.url.path
+    if (TRAINER_LEGACY_MODE or path.startswith("/api/studio/")
+            or not path.startswith("/api/")):
+        return await call_next(request)
+    if request.method in {"GET", "HEAD"} and path in LEGACY_STUDIO_READONLY_PATHS:
+        return await call_next(request)
+    return _legacy_singleton_rejection()
+
+
 # Serve static UI
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -3473,9 +3506,7 @@ def start_auto_train_worker_event():
 
 
 def _legacy_mode_required() -> JSONResponse | None:
-    if not TRAINER_LEGACY_MODE:
-        return JSONResponse({"ok": False, "error": "Legacy singleton actions are disabled in Studio mode. Use /api/studio workspaces and jobs, or restart with TRAINER_LEGACY_MODE=1 for isolated legacy behavior."}, status_code=409)
-    return None
+    return None if TRAINER_LEGACY_MODE else _legacy_singleton_rejection()
 
 
 @app.on_event("shutdown")
