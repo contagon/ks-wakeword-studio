@@ -224,16 +224,11 @@ STUDIO_RUNTIME = StudioRuntime(
 )
 app.include_router(create_studio_router(STUDIO_RUNTIME))
 
-# Studio owns all writes by default. Keep this intentionally small and
-# explicit: a new legacy endpoint is blocked unless it is added as a genuinely
-# read-only compatibility route. In particular, do not allow legacy audio or
-# model GET routes here because their historical implementations can mutate
-# singleton files as a side effect.
-LEGACY_STUDIO_READONLY_PATHS = frozenset({
-    "/api/auto_train",
-    "/api/samples",
-    "/api/data",
-})
+# Studio owns the API in its default mode. Legacy endpoints are denied unless
+# the Studio frontend requires one and it is proven not to mutate legacy state
+# or disk. The Studio frontend uses only /api/studio, so there are no legacy
+# compatibility routes today.
+LEGACY_STUDIO_READONLY_PATHS = frozenset()
 
 
 def _legacy_singleton_rejection() -> JSONResponse:

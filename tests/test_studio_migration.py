@@ -2,6 +2,7 @@ import io
 import copy
 import json
 import os
+import re
 import tempfile
 import unittest
 import wave
@@ -207,27 +208,41 @@ class MigrationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "legacy singleton training is disabled"):
             trainer._start_training_thread("studio_word", "en", True, False, "modern")
 
-    def test_studio_mode_legacy_gets_do_not_mutate_state(self):
+    @staticmethod
+    def _legacy_api_routes(app):
+        return tuple(
+            route for route in app.routes
+            if getattr(route, "path", "").startswith("/api/")
+            and not route.path.startswith("/api/studio/")
+            and getattr(route, "methods", None)
+        )
+
+    @staticmethod
+    def _legacy_data_tree_snapshot(root):
+        if not root.exists():
+            return ()
+        return tuple(
+            (str(path.relative_to(root)), path.lstat().st_size, path.lstat().st_mtime_ns)
+            for path in sorted(root.rglob("*"))
+        )
+
+    def test_studio_mode_allowlisted_legacy_routes_are_pure(self):
+        """Any future Studio compatibility exception must be state and disk pure."""
         import trainer_server as trainer
         from fastapi.testclient import TestClient
 
         if trainer.TRAINER_LEGACY_MODE:
             self.skipTest("explicit legacy-mode process")
 
-        safe_read_only_paths = {
-            "/api/auto_train",
-            "/api/samples",
-            "/api/data",
-        }
-        compatibility_paths = (
-            "/api/auto_train",
-            "/api/samples",
-            "/api/data",
-            "/api/session",
-            "/api/train_status",
-        )
-        self.assertEqual(set(trainer.LEGACY_STUDIO_READONLY_PATHS), safe_read_only_paths)
+        routes = {route.path: route for route in self._legacy_api_routes(trainer.app)}
+        self.assertTrue(set(trainer.LEGACY_STUDIO_READONLY_PATHS).issubset(routes))
+        # Production Studio code has /api/studio as its only API base.
+        self.assertEqual(trainer.LEGACY_STUDIO_READONLY_PATHS, frozenset())
 
+        seed = trainer.PERSONAL_DIR / f"allowlist-purity-{os.getpid()}.wav"
+        seed.parent.mkdir(parents=True, exist_ok=True)
+        previous_seed = seed.read_bytes() if seed.exists() else None
+        seed.write_bytes(wav())
         with trainer.STATE_LOCK:
             original_state = copy.deepcopy(trainer.STATE)
             trainer.STATE.update(
@@ -237,26 +252,56 @@ class MigrationTests(unittest.TestCase):
                     "language": "invalid-language",
                     "english_accent": "invalid-accent",
                     "tts_mode": "invalid-mode",
+                    "takes": ["previous.wav"],
+                    "takes_received": 77,
                 }
             )
             trainer.STATE["training"].update(
                 {"last_sent_tail": ["previous tail"], "last_log_size": 321}
             )
-            seeded_state = copy.deepcopy(trainer.STATE)
 
         try:
             with TestClient(trainer.app) as client:
-                for path in compatibility_paths:
+                for path in sorted(trainer.LEGACY_STUDIO_READONLY_PATHS):
                     with self.subTest(path=path):
-                        response = client.get(path)
-                        expected_status = 200 if path in safe_read_only_paths else 409
-                        self.assertEqual(response.status_code, expected_status)
+                        route = routes[path]
+                        method = "GET" if "GET" in route.methods else sorted(route.methods)[0]
+                        before_tree = self._legacy_data_tree_snapshot(trainer.DATA_DIR)
                         with trainer.STATE_LOCK:
-                            self.assertEqual(trainer.STATE, seeded_state)
+                            before_state = copy.deepcopy(trainer.STATE)
+                        response = client.request(method, path)
+                        self.assertNotEqual(response.status_code, 409)
+                        with trainer.STATE_LOCK:
+                            self.assertEqual(trainer.STATE, before_state)
+                        self.assertEqual(self._legacy_data_tree_snapshot(trainer.DATA_DIR), before_tree)
         finally:
+            if previous_seed is None:
+                seed.unlink(missing_ok=True)
+            else:
+                seed.write_bytes(previous_seed)
             with trainer.STATE_LOCK:
                 trainer.STATE.clear()
                 trainer.STATE.update(original_state)
+
+    def test_studio_mode_default_denies_every_non_studio_api_route(self):
+        import trainer_server as trainer
+        from fastapi.testclient import TestClient
+
+        if trainer.TRAINER_LEGACY_MODE:
+            self.skipTest("explicit legacy-mode process")
+
+        routes = self._legacy_api_routes(trainer.app)
+        self.assertTrue(routes)
+        with TestClient(trainer.app) as client:
+            for route in routes:
+                if route.path in trainer.LEGACY_STUDIO_READONLY_PATHS:
+                    continue
+                path = re.sub(r"{[^}]+}", "not-a-real-item", route.path)
+                for method in sorted(route.methods):
+                    with self.subTest(method=method, path=route.path):
+                        response = client.request(method, path)
+                        self.assertEqual(response.status_code, 409)
+                        self.assertIn("Legacy singleton actions are disabled in Studio mode", response.text)
 
     def test_every_legacy_mutation_is_conflicted_in_studio_and_not_conflicted_in_legacy_mode(self):
         import trainer_server as trainer
