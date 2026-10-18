@@ -660,3 +660,50 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(self.client.files['leader']['microwakeword/hello_robot.tflite'],
                          (Path(old.path) / 'hello_robot.tflite').read_bytes())
         self.assertNotEqual(old.id, new.id)
+
+    def test_quarantined_standalone_cannot_bypass_block_by_becoming_synced_follower(self):
+        version = self.train()
+        self.client.files['solo'] = {}
+        self.client.staged['solo'] = {'unowned.onnx': b'foreign-staging'}
+        self.service.publish(version.id)
+        self.assertEqual(self.status()['solo'].state, 'staging_blocked')
+        with self.runtime.devices.store.transaction() as db:
+            db.execute("UPDATE devices SET role='follower',leader_id='leader',model_eligible=1 WHERE id='solo'")
+        self.client.roles['solo'] = (False, 'leader')
+        self.client.files['solo'] = dict(self.client.files['leader'])
+        self.client.calls.clear()
+        self.service.publish(version.id)
+        self.assertEqual(self.status()['solo'].state, 'staging_blocked')
+        self.assertEqual(self.status()['solo'].error_code, 'staging_unowned')
+        self.assertEqual(self.status()['solo'].manifest_state, 'unverified')
+        self.assertEqual(self.status()['solo'].refresh_state, 'pending')
+        self.service.rollback(self.word.id, version.id)
+        self.service.retry_due(self.now + timedelta(days=1))
+        self.assertEqual(self.status()['solo'].state, 'staging_blocked')
+        self.assertEqual([p for d, p, _ in self.client.calls if d == 'solo'], [])
+        with self.runtime.devices.store.transaction() as db:
+            self.assertEqual(db.execute("SELECT reason FROM deployment_staging_blocks WHERE device_id='solo'").fetchone()[0],
+                             'staging_unowned')
+
+    def test_quarantine_reconciliation_and_attempt_guard_apply_to_every_role_and_eligibility(self):
+        self.train()
+        self.client.files['follow'] = dict(self.client.files['leader'])
+        self.service.retry_due(self.now + timedelta(days=1))
+        self.assertEqual(self.status()['follow'].state, 'synced')
+        with self.runtime.devices.store.transaction() as db:
+            db.execute("INSERT INTO deployment_staging_blocks VALUES ('follow','staging_unowned')")
+        self.client.calls.clear()
+        for active, eligible in ((1, 1), (1, 0), (0, 0), (1, 1)):
+            with self.subTest(active=active, eligible=eligible):
+                with self.runtime.devices.store.transaction() as db:
+                    db.execute("UPDATE devices SET active=?,model_eligible=? WHERE id='follow'", (active, eligible))
+                self.service.reconcile()
+                self.assertEqual(self.status()['follow'].state, 'staging_blocked')
+                # Defense in depth at the mutation entrypoint, even if a caller
+                # holds an old pending publication snapshot or exhausted budget.
+                p = self.status()['follow']
+                from dataclasses import replace
+                result = self.service._attempt(replace(p, state='pending', attempts=self.service.max_attempts), self.now)
+                self.assertEqual(result.state, 'staging_blocked')
+                self.assertEqual(result.error_code, 'staging_unowned')
+        self.assertEqual(self.client.calls, [])

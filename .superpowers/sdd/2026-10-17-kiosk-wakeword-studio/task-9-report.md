@@ -271,3 +271,36 @@ env DATA_DIR=/tmp/opencode/wakeword-studio-baseline /tmp/opencode/wakeword-studi
 ```
 
 Full suite exit **0**: **`Ran 316 tests in 27.998s`, `OK (skipped=1)`**. Only the explicitly opted-in live mutation test was skipped; existing socket ResourceWarning appeared during the passing `test_inactive_credentials_route_still_rejects_identity_mismatch_and_bad_token`. `git diff --check` passed. No production/test changes after these runs; only this report and scoped commit operations follow. The new commit/head is returned in the final status.
+
+---
+
+## Task 9 review fix — round 2: quarantine survives role transitions
+
+Verified the new Important finding: both terminal reconciliation and the mutation-attempt guard restricted persistent staging quarantine to direct targets. An otherwise eligible follower with matching leader hashes could therefore be refreshed/reported `synced` after its former standalone identity had been quarantined. The original round-1 findings remain addressed; this fix closes the new role-transition bypass.
+
+Changes are scoped to `studio/deployment.py` and two new deployment regressions:
+
+- `_enroll` now gives persistent `deployment_staging_blocks` **first precedence for every device identity**, regardless of current leader/standalone/follower role, activity or Voice Satellite eligibility. Quarantine cannot be masked by `inactive` / `not_covered`, reopened through eligibility transitions, or silently become successful follower synchronization. Reconciliation is local and makes no kiosk requests.
+- `_attempt` checks persistent quarantine **before** role/activity/profile/credential checks, attempt-budget handling, archive/manifest probes, uploads, commits or refresh. It returns `staging_blocked` with the retained cause, unverified manifest/runtime, pending refresh, and no retry due time. A stale pending snapshot or exhausted attempt budget cannot bypass or obscure the block.
+- Regression creates **actual fixture-side unexpected acceptance** on a standalone, then changes it to an eligible follower with exactly matching synchronized desired hashes. Republish, rollback and retry remain blocked, the persistent cause survives, and there are **zero requests** to that device (including no uploads or cache refresh).
+- Regression starts with a synced follower, persists quarantine, and reconciles eligibility/activity transitions (eligible → excluded → inactive → eligible). All remain blocked without network calls. It also exercises `_attempt` directly with a stale pending/exhausted snapshot to verify the defense-in-depth entry guard.
+
+The explicit operational/operator-remediation boundary is unchanged: initially clean and exclusively trainer-owned staging is required; there is no automatic clean check, discard, quarantine release, selected-slot mutation or custom-model deletion. Changing fleet roles is **not remediation**. No schema/API change, agents, satellite edits or LAN mutations were made.
+
+### Actual RED → GREEN evidence
+
+All commands use `env DATA_DIR=/tmp/opencode/wakeword-studio-baseline /tmp/opencode/wakeword-studio-venv/bin/python -m unittest discover -s tests`, with stdout/stderr redirected to the named log:
+
+| Log under `/tmp/opencode/` | Suffix / actual output |
+| --- | --- |
+| `task-9-round2-red.log` | `-p 'test_studio_deployment.py' -v`: **Ran 32 tests in 3.099s; FAILED (failures=5)**. Eligible republished follower was incorrectly `synced`; four activity/profile subtests showed quarantine missing/masked as `synced`, `not_covered`, `inactive`, or `pending`. |
+| `task-9-round2-deploy-green.log` | `-p 'test_studio_deployment*.py' -v`: **Ran 37 tests in 4.196s; OK (skipped=1)**. |
+| `task-9-round2-devices-green.log` | `-p 'test_studio_devices.py' -v`: **Ran 15 tests in 8.330s; OK**. |
+
+Full verification (once for this round):
+
+```sh
+env DATA_DIR=/tmp/opencode/wakeword-studio-baseline /tmp/opencode/wakeword-studio-venv/bin/python -m unittest discover -s tests -v > /tmp/opencode/task-9-round2-full-tests.log 2>&1
+```
+
+Exit **0**: **`Ran 318 tests in 28.373s`, `OK (skipped=1)`**. The skip remains the separately opted-in live mutation contract. Existing socket ResourceWarning occurred during the passing `test_inactive_credentials_route_still_rejects_identity_mismatch_and_bad_token`; it was not suppressed. `git diff --check` passed. No production/test changes follow full verification; only this report and scoped staging/commit operations. Commit/head is returned in the final status.

@@ -149,9 +149,11 @@ class DeploymentService:
                           'JOIN devices d ON d.id=p.device_id LEFT JOIN deployment_staging_blocks b ON b.device_id=p.device_id '
                           'WHERE p.word_id=?', (word_id,)).fetchall()
         for row in rows:
-            blocked = ('inactive' if not row['active'] else
-                       'not_covered' if row['role'] == 'follower' and not row['model_eligible'] else
-                       'staging_blocked' if row['role'] != 'follower' and row['staging_reason'] else None)
+            # Quarantine belongs to the stable device identity, not its current
+            # fleet role. Neither profile edits nor membership changes release it.
+            blocked = ('staging_blocked' if row['staging_reason'] else
+                       'inactive' if not row['active'] else
+                       'not_covered' if row['role'] == 'follower' and not row['model_eligible'] else None)
             if blocked and row['state'] != blocked:
                 db.execute("UPDATE publications SET state=?,next_retry=NULL,manifest_state='unverified',"
                            "refresh_state='pending',runtime_state='unverified',error_code=?,updated_at=? "
@@ -320,6 +322,14 @@ class DeploymentService:
             db.execute('DELETE FROM deployment_staging WHERE device_id=?', (p.device_id,))
 
     def _attempt(self, p, now):
+        # Check before role/eligibility, credentials, budgets or any remote work.
+        # Becoming a follower must not turn a quarantined uploader into a
+        # refresh-only success. Only explicit operator remediation can release it.
+        with self.store.transaction() as db:
+            blocked = db.execute('SELECT reason FROM deployment_staging_blocks WHERE device_id=?', (p.device_id,)).fetchone()
+        if blocked:
+            return self._save(p, state='staging_blocked', error_code=blocked[0], manifest_state='unverified',
+                              refresh_state='pending', runtime_state='unverified', next_retry=None)
         if p.attempts >= self.max_attempts:
             return self._save(p, state='exhausted', error_code='interrupted_attempt', next_retry=None)
         device = self.devices.get(p.device_id)
@@ -334,11 +344,6 @@ class DeploymentService:
         # before it can persist a result/backoff. `pending` is always eligible.
         p = self._save(p, state='pending', attempts=p.attempts + 1, next_retry=None)
         try:
-            if not indirect:
-                with self.store.transaction() as db:
-                    blocked = db.execute('SELECT reason FROM deployment_staging_blocks WHERE device_id=?', (p.device_id,)).fetchone()
-                if blocked:
-                    raise StagingFailure(blocked[0])
             version = self.version(p.desired_version, p.word_id)
             content = self.artifacts(version)
             expected = self._expected(content)
