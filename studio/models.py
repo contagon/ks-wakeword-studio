@@ -8,6 +8,36 @@ class NotFound(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class DatasetInput:
+    id: str
+    path: str
+    representation: str
+    split: str
+    adapter: str
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class Dataset:
+    id: str
+    name: str
+    description: str
+    source: str
+    license: str
+    representation: str
+    split: str
+    adapter: str
+    purpose: str
+    download_bytes: int | None
+    installed_bytes: int | None
+    fingerprint: str | None
+    selected: bool
+    status: str
+    job_id: str | None
+    error_code: str | None
+
+
 class Conflict(Exception):
     pass
 

@@ -8,12 +8,14 @@ source "${PROGDIR}/shell.functions"
 
 if [ "${HELP}" == "true" ] ; then
     cat <<EOF >&2
-Usage: $0 [ --cleanup-archives ] [ --data-dir=<data_dir> ]
+Usage: $0 [ --cleanup-archives ] [ --data-dir=<data_dir> ] [ --dataset=<id> ]
 
     --cleanup-archives    : Automatically clean up any downloaded archvies after
                             extraction.
     <data_dir>            : Path to the data directory.
                           :    Default: ${DATA_DIR}
+    --dataset=<id>        : Install only speech, no_speech, dinner_party, or
+                            dinner_party_eval (held-out evaluation only).
 
 EOF
     exit 1
@@ -26,6 +28,13 @@ mkdir -p ./negative_datasets || :
 
 NEGATIVE_DATASET_URL="https://huggingface.co/datasets/kahrendt/microwakeword/resolve/main"
 declare -a NEGATIVE_DATASETS=( dinner_party dinner_party_eval no_speech speech )
+# Optional single-dataset legacy installation; default remains all four.
+if [ -n "${DATASET:-}" ]; then
+    case "${DATASET}" in
+        dinner_party|dinner_party_eval|no_speech|speech) NEGATIVE_DATASETS=( "${DATASET}" ) ;;
+        *) echo 'Unsupported classifier dataset' >&2; exit 1 ;;
+    esac
+fi
 AUDIO_FILECOUNT="./downloads/negative_filecount"
 
 declare -A filecounts=( [dinner_party.zip]=0 [dinner_party_eval.zip]=0 [no_speech.zip]=0 [speech.zip]=0 )
@@ -82,4 +91,3 @@ if "${CLEANUP_ARCHIVES}" ; then
 fi
 
 echo "   Negative datasets complete"
-

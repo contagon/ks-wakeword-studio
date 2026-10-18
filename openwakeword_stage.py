@@ -104,9 +104,21 @@ def prepare_openwakeword_stage(
     trained_dir: Path,
     environ: Mapping[str, str] | None = None,
     log=lambda _line: None,
+    dataset_manifest: Path | None = None,
 ) -> tuple[list[str], Path, dict[str, str], Path]:
     base_env = dict(os.environ if environ is None else environ)
-    trainer_root = ensure_openwakeword_trainer(data_dir, environ=base_env, log=log)
+    if dataset_manifest is None:
+        trainer_root = ensure_openwakeword_trainer(data_dir, environ=base_env, log=log)
+    else:
+        from studio.datasets import oww_dataset_config, read_dataset_manifest
+        oww_dataset_config({}, read_dataset_manifest(dataset_manifest))
+        # Task-8 adapter provisions dependencies through its owned runner. Never
+        # silently run upstream's shell setup/download-defaults in manifest mode.
+        trainer_root = Path(base_env.get('TATER_OWW_TRAINER_DIR') or
+                            base_env.get('TATER_OWW_TRAINER_CACHE') or
+                            Path(data_dir).resolve() / 'tools/openwakeword-trainer').resolve()
+        if not _valid_trainer_root(trainer_root):
+            raise RuntimeError('Explicit datasets require a prepared pinned openWakeWord trainer')
     oww_root = Path(data_dir).resolve() / "openwakeword"
     staging_dir = oww_root / "publish-staging" / safe_word
     if staging_dir.exists():
@@ -150,6 +162,10 @@ def prepare_openwakeword_stage(
     ]
     if any(Path(personal_dir).glob("*.wav")) and any(Path(negative_dir).glob("*.wav")):
         cmd.append("--train-verifier")
+    if dataset_manifest is not None:
+        python = base_env.get('OWW_PYTHON_BIN') or str(oww_root / '.venv/bin/python')
+        cmd = [python, str(Path(__file__).resolve().parent / 'cli/oww_dataset_trainer.py'),
+               str(trainer_root / 'scripts/train_openwakeword.py'), str(Path(dataset_manifest).resolve()), *cmd[2:]]
     Path(trained_dir).mkdir(parents=True, exist_ok=True)
     return cmd, trainer_root, env, staging_dir
 

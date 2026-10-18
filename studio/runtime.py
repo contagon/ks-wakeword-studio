@@ -12,6 +12,7 @@ from studio.workspaces import WorkspaceService
 from studio.jobs import JobQueue, WorkerPool, utc_now
 from studio.schedules import ScheduleService
 from studio.models import WorkerHealth
+from studio.datasets import DatasetService
 
 
 class StudioRuntime:
@@ -28,6 +29,7 @@ class StudioRuntime:
         self._jobs: JobQueue | None = None
         self._schedules: ScheduleService | None = None
         self._workers: WorkerPool | None = None
+        self._datasets: DatasetService | None = None
 
     def startup(self) -> None:
         with self._lock:
@@ -43,9 +45,11 @@ class StudioRuntime:
                 self._devices = DeviceService(store)
                 self._collection = CollectionService(store, self._samples, self._devices, clock=self.clock)
                 self._jobs = JobQueue(store, clock=self.clock, groups=self.groups)
+                self._datasets = DatasetService(store, self._jobs)
                 self._schedules = ScheduleService(store, self._jobs, clock=self.clock)
                 self._workers = WorkerPool(self._jobs, clock=self.clock, runner=self.runner, schedules=self._schedules)
                 self._workers.register('scrape', 'collection', self._collect_job)
+                self._workers.register('download', 'download', self._datasets.execute)
                 self._jobs.recover()
                 self._store = store
             except BaseException:
@@ -58,6 +62,12 @@ class StudioRuntime:
         assert self._collection is not None
         result = self._collection.run(job.payload.get('device_ids'))
         return {'run_id': result.id, 'status': result.status}
+
+    @property
+    def datasets(self) -> DatasetService:
+        self.startup()
+        assert self._datasets is not None
+        return self._datasets
 
     @property
     def jobs(self) -> JobQueue:
@@ -131,3 +141,4 @@ class StudioRuntime:
                 self._jobs = None
                 self._schedules = None
                 self._workers = None
+                self._datasets = None

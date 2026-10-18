@@ -4,7 +4,7 @@ set -e
 PROGPATH=$(realpath "$0")
 PROGDIR=$(dirname "${PROGPATH}")
 
-KNOWN_ARGS=( training-steps samples data-dir language artifact-slug )
+KNOWN_ARGS=( training-steps samples data-dir language artifact-slug dataset-manifest )
 source "${PROGDIR}/shell.functions"
 WAKE_WORD="${POSITIONAL_ARGS[0]}"
 
@@ -26,6 +26,8 @@ Usage: $0 [ --samples=<samples> ] [ --training-steps=<steps> ]
 --training-steps:   Number of training steps.
                     Default: ${DEFAULT_TRAINING_STEPS}
 
+--dataset-manifest: Explicit version-1 dataset JSON. Replaces stock classifier negatives.
+
 <wake_word>:        The word to train spelled phonetically.
                     Required.
 
@@ -38,6 +40,9 @@ fi
 
 WORK_DIR="${DATA_DIR}/work"
 TRAINING_DS="${DATA_DIR}/training_datasets"
+if [ -n "${DATASET_MANIFEST:-}" ]; then
+    DATASET_MANIFEST="$(realpath "${DATASET_MANIFEST}")"
+fi
 
 [ ${#POSITIONAL_ARGS[@]} -eq 2 ] && WAKE_WORD_TITLE="${POSITIONAL_ARGS[1]}"
 
@@ -119,8 +124,10 @@ check_directories() {
     done
 }
 
-check_directories ${WORK_DIR}/wake_word_samples_augmented \
-    ${TRAINING_DS}/negative_datasets/{speech,dinner_party,no_speech,dinner_party_eval}
+check_directories "${WORK_DIR}/wake_word_samples_augmented"
+if [ -z "${DATASET_MANIFEST:-}" ]; then
+    check_directories "${TRAINING_DS}"/negative_datasets/{speech,dinner_party,no_speech,dinner_party_eval}
+fi
 
 # Personal features are optional, but if present they MUST have /training
 PERSONAL_FEATURES_DIR="${WORK_DIR}/personal_augmented_features"
@@ -254,6 +261,11 @@ EOF
   perl -0777 -i -pe "s#__REVIEWED_NEGATIVE_FEATURE_MARKER__#${reviewed_negative_block}#g" "${YAML_PATH}"
 else
   sed -i -e "/__REVIEWED_NEGATIVE_FEATURE_MARKER__/d" "${YAML_PATH}"
+fi
+
+if [ -n "${DATASET_MANIFEST:-}" ]; then
+    python "${PROGDIR}/dataset_config.py" "${DATASET_MANIFEST}" "${YAML_PATH}" \
+        --reviewed-negative-dir "${REVIEWED_NEGATIVE_FEATURES_DIR}"
 fi
 
 echo "   Wrote training_parameters.yaml"

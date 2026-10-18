@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 from studio.models import (CollectionRun, Conflict, CredentialsRequired, Device, IdentityMismatch, SourceMapping,
                            RemoteRejected, RemoteUnavailable, NotFound, Page, Recording, Sample, SampleQuery,
-                           ValidationError, Wakeword, WakewordUpdate, Job, Schedule, WorkerHealth)
+                           ValidationError, Wakeword, WakewordUpdate, Job, Schedule, WorkerHealth, Dataset)
 from studio.runtime import StudioRuntime
 from studio.storage import AUDIO_MIMES
 
@@ -107,6 +107,11 @@ class JobBody(BaseModel):
     dedupe_key: str | None = None
 
 
+class DatasetSelectionBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    dataset_ids: list[str]
+
+
 def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
                  label: str | None = None, device_id: str | None = None,
                  near_miss: bool | None = None, source: str | None = None,
@@ -116,6 +121,20 @@ def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=1
 
 def create_router(runtime: StudioRuntime) -> APIRouter:
     router = APIRouter(prefix="/api/studio", route_class=StudioRoute)
+
+    @router.get('/wakewords/{word_id}/datasets', response_model=Page[Dataset])
+    def datasets(word_id: str, search: str = '', status: str | None = None,
+                 offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)) -> Page[Dataset]:
+        return runtime.datasets.list(word_id, search, status, offset, limit)
+
+    @router.put('/wakewords/{word_id}/datasets', response_model=Page[Dataset])
+    def select_datasets(word_id: str, body: DatasetSelectionBody) -> Page[Dataset]:
+        runtime.datasets.select(word_id, body.dataset_ids)
+        return runtime.datasets.list(word_id)
+
+    @router.post('/datasets/{dataset_id}/download', response_model=Job, status_code=201)
+    def download_dataset(dataset_id: str) -> Job:
+        return runtime.datasets.download(dataset_id)
 
     @router.get('/schedules', response_model=list[Schedule])
     def schedules() -> list[Schedule]:

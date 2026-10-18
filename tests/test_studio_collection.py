@@ -350,9 +350,10 @@ class CollectionTests(unittest.TestCase):
         self.store.close()
         path = self.root / 'studio/studio.sqlite3'
         with sqlite3.connect(path) as db:
-            # Reconstruct an actual v3 schema, including removal of later v5
+            # Reconstruct an actual v3 schema, including removal of later v5/v6
             # tables now created by setUp's Store.open().
-            for table in ('studio_schedule_occurrences', 'studio_schedules', 'studio_jobs',
+            for table in ('studio_dataset_selections', 'studio_dataset_installations',
+                          'studio_schedule_occurrences', 'studio_schedules', 'studio_jobs',
                           'collection_attempts', 'collection_devices', 'collection_runs', 'source_mappings'):
                 db.execute('DROP TABLE ' + table)
             db.execute('PRAGMA user_version=3')
@@ -360,5 +361,5 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(WorkspaceService(self.store).get(self.word.id).phrase, 'Hello')
         self.assertEqual(DeviceService(self.store).get('a').id, 'a')
         with self.store.transaction() as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 5)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 6)
             self.assertEqual(db.execute('SELECT id FROM recordings').fetchone()[0], recording.id)
