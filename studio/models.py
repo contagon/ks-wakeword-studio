@@ -56,6 +56,24 @@ class Job:
 
 
 @dataclass(frozen=True)
+class LoopHealth:
+    component: str
+    status: str = 'pending'
+    failure_count: int = 0
+    consecutive_failures: int = 0
+    last_error_code: str | None = None
+    last_failure_at: str | None = None
+    last_success_at: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkerHealth:
+    workers_started: bool
+    degraded: bool
+    loops: list[LoopHealth]
+
+
+@dataclass(frozen=True)
 class Device:
     # The stable kiosk identity, never an address or display name.
     id: str

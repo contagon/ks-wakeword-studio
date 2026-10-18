@@ -14,10 +14,11 @@ import subprocess
 import sys
 import threading
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-from studio.models import Conflict, Job, NotFound, Page, ValidationError
+from studio.models import Conflict, Job, LoopHealth, NotFound, Page, ValidationError, WorkerHealth
 from studio.storage import open_directory
 
 RESOURCES = {'train': 'gpu', 'generation': 'gpu', 'scrape': 'collection', 'download': 'download'}
@@ -394,6 +395,37 @@ class WorkerPool:
         self.handlers = {}
         self.stop_event = threading.Event()
         self.threads = []
+        self._health_lock = threading.Lock()
+        components = ['gpu', 'collection', 'download'] + (['scheduler'] if schedules is not None else [])
+        self._health = {component: LoopHealth(component) for component in components}
+
+    def health(self) -> WorkerHealth:
+        """Process-local snapshot, independent of SQLite availability.
+
+        Pending/stopped workers are not a readiness guarantee. Failure history
+        survives successful retries, but resets with a new runtime/process.
+        """
+        with self._health_lock:
+            loops = list(self._health.values())
+            return WorkerHealth(bool(self.threads), any(loop.status == 'error' for loop in loops), loops)
+
+    def _record_loop_result(self, component, *, failed):
+        try:
+            timestamp = aware_utc(self.clock()).isoformat()
+        except Exception:
+            # A broken injected clock must not take down error reporting too.
+            timestamp = utc_now().isoformat()
+        with self._health_lock:
+            previous = self._health[component]
+            if failed:
+                code = 'scheduler_tick_failed' if component == 'scheduler' else 'resource_loop_failed'
+                self._health[component] = replace(previous, status='error', last_error_code=code,
+                                                 failure_count=min(previous.failure_count + 1, 2147483647),
+                                                 consecutive_failures=min(previous.consecutive_failures + 1, 2147483647),
+                                                 last_failure_at=timestamp)
+            else:
+                self._health[component] = replace(previous, status='ok', consecutive_failures=0,
+                                                 last_success_at=timestamp)
 
     def register(self, kind, resource, handler):
         if RESOURCES.get(kind) != resource or not callable(handler):
@@ -430,11 +462,13 @@ class WorkerPool:
     def _loop(self, resource):
         while not self.stop_event.is_set():
             try:
-                if self.run_once(resource):
-                    continue
+                worked = self.run_once(resource)
             except Exception:
-                # Retry boundedly without leaking arbitrary exception text.
-                pass
+                self._record_loop_result(resource, failed=True)
+            else:
+                self._record_loop_result(resource, failed=False)
+                if worked:
+                    continue
             self.stop_event.wait(0.25)
 
     def _schedule_loop(self):
@@ -442,7 +476,9 @@ class WorkerPool:
             try:
                 self.schedules.tick(self.clock())
             except Exception:
-                pass
+                self._record_loop_result('scheduler', failed=True)
+            else:
+                self._record_loop_result('scheduler', failed=False)
             self.stop_event.wait(0.25)
 
     def start(self):

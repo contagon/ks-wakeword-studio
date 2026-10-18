@@ -11,6 +11,7 @@ from studio.samples import SampleService
 from studio.workspaces import WorkspaceService
 from studio.jobs import JobQueue, WorkerPool, utc_now
 from studio.schedules import ScheduleService
+from studio.models import WorkerHealth
 
 
 class StudioRuntime:
@@ -78,6 +79,11 @@ class StudioRuntime:
 
     def start_workers(self) -> None:
         self.workers.start()
+
+    def health(self) -> WorkerHealth:
+        # Do not initialize/query SQLite to report a worker's SQL outage.
+        with self._lock:
+            return self._workers.health() if self._workers is not None else WorkerHealth(False, False, [])
 
     @property
     def collection(self) -> CollectionService:

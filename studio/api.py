@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 from studio.models import (CollectionRun, Conflict, CredentialsRequired, Device, IdentityMismatch, SourceMapping,
                            RemoteRejected, RemoteUnavailable, NotFound, Page, Recording, Sample, SampleQuery,
-                           ValidationError, Wakeword, WakewordUpdate, Job, Schedule)
+                           ValidationError, Wakeword, WakewordUpdate, Job, Schedule, WorkerHealth)
 from studio.runtime import StudioRuntime
 from studio.storage import AUDIO_MIMES
 
@@ -132,6 +132,10 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.get('/jobs', response_model=Page[Job])
     def jobs(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)) -> Page[Job]:
         return runtime.jobs.list(offset, limit)
+
+    @router.get('/jobs/health', response_model=WorkerHealth)
+    def worker_health() -> WorkerHealth:
+        return runtime.health()
 
     @router.get('/jobs/{job_id}', response_model=Job)
     def job(job_id: str) -> Job:

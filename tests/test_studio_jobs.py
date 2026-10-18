@@ -277,6 +277,98 @@ class JobTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_each_background_loop_reports_repeated_failure_then_recovery_at_bounded_cadence(self):
+        import sqlite3
+        from datetime import timedelta
+        from studio.schedules import ScheduleService
+        for component in ('gpu', 'collection', 'download', 'scheduler'):
+            with self.subTest(component=component):
+                self.now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+                schedules = ScheduleService(self.store, self.jobs, clock=lambda: self.now)
+                pool = WorkerPool(self.jobs, clock=lambda: self.now, schedules=schedules)
+                snapshots, delays = [], []
+                original_transaction = self.store.transaction
+                def transaction():
+                    if len(snapshots) < 2:
+                        raise sqlite3.OperationalError('Authorization: Bearer private-token')
+                    return original_transaction()
+                def wait(delay):
+                    delays.append(delay)
+                    snapshots.append(pool.health())
+                    self.now += timedelta(seconds=1)
+                    if len(snapshots) == 3:
+                        pool.stop_event.set()
+                with patch.object(self.store, 'transaction', side_effect=transaction), \
+                     patch.object(pool.stop_event, 'wait', side_effect=wait):
+                    if component == 'scheduler':
+                        pool._schedule_loop()
+                    else:
+                        pool._loop(component)
+                self.assertEqual(delays, [0.25, 0.25, 0.25])
+                states = [next(loop for loop in health.loops if loop.component == component) for health in snapshots]
+                self.assertEqual([state.status for state in states], ['error', 'error', 'ok'])
+                self.assertEqual([state.failure_count for state in states], [1, 2, 2])
+                self.assertEqual([state.consecutive_failures for state in states], [1, 2, 0])
+                self.assertEqual([health.degraded for health in snapshots], [True, True, False])
+                self.assertEqual(states[-1].last_failure_at, '2026-01-01T00:00:01+00:00')
+                self.assertEqual(states[-1].last_success_at, '2026-01-01T00:00:02+00:00')
+                expected_code = 'scheduler_tick_failed' if component == 'scheduler' else 'resource_loop_failed'
+                self.assertEqual(states[-1].last_error_code, expected_code)
+                self.assertEqual(len(snapshots[-1].loops), 4)
+                self.assertNotIn('private-token', repr(snapshots))
+                snapshots[-1].loops.clear()
+                self.assertEqual(len(pool.health().loops), 4)
+
+    def test_failure_counters_saturate_without_unbounded_error_history(self):
+        from dataclasses import replace
+        pool = WorkerPool(self.jobs, clock=lambda: self.now)
+        # Model an already long-running failing process without billions of iterations.
+        pool._health['gpu'] = replace(pool.health().loops[0], failure_count=2147483646,
+                                      consecutive_failures=2147483646)
+        count = 0
+        def wait(delay):
+            nonlocal count
+            count += 1
+            if count == 3:
+                pool.stop_event.set()
+        with patch.object(self.jobs, 'recover', side_effect=RuntimeError('secret')), \
+             patch.object(pool.stop_event, 'wait', side_effect=wait):
+            pool._loop('gpu')
+        gpu = pool.health().loops[0]
+        self.assertEqual((gpu.failure_count, gpu.consecutive_failures), (2147483647, 2147483647))
+        self.assertEqual(len(pool.health().loops), 3)
+        self.assertNotIn('secret', repr(pool.health()))
+
+    def test_scheduler_recovery_admits_due_work_and_keeps_failure_history(self):
+        import sqlite3
+        from datetime import timedelta
+        from studio.schedules import ScheduleService
+        schedules = ScheduleService(self.store, self.jobs, clock=lambda: self.now)
+        schedules.save('scrape', '* * * * *', 'UTC', True)
+        self.now += timedelta(minutes=1)
+        pool = WorkerPool(self.jobs, clock=lambda: self.now, schedules=schedules)
+        original_transaction = self.store.transaction
+        attempts = []
+        def transaction():
+            if not attempts:
+                raise sqlite3.OperationalError('secret outage')
+            return original_transaction()
+        def wait(delay):
+            attempts.append(pool.health())
+            self.now += timedelta(minutes=1)
+            if len(attempts) == 2:
+                pool.stop_event.set()
+        with patch.object(self.store, 'transaction', side_effect=transaction), \
+             patch.object(pool.stop_event, 'wait', side_effect=wait):
+            pool._schedule_loop()
+        self.assertEqual(self.jobs.list().total, 1)
+        self.assertEqual(self.jobs.list().items[0].kind, 'scrape')
+        self.assertEqual([health.degraded for health in attempts], [True, False])
+        scheduler = attempts[-1].loops[-1]
+        self.assertEqual((scheduler.failure_count, scheduler.consecutive_failures), (1, 0))
+        self.assertEqual(scheduler.last_failure_at, '2026-01-01T00:01:00+00:00')
+        self.assertEqual(scheduler.last_success_at, '2026-01-01T00:02:00+00:00')
+
 
 class ChildGroupTests(unittest.TestCase):
     def setUp(self):
@@ -324,6 +416,55 @@ class ChildGroupTests(unittest.TestCase):
 
 
 class JobBoundaryTests(unittest.TestCase):
+    def test_health_before_startup_does_not_initialize_storage_or_claim_readiness(self):
+        from studio.api import create_router
+        with tempfile.TemporaryDirectory() as root:
+            runtime = StudioRuntime(Path(root))
+            app = FastAPI()
+            app.include_router(create_router(runtime))
+            with TestClient(app) as api, patch.object(Store, 'open', side_effect=AssertionError('Unexpected DB access')):
+                response = api.get('/api/studio/jobs/health')
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json(), {'workers_started': False, 'degraded': False, 'loops': []})
+                self.assertFalse((Path(root) / 'studio').exists())
+
+    def test_health_route_remains_readable_during_sql_failure_and_exposes_recovery(self):
+        import sqlite3
+        from datetime import timedelta
+        from studio.api import create_router
+        with tempfile.TemporaryDirectory() as root:
+            now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            runtime = StudioRuntime(Path(root), clock=lambda: now)
+            app = FastAPI()
+            app.include_router(create_router(runtime))
+            try:
+                pool = runtime.workers
+                with TestClient(app) as api:
+                    # Run one deterministic failed iteration, without real threads or waits.
+                    with patch.object(runtime._store, 'transaction', side_effect=sqlite3.OperationalError('Bearer secret-sql')), \
+                         patch.object(pool.stop_event, 'wait', side_effect=lambda delay: pool.stop_event.set()):
+                        pool._loop('gpu')
+                        response = api.get('/api/studio/jobs/health')
+                        self.assertEqual(response.status_code, 200, response.text)
+                        failed = response.json()
+                        self.assertTrue(failed['degraded'])
+                        gpu = next(item for item in failed['loops'] if item['component'] == 'gpu')
+                        self.assertEqual(gpu['last_error_code'], 'resource_loop_failed')
+                        self.assertEqual(gpu['last_failure_at'], now.isoformat())
+                        self.assertNotIn('secret-sql', response.text)
+                    pool.stop_event.clear()
+                    now += timedelta(seconds=1)
+                    with patch.object(pool.stop_event, 'wait', side_effect=lambda delay: pool.stop_event.set()):
+                        pool._loop('gpu')
+                    recovered = api.get('/api/studio/jobs/health').json()
+                    self.assertFalse(recovered['degraded'])
+                    gpu = next(item for item in recovered['loops'] if item['component'] == 'gpu')
+                    self.assertEqual((gpu['status'], gpu['failure_count'], gpu['consecutive_failures']), ('ok', 1, 0))
+                    self.assertEqual(gpu['last_success_at'], now.isoformat())
+                    self.assertEqual(runtime.health().loops[0].component, 'gpu')
+            finally:
+                runtime.shutdown()
+
     def test_runtime_and_http_job_schedule_boundaries(self):
         from studio.api import create_router
         with tempfile.TemporaryDirectory() as root:
