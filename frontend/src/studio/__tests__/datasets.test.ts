@@ -15,6 +15,7 @@ let delayDatasetSave = false;
 let resolveDatasetSave: ((response: Response) => void) | undefined;
 let delayDownload = false;
 let resolveDownload: ((response: Response) => void) | undefined;
+function resolveDeferred(resolver: ((response: Response) => void) | undefined, response: Response): void { expect(resolver).toBeTypeOf("function"); if (resolver) resolver(response); }
 function host() { return { components: { NegativeDatasetsPage }, setup() { workspace = createWorkspace(useStudioRoutes()); provide(workspaceKey, workspace); }, template: "<NegativeDatasetsPage />" }; }
 
 beforeEach(() => {
@@ -97,4 +98,31 @@ describe("NegativeDatasetsPage", () => {
     expect(resolveDownload).toBeTypeOf("function"); resolveDownload?.(json({ id: "download-3", kind: "download", word_id: null, resource: "download", payload: { dataset_id: "set-3" }, status: "running", created_at: "", started_at: "", finished_at: null, result: {} }, 201)); await flushPromises();
     expect(ui.find('[data-job-id="download-3"]').exists()).toBe(false);
     ui.unmount();
+  });
+
+  it("settles independently launched save and download mutations in either completion order", async () => {
+    async function startBoth(ui: ReturnType<typeof mount>): Promise<void> {
+      delayDatasetSave = true; delayDownload = true;
+      await ui.get('[data-action="save-datasets"]').trigger("click"); await flushPromises();
+      const download = ui.findAll("article").find(article => article.find('input[data-dataset-id="set-3"]').exists())?.find("button");
+      expect(download?.exists()).toBe(true); await download?.trigger("click"); await flushPromises();
+      expect(resolveDatasetSave).toBeTypeOf("function"); expect(resolveDownload).toBeTypeOf("function");
+    }
+    function expectSettled(ui: ReturnType<typeof mount>): void {
+      expect((ui.get('[data-action="save-datasets"]').element as HTMLButtonElement).disabled).toBe(false);
+      const download = ui.findAll("article").find(article => article.find('input[data-dataset-id="set-3"]').exists())?.find("button");
+      expect((download?.element as HTMLButtonElement).disabled).toBe(false);
+      expect(ui.find('[data-job-id="download-3"]').exists()).toBe(true);
+    }
+
+    let ui = mount(host()); await flushPromises(); await flushPromises(); await startBoth(ui);
+    resolveDeferred(resolveDatasetSave, json({ items: [], total: 0, offset: 0, limit: 50 })); await flushPromises();
+    resolveDeferred(resolveDownload, json({ id: "download-3", kind: "download", word_id: null, resource: "download", payload: { dataset_id: "set-3" }, status: "running", created_at: "", started_at: "", finished_at: null, result: {} }, 201)); await flushPromises();
+    expectSettled(ui); ui.unmount();
+
+    delayDatasetSave = false; resolveDatasetSave = undefined; delayDownload = false; resolveDownload = undefined;
+    ui = mount(host()); await flushPromises(); await flushPromises(); await startBoth(ui);
+    resolveDeferred(resolveDownload, json({ id: "download-3", kind: "download", word_id: null, resource: "download", payload: { dataset_id: "set-3" }, status: "running", created_at: "", started_at: "", finished_at: null, result: {} }, 201)); await flushPromises();
+    resolveDeferred(resolveDatasetSave, json({ items: [], total: 0, offset: 0, limit: 50 })); await flushPromises();
+    expectSettled(ui); ui.unmount();
   });

@@ -9,12 +9,13 @@ import JobConsole from "../components/JobConsole.vue";
 const workspace = useWorkspace();
 const rows = ref<Dataset[]>([]); const total = ref(0); const offset = ref(0); const search = ref(""); const status = ref("");
 const selected = ref<Set<string>>(new Set()); const loading = ref(false); const saving = ref(false); const downloading = ref(false); const error = ref(""); const jobs = ref<Job[]>([]);
-let loadRequest: AbortController | undefined; let saveRequest: AbortController | undefined; let downloadRequest: AbortController | undefined; let loadGeneration = 0; let mutationGeneration = 0;
+let loadRequest: AbortController | undefined; let saveRequest: AbortController | undefined; let downloadRequest: AbortController | undefined; let loadGeneration = 0; let saveGeneration = 0; let downloadGeneration = 0;
 const activeId = computed(() => workspace.selectedId.value);
 const selectedIds = computed(() => [...selected.value].sort());
 function loadCurrent(id: string, token: number, controller: AbortController): boolean { return activeId.value === id && loadGeneration === token && !controller.signal.aborted; }
-function mutationCurrent(id: string, token: number, controller: AbortController): boolean { return activeId.value === id && mutationGeneration === token && !controller.signal.aborted; }
-function abortWorkspaceMutations(): void { saveRequest?.abort(); downloadRequest?.abort(); saveRequest = undefined; downloadRequest = undefined; mutationGeneration += 1; saving.value = false; downloading.value = false; jobs.value = []; }
+function saveCurrent(id: string, token: number, controller: AbortController): boolean { return activeId.value === id && saveGeneration === token && !controller.signal.aborted; }
+function downloadCurrent(id: string, token: number, controller: AbortController): boolean { return activeId.value === id && downloadGeneration === token && !controller.signal.aborted; }
+function abortWorkspaceMutations(): void { saveRequest?.abort(); downloadRequest?.abort(); saveRequest = undefined; downloadRequest = undefined; saveGeneration += 1; downloadGeneration += 1; saving.value = false; downloading.value = false; jobs.value = []; }
 async function selectedDatasets(id: string, controller: AbortController): Promise<Dataset[]> {
   const items: Dataset[] = []; let selectedOffset = 0;
   while (!controller.signal.aborted) { const page: Page<Dataset> = await studioApi.datasets(id, { status: "selected", offset: selectedOffset, limit: 100 }, controller.signal); items.push(...page.items); selectedOffset += page.items.length; if (selectedOffset >= page.total || page.items.length === 0) break; }
@@ -22,17 +23,17 @@ async function selectedDatasets(id: string, controller: AbortController): Promis
 }
 async function load(): Promise<void> {
   loadRequest?.abort(); const controller = new AbortController(); loadRequest = controller; const token = ++loadGeneration; const id = activeId.value;
-  rows.value = []; total.value = 0; selected.value = new Set(); jobs.value = []; error.value = ""; if (!id) return; loading.value = true;
+  rows.value = []; total.value = 0; selected.value = new Set(); error.value = ""; if (!id) return; loading.value = true;
   try { const filters = { search: search.value, status: status.value || undefined, offset: offset.value, limit: 50 }; const [page, selectedRows] = await Promise.all([studioApi.datasets(id, filters, controller.signal), selectedDatasets(id, controller)]); if (!loadCurrent(id, token, controller)) return; rows.value = page.items; total.value = page.total; selected.value = new Set(selectedRows.map(item => item.id)); }
   catch (cause) { if (loadCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Unable to load datasets."; }
   finally { if (loadCurrent(id, token, controller)) loading.value = false; }
 }
 function toggle(id: string, checked: boolean): void { const next = new Set(selected.value); checked ? next.add(id) : next.delete(id); selected.value = next; }
-async function save(): Promise<void> { const id = activeId.value; if (!id) return; saveRequest?.abort(); const controller = new AbortController(); saveRequest = controller; const token = ++mutationGeneration; const ids = selectedIds.value; saving.value = true; error.value = "";
-  try { await studioApi.selectDatasets(id, ids, controller.signal); if (mutationCurrent(id, token, controller)) await load(); } catch (cause) { if (mutationCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Dataset selection was not saved."; } finally { if (mutationCurrent(id, token, controller)) saving.value = false; }
+async function save(): Promise<void> { const id = activeId.value; if (!id) return; saveRequest?.abort(); const controller = new AbortController(); saveRequest = controller; const token = ++saveGeneration; const ids = selectedIds.value; saving.value = true; error.value = "";
+  try { await studioApi.selectDatasets(id, ids, controller.signal); if (saveCurrent(id, token, controller)) await load(); } catch (cause) { if (saveCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Dataset selection was not saved."; } finally { if (saveCurrent(id, token, controller)) saving.value = false; }
 }
-async function download(dataset: Dataset): Promise<void> { const id = activeId.value; if (!id) return; downloadRequest?.abort(); const controller = new AbortController(); downloadRequest = controller; const token = ++mutationGeneration; downloading.value = true; error.value = "";
-  try { const job = await studioApi.downloadDataset(dataset.id, controller.signal); if (mutationCurrent(id, token, controller)) jobs.value = [job, ...jobs.value.filter(item => item.id !== job.id)]; } catch (cause) { if (mutationCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Dataset download was not started."; } finally { if (mutationCurrent(id, token, controller)) downloading.value = false; }
+async function download(dataset: Dataset): Promise<void> { const id = activeId.value; if (!id) return; downloadRequest?.abort(); const controller = new AbortController(); downloadRequest = controller; const token = ++downloadGeneration; downloading.value = true; error.value = "";
+  try { const job = await studioApi.downloadDataset(dataset.id, controller.signal); if (downloadCurrent(id, token, controller)) jobs.value = [job, ...jobs.value.filter(item => item.id !== job.id)]; } catch (cause) { if (downloadCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Dataset download was not started."; } finally { if (downloadCurrent(id, token, controller)) downloading.value = false; }
 }
 watch(activeId, () => { abortWorkspaceMutations(); void load(); }, { immediate: true });
 watch(offset, () => { void load(); });

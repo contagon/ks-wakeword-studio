@@ -14,6 +14,7 @@ let delayTrainStart = false;
 let resolveTrainStart: ((response: Response) => void) | undefined;
 let delayTrainingSave = false;
 let resolveTrainingSave: ((response: Response) => void) | undefined;
+function resolveDeferred(resolver: ((response: Response) => void) | undefined, response: Response): void { expect(resolver).toBeTypeOf("function"); if (resolver) resolver(response); }
 function host() { return { components: { TrainPage }, setup() { workspace = createWorkspace(useStudioRoutes()); provide(workspaceKey, workspace); }, template: "<TrainPage />" }; }
 
 beforeEach(() => {
@@ -89,4 +90,29 @@ describe("JobConsole", () => {
     expect(resolveTrainingSave).toBeTypeOf("function"); resolveTrainingSave?.(json({ training_steps: 40000, train_openwakeword: false })); await flushPromises();
     expect((ui.get('[data-action="save-training-settings"]').element as HTMLButtonElement).disabled).toBe(false);
     ui.unmount();
+  });
+
+  it("settles independently launched save and start mutations in either completion order", async () => {
+    async function startBoth(ui: ReturnType<typeof mount>): Promise<void> {
+      delayTrainingSave = true; delayTrainStart = true;
+      await ui.get('[data-action="save-training-settings"]').trigger("click"); await flushPromises();
+      await ui.get('[data-action="start-training"]').trigger("click"); await flushPromises();
+      expect(resolveTrainingSave).toBeTypeOf("function"); expect(resolveTrainStart).toBeTypeOf("function");
+    }
+    function expectSettled(ui: ReturnType<typeof mount>): void {
+      expect((ui.get('[data-action="save-training-settings"]').element as HTMLButtonElement).disabled).toBe(false);
+      expect((ui.get('[data-action="start-training"]').element as HTMLButtonElement).disabled).toBe(false);
+      expect(ui.find('[data-job-id="train-1"]').exists()).toBe(true);
+    }
+
+    let ui = mount(host()); await flushPromises(); await flushPromises(); await startBoth(ui);
+    resolveDeferred(resolveTrainingSave, json({ training_steps: 40000, train_openwakeword: false })); await flushPromises();
+    resolveDeferred(resolveTrainStart, json(train("queued"))); await flushPromises();
+    expectSettled(ui); ui.unmount();
+
+    delayTrainingSave = false; resolveTrainingSave = undefined; delayTrainStart = false; resolveTrainStart = undefined;
+    ui = mount(host()); await flushPromises(); await flushPromises(); await startBoth(ui);
+    resolveDeferred(resolveTrainStart, json(train("queued"))); await flushPromises();
+    resolveDeferred(resolveTrainingSave, json({ training_steps: 40000, train_openwakeword: false })); await flushPromises();
+    expectSettled(ui); ui.unmount();
   });
