@@ -86,6 +86,36 @@ class Job:
 
 
 @dataclass(frozen=True)
+class GenerationRecipe:
+    language: str
+    english_accent: str
+    tts_mode: str
+    samples: int
+    batch_size: int
+
+
+@dataclass(frozen=True)
+class BatchAudio:
+    audio_id: str
+    original_hash: str
+    normalized_hash: str
+    family_id: str
+
+
+@dataclass(frozen=True)
+class Batch:
+    id: str
+    word_id: str
+    phrase: str
+    recipe: GenerationRecipe
+    status: str
+    created_at: str
+    finished_at: str | None
+    audio: list[BatchAudio]
+    selected: bool
+
+
+@dataclass(frozen=True)
 class LoopHealth:
     component: str
     status: str = 'pending'

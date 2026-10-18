@@ -24,6 +24,7 @@ class StudioPackagingTests(unittest.TestCase):
                         copies.append([word for word in words[1:] if not word.startswith("--")])
                 self.assertIn(["studio/", "/root/mww-scripts/studio/"], copies,
                               f"{filename} must copy the complete studio directory, including schema.sql")
+                self.assertIn(['tts_config.py', '/root/mww-scripts/tts_config.py'], copies)
 
                 # Exercise the COPY source/destination in an isolated image-like tree.
                 # No repository import path may hide a missing packaged resource.
@@ -31,6 +32,7 @@ class StudioPackagingTests(unittest.TestCase):
                     image = Path(directory)
                     package = image / "root/mww-scripts/studio"
                     shutil.copytree(REPO_ROOT / "studio", package, ignore=shutil.ignore_patterns("__pycache__"))
+                    shutil.copyfile(REPO_ROOT / 'tts_config.py', package.parent / 'tts_config.py')
                     self.assertTrue((package / "schema.sql").is_file())
                     result = subprocess.run(
                         [sys.executable, "-I", "-c", "\n".join([

@@ -9,7 +9,8 @@ from pydantic import BaseModel, ConfigDict
 
 from studio.models import (CollectionRun, Conflict, CredentialsRequired, Device, IdentityMismatch, SourceMapping,
                            RemoteRejected, RemoteUnavailable, NotFound, Page, Recording, Sample, SampleQuery,
-                           ValidationError, Wakeword, WakewordUpdate, Job, Schedule, WorkerHealth, Dataset)
+                           ValidationError, Wakeword, WakewordUpdate, Job, Schedule, WorkerHealth, Dataset,
+                           Batch, GenerationRecipe)
 from studio.runtime import StudioRuntime
 from studio.storage import AUDIO_MIMES
 
@@ -112,6 +113,20 @@ class DatasetSelectionBody(BaseModel):
     dataset_ids: list[str]
 
 
+class GenerationRecipeBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    language: str
+    english_accent: str
+    tts_mode: str
+    samples: int
+    batch_size: int
+
+
+class BatchSelectionBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    batch_ids: list[str]
+
+
 def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
                  label: str | None = None, device_id: str | None = None,
                  near_miss: bool | None = None, source: str | None = None,
@@ -121,6 +136,35 @@ def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=1
 
 def create_router(runtime: StudioRuntime) -> APIRouter:
     router = APIRouter(prefix="/api/studio", route_class=StudioRoute)
+
+    @router.get('/generation/catalog')
+    def generation_catalog():
+        return runtime.generation.catalog()
+
+    @router.get('/wakewords/{word_id}/generation/recipe', response_model=GenerationRecipe)
+    def generation_recipe(word_id: str) -> GenerationRecipe:
+        return runtime.generation.get_recipe(word_id)
+
+    @router.put('/wakewords/{word_id}/generation/recipe', response_model=GenerationRecipe)
+    def save_generation_recipe(word_id: str, body: GenerationRecipeBody) -> GenerationRecipe:
+        return runtime.generation.save_recipe(word_id, GenerationRecipe(**body.model_dump()))
+
+    @router.post('/wakewords/{word_id}/generation/jobs', response_model=Job, status_code=201)
+    def generate_batch(word_id: str) -> Job:
+        return runtime.generation.enqueue(word_id)
+
+    @router.get('/wakewords/{word_id}/generation/batches', response_model=Page[Batch])
+    def batches(word_id: str, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)) -> Page[Batch]:
+        return runtime.generation.list(word_id, offset, limit)
+
+    @router.get('/wakewords/{word_id}/generation/batches/{batch_id}', response_model=Batch)
+    def batch(word_id: str, batch_id: str) -> Batch:
+        return runtime.generation.get_batch(word_id, batch_id)
+
+    @router.put('/wakewords/{word_id}/generation/batches', response_model=Page[Batch])
+    def select_batches(word_id: str, body: BatchSelectionBody) -> Page[Batch]:
+        runtime.generation.select_batches(word_id, body.batch_ids)
+        return runtime.generation.list(word_id)
 
     @router.get('/wakewords/{word_id}/datasets', response_model=Page[Dataset])
     def datasets(word_id: str, search: str = '', status: str | None = None,

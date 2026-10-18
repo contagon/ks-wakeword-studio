@@ -105,8 +105,10 @@ def run(command: list[str], *, env: dict[str, str] | None = None) -> None:
     log("→ " + " ".join(command))
     # Some upstream CLIs terminate their entire process group after a fatal
     # worker error.  Give each model command its own group so that behavior
-    # cannot kill the trainer/orchestrator process.
-    subprocess.run(command, check=True, env=env, start_new_session=True)
+    # cannot kill the legacy trainer/orchestrator process. Studio instead owns
+    # the whole session: descendants must not escape its durable GPU claim.
+    subprocess.run(command, check=True, env=env,
+                   start_new_session=not bool(os.environ.get('STUDIO_JOB_TOKEN')))
 
 
 def run_with_batch_retry(
@@ -136,7 +138,7 @@ def run_normalization_ffmpeg(command: list[str], timeout: float) -> int | None:
     process = subprocess.Popen(
         command,
         stdin=subprocess.DEVNULL,
-        start_new_session=True,
+        start_new_session=not bool(os.environ.get('STUDIO_JOB_TOKEN')),
     )
     try:
         return process.wait(timeout=timeout)
@@ -145,7 +147,10 @@ def run_normalization_ffmpeg(command: list[str], timeout: float) -> int | None:
         # unbounded wait after killing the child, which can still freeze the
         # trainer when a process is stuck in filesystem I/O.
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            if os.environ.get('STUDIO_JOB_TOKEN'):
+                process.kill()  # Never signal the shared Studio group here.
+            else:
+                os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
         except OSError:

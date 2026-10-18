@@ -13,6 +13,7 @@ from studio.jobs import JobQueue, WorkerPool, utc_now
 from studio.schedules import ScheduleService
 from studio.models import WorkerHealth
 from studio.datasets import DatasetService
+from studio.generation import GenerationService
 
 
 class StudioRuntime:
@@ -30,6 +31,7 @@ class StudioRuntime:
         self._schedules: ScheduleService | None = None
         self._workers: WorkerPool | None = None
         self._datasets: DatasetService | None = None
+        self._generation: GenerationService | None = None
 
     def startup(self) -> None:
         with self._lock:
@@ -46,10 +48,12 @@ class StudioRuntime:
                 self._collection = CollectionService(store, self._samples, self._devices, clock=self.clock)
                 self._jobs = JobQueue(store, clock=self.clock, groups=self.groups)
                 self._datasets = DatasetService(store, self._jobs)
+                self._generation = GenerationService(store, blobs, self._jobs, clock=self.clock)
                 self._schedules = ScheduleService(store, self._jobs, clock=self.clock)
                 self._workers = WorkerPool(self._jobs, clock=self.clock, runner=self.runner, schedules=self._schedules)
                 self._workers.register('scrape', 'collection', self._collect_job)
                 self._workers.register('download', 'download', self._datasets.execute)
+                self._workers.register('generation', 'gpu', self._generation.handle)
                 self._jobs.recover()
                 self._store = store
             except BaseException:
@@ -62,6 +66,12 @@ class StudioRuntime:
         assert self._collection is not None
         result = self._collection.run(job.payload.get('device_ids'))
         return {'run_id': result.id, 'status': result.status}
+
+    @property
+    def generation(self) -> GenerationService:
+        self.startup()
+        assert self._generation is not None
+        return self._generation
 
     @property
     def datasets(self) -> DatasetService:
@@ -142,3 +152,4 @@ class StudioRuntime:
                 self._schedules = None
                 self._workers = None
                 self._datasets = None
+                self._generation = None
