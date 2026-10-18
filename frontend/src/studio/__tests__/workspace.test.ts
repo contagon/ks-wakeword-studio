@@ -34,6 +34,13 @@ beforeEach(() => {
       return json(page(records));
     }
     if (u.pathname === "/api/studio/schedules") return json([{ scope: "train:a", cron: "0 2 * * *", timezone: "UTC", enabled: true, next_run_at: "2026-01-02T02:00:00Z" }]);
+    if (u.pathname.endsWith("/training/counts")) return json({ positive: 0, negative: 0, artificial: 0 });
+    if (u.pathname.endsWith("/training/settings")) return json({ training_steps: 40000, train_openwakeword: false });
+    if (u.pathname.endsWith("/training/runs")) return json(page([]));
+    if (u.pathname === "/api/studio/generation/catalog") return json([]);
+    if (u.pathname.endsWith("/generation/recipe")) return json({ language: "en", english_accent: "mixed", tts_mode: "hybrid", samples: 1, batch_size: 1 });
+    if (u.pathname.endsWith("/generation/batches")) return json(page([]));
+    if (u.pathname.endsWith("/datasets")) return json(page([]));
     const id = u.pathname.split("/")[4];
     if (u.pathname.endsWith("/queue")) return json(page([], id === "a" ? 7 : 2));
     if (u.pathname.endsWith("/models")) return json(page([]));
@@ -56,29 +63,24 @@ function mediaQuery(initial: boolean) {
 async function open() { wrapper = mount(TrainerApp, { attachTo: document.body }); await flushPromises(); return wrapper; }
 
 describe("compact studio workspace", () => {
-  it("groups exactly eight real navigation pages and labels unfinished modules honestly", async () => {
+  it("groups exactly eight real navigation pages and mounts the real training page", async () => {
     const ui = await open();
     expect(ui.get('nav').findAll('a').map(a => a.text())).toEqual(["Wakewords", "Negative Datasets", "Artificial", "Scrape", "Classify", "Samples", "Train", "Deploy"]);
     expect(ui.get('nav').text()).toContain("Data");
     expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
-    await ui.get('[data-page="train"]').trigger('click');
-    expect(ui.get('h1').text()).toBe("Train");
-    expect(ui.get('[data-studio-placeholder]').text()).toContain("not implemented yet");
-  });
-  it("keeps untouched legacy trainer workflows reachable from unfinished pages without a ninth page", async () => {
-    const ui = await open();
     await ui.get('[data-page="train"]').trigger('click'); await flushPromises();
-    const legacy = ui.get('[data-legacy-trainer]');
-    expect(requests.some(r => r.path === '/api/train_status')).toBe(true);
-    expect(legacy.findAll('button').map(b => b.text())).toContain('Start training');
-    await ui.get('[data-page="samples"]').trigger('click'); await flushPromises();
-    expect(ui.get('h1').text()).toBe('Samples');
-    expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
-    await ui.get('[data-page="deploy"]').trigger('click'); await flushPromises();
-    expect(ui.get('h1').text()).toBe('Deploy');
-    expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
+    expect(ui.get('h1').text()).toBe("Train");
+    expect(ui.text()).toContain("Effective inputs for the next snapshot");
+    expect(ui.find('[data-studio-placeholder]').exists()).toBe(false);
+  });
+  it("unmounts the legacy trainer after all formerly unfinished pages gain studio implementations", async () => {
+    const ui = await open();
+    for (const pageId of ["negative-datasets", "artificial", "train"] as const) {
+      await ui.get(`[data-page="${pageId}"]`).trigger('click'); await flushPromises();
+      expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
+      expect(ui.find('[data-studio-placeholder]').exists()).toBe(false);
+    }
     expect(ui.get('nav').findAll('a')).toHaveLength(8);
-    await ui.get('[data-page="wakewords"]').trigger('click'); await flushPromises();
     expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
   });
   it("preserves selection across navigation, reload, and direct links", async () => {

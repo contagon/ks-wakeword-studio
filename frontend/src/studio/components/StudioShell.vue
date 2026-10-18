@@ -7,8 +7,9 @@ import ClassifyPage from "../pages/ClassifyPage.vue";
 import SamplesPage from "../pages/SamplesPage.vue";
 import ScrapePage from "../pages/ScrapePage.vue";
 import DeployPage from "../pages/DeployPage.vue";
-import LegacyTrainer from "../../LegacyTrainer.vue";
-import type { ViewName } from "../../types";
+import NegativeDatasetsPage from "../pages/NegativeDatasetsPage.vue";
+import ArtificialPage from "../pages/ArtificialPage.vue";
+import TrainPage from "../pages/TrainPage.vue";
 
 const routes = useStudioRoutes();
 const workspace = createWorkspace(routes);
@@ -19,13 +20,6 @@ const narrow = ref(false);
 const toggle = ref<HTMLButtonElement>();
 const content = ref<HTMLElement>();
 const current = computed(() => pages.find(page => page.id === routes.page.value)!);
-// Existing trainer workflows stay reachable until each Studio replacement is wired.
-const legacyViews: Partial<Record<Exclude<PageId, "wakewords">, ViewName>> = {
-  "negative-datasets": "data",
-  artificial: "trainer",
-  train: "trainer",
-};
-const legacyView = computed(() => current.value.id === "wakewords" ? null : legacyViews[current.value.id]);
 const navigationHidden = computed(() => narrow.value && !navigationOpen.value);
 const narrowQuery = typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 650px)") : null;
 function updateNarrow() { narrow.value = narrowQuery?.matches ?? false; }
@@ -87,17 +81,9 @@ onBeforeUnmount(() => {
         <SamplesPage v-else-if="current.id === 'samples'" />
         <ScrapePage v-else-if="current.id === 'scrape'" />
         <DeployPage v-else-if="current.id === 'deploy'" />
-        <template v-else>
-          <section :key="`${current.id}:${selectedId}`">
-            <h1>{{ current.name }}</h1>
-            <p v-if="selected" class="studio-muted mb-4">Workspace: {{ selected.phrase }}</p>
-            <div class="studio-card" data-studio-placeholder>
-              <h2>Studio module not implemented yet</h2>
-              <p>This page will be connected to the per-wakeword studio API in a later task. Until then, the existing single-trainer tools below remain available; they are not scoped to the selected workspace.</p>
-            </div>
-          </section>
-          <LegacyTrainer v-if="legacyView" :view="legacyView" />
-        </template>
+        <NegativeDatasetsPage v-else-if="current.id === 'negative-datasets'" />
+        <ArtificialPage v-else-if="current.id === 'artificial'" />
+        <TrainPage v-else-if="current.id === 'train'" />
       </main>
     </div>
   </div>
