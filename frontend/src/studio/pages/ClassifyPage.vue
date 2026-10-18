@@ -28,14 +28,21 @@ const kind = ref("");
 const player = ref<InstanceType<typeof AudioPlayer>>();
 let request: AbortController | undefined;
 let mutation: AbortController | undefined;
+let assignment: AbortController | undefined;
+let assignmentGeneration = 0;
 let generation = 0;
 const visible = computed(() => queue.value.filter(item => !skipped.value.has(item.id)));
 const active = computed(() => visible.value[position.value] ?? null);
 const source = computed(() => active.value ? studioApi.audioUrl(active.value.word_id, active.value.id) : null);
 const reviewed = computed(() => reviewedCount.value);
 function reset(): void { player.value?.stop(); queue.value = []; unmapped.value = []; skipped.value = new Set(); position.value = 0; total.value = 0; reviewedCount.value = 0; autoplayNext.value = false; discardOpen.value = false; error.value = ""; notice.value = ""; }
+function invalidateAssignment(): void {
+  assignmentGeneration += 1;
+  if (assignment) { assignment.abort(); assignment = undefined; saving.value = false; }
+}
 function queueParams() { return { limit: 100, ...(kind.value ? { near_miss: kind.value === "true" } : {}) }; }
 async function load(): Promise<void> {
+  invalidateAssignment();
   request?.abort(); const controller = new AbortController(); request = controller; const current = ++generation; const word = workspace.selectedId.value;
   reset(); if (!word) return; loading.value = true;
   try {
@@ -79,9 +86,25 @@ async function undo(): Promise<void> {
   finally { if (mutation === controller) saving.value = false; }
 }
 async function assign(recording: Recording): Promise<void> {
-  if (saving.value || !workspace.selectedId.value) return; saving.value = true; error.value = "";
-  try { const assigned = await studioApi.assign(recording.id, workspace.selectedId.value); unmapped.value = unmapped.value.filter(item => item.id !== recording.id); queue.value = [...queue.value, assigned]; total.value += 1; notice.value = "Recording assigned to this workspace and added to the pending queue."; }
-  catch { error.value = "Recording could not be assigned."; } finally { saving.value = false; }
+  const word = workspace.selectedId.value;
+  if (saving.value || !word) return;
+  const queueGeneration = generation;
+  const current = ++assignmentGeneration;
+  const controller = new AbortController();
+  assignment?.abort(); assignment = controller;
+  saving.value = true; error.value = "";
+  try {
+    const assigned = await studioApi.assign(recording.id, word, controller.signal);
+    if (controller.signal.aborted || assignment !== controller || current !== assignmentGeneration || queueGeneration !== generation || workspace.selectedId.value !== word) return;
+    unmapped.value = unmapped.value.filter(item => item.id !== recording.id);
+    queue.value = [...queue.value, assigned];
+    total.value += 1;
+    notice.value = "Recording assigned to this workspace and added to the pending queue.";
+  } catch {
+    if (!controller.signal.aborted && assignment === controller && current === assignmentGeneration && workspace.selectedId.value === word) error.value = "Recording could not be assigned.";
+  } finally {
+    if (assignment === controller) { assignment = undefined; saving.value = false; }
+  }
 }
 function editing(event: KeyboardEvent): boolean { const target = event.target instanceof HTMLElement ? event.target : document.activeElement; return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName)); }
 function shortcut(event: KeyboardEvent): void {
@@ -96,7 +119,7 @@ function shortcut(event: KeyboardEvent): void {
 watch(workspace.selectedId, () => { void load(); }, { immediate: true });
 watch(kind, () => { void load(); });
 onMounted(() => document.addEventListener("keydown", shortcut));
-onBeforeUnmount(() => { document.removeEventListener("keydown", shortcut); request?.abort(); mutation?.abort(); player.value?.stop(); });
+onBeforeUnmount(() => { document.removeEventListener("keydown", shortcut); request?.abort(); mutation?.abort(); invalidateAssignment(); player.value?.stop(); });
 </script>
 
 <template>

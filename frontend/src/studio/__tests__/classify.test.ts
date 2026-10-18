@@ -232,4 +232,19 @@ describe("keyboard-first classification", () => {
     expect(ui.find("[data-unmapped-id=r9]").exists()).toBe(false);
     expect(ui.get("[data-progress]").text()).toContain("4 pending");
   });
+
+  it("does not add an assignment from the previous workspace after switching workspaces", async () => {
+    server.db.unmapped.push(recording("r-late", { phrase: "assigned only to A" }));
+    const ui = await open();
+    const assignment = server.hold(r => r.method === "POST" && r.url.pathname === "/api/studio/recordings/r-late/assign");
+    await ui.get("[data-unmapped-id=r-late] [data-action=assign]").trigger("click");
+    await settle();
+    expect(assignment.request()?.body).toEqual({ word_id: "a" });
+    await ui.get("#studio-word").setValue("b"); await settle();
+    expect(current(wrapper!)).toBe("b1");
+    assignment.release(); await settle();
+    expect(current(wrapper!)).toBe("b1");
+    expect(wrapper!.get("[data-progress]").text()).toContain("1 pending");
+    expect(wrapper!.find("[data-classify-current]").attributes("data-sample-id")).not.toBe("from-r-late");
+  });
 });
