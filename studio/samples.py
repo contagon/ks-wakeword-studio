@@ -23,8 +23,10 @@ from studio.storage import BlobStore, normalize_audio
 from studio.workspaces import WorkspaceService, utc_now
 
 
-SAMPLE_SELECT = """SELECT s.*, a.original_hash, a.normalized_hash, a.family_id
+SAMPLE_SELECT = """SELECT s.*, COALESCE(mp.source, s.source) AS migration_source,
+    a.original_hash, a.normalized_hash, a.family_id
     FROM samples s JOIN audio_records a ON a.id=s.audio_id
+    LEFT JOIN migration_sample_provenance mp ON mp.sample_id=s.id
     LEFT JOIN recordings r ON r.id=s.recording_id"""
 RECORDING_SELECT = """SELECT r.*, a.original_hash, a.normalized_hash, a.family_id
     FROM recordings r JOIN audio_records a ON a.id=r.audio_id"""
@@ -49,6 +51,7 @@ def _public_metadata(raw: object) -> dict[str, object]:
 
 def _sample(db: sqlite3.Connection, row: sqlite3.Row) -> Sample:
     values = {f.name: row[f.name] for f in fields(Sample) if f.name != "recording"}
+    values["source"] = row["migration_source"]
     recording = None
     if row["recording_id"]:
         recording = _recording(db.execute(RECORDING_SELECT + " WHERE r.id=?", (row["recording_id"],)).fetchone())
@@ -276,7 +279,7 @@ class SampleService:
     def _query(self, query: SampleQuery) -> tuple[list[str], list[object]]:
         if type(query.offset) is not int or query.offset < 0 or type(query.limit) is not int or not 1 <= query.limit <= 100:
             raise ValidationError("Invalid pagination")
-        if query.label not in (None, "pending", "positive", "negative", "discarded") or query.source not in (None, "diagnostic", "import"):
+        if query.label not in (None, "pending", "positive", "negative", "discarded") or query.source not in (None, "diagnostic", "import", "legacy"):
             raise ValidationError("Invalid filter")
         if not isinstance(query.search, str) or len(query.search) > 200 or query.near_miss not in (None, True, False):
             raise ValidationError("Invalid filter")
@@ -299,10 +302,12 @@ class SampleService:
         clauses = [clause.replace("r.created_at", "s.created_at") for clause in clauses]
         clauses += ["s.word_id=?", "s.deleted=0", "COALESCE(r.quarantined,0)=0"]
         params.append(word_id)
-        for column, value in (("s.label", query.label), ("s.source", query.source)):
-            if value is not None:
-                clauses.append(column + "=?")
-                params.append(value)
+        if query.label is not None:
+            clauses.append("s.label=?")
+            params.append(query.label)
+        if query.source is not None:
+            clauses.append("mp.source=?" if query.source == "legacy" else "s.source=?")
+            params.append(query.source)
         where = " WHERE " + " AND ".join(clauses)
         with self.store.transaction() as db:
             self._word(db, word_id)

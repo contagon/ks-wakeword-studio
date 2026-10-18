@@ -781,7 +781,7 @@ class ModernTtsTests(unittest.TestCase):
             self.assertIn("ffmpeg", source)
             self.assertIn("tts_config.py", source)
 
-        ui = (REPO_ROOT / "frontend" / "src" / "TrainerApp.vue").read_text(encoding="utf-8")
+        ui = (REPO_ROOT / "frontend" / "src" / "LegacyTrainer.vue").read_text(encoding="utf-8")
         store = (REPO_ROOT / "frontend" / "src" / "trainerStore.ts").read_text(encoding="utf-8")
         self.assertIn('v-model="trainer.ttsMode"', ui)
         self.assertIn("tts_mode: trainer.ttsMode", store)

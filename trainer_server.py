@@ -69,6 +69,7 @@ from openwakeword_stage import (
 
 # In Docker, /data is the persistent workspace mounted by the user.
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data")).resolve()
+TRAINER_LEGACY_MODE = os.environ.get("TRAINER_LEGACY_MODE") == "1"
 STATIC_DIR = Path(os.environ.get("STATIC_DIR", str(ROOT_DIR / "static"))).resolve()
 PERSONAL_DIR = Path(os.environ.get("PERSONAL_DIR", str(DATA_DIR / "personal_samples"))).resolve()
 CAPTURED_DIR = Path(os.environ.get("CAPTURED_DIR", str(DATA_DIR / "captured_audio"))).resolve()
@@ -215,7 +216,12 @@ AUTO_TRAIN_DEFAULT_STATE: Dict[str, Any] = {
 
 
 app = FastAPI(title="microWakeWord Personal Samples")
-STUDIO_RUNTIME = StudioRuntime(DATA_DIR)
+STUDIO_RUNTIME = StudioRuntime(
+    DATA_DIR,
+    legacy_mode=TRAINER_LEGACY_MODE,
+    legacy_active=lambda: bool(STATE["training"].get("running") or AUTO_TRAIN_RUNTIME.get("review_running")
+                             or AUTO_TRAIN_RUNTIME.get("scheduler_running")),
+)
 app.include_router(create_studio_router(STUDIO_RUNTIME))
 
 # Serve static UI
@@ -3175,10 +3181,23 @@ def _start_training_thread(
     english_accent: str = DEFAULT_SERVER_ENGLISH_ACCENT,
     train_openwakeword: bool = True,
 ) -> threading.Thread:
-    # The singleton command regenerates mutable global inputs and can publish
-    # through Tater outside the studio resource/provenance contracts. It is not
-    # a safe fallback while the explicit studio training adapter is pending.
-    raise RuntimeError("Use the Studio durable training queue; legacy singleton training is disabled.")
+    if not TRAINER_LEGACY_MODE:
+        raise RuntimeError("Use the Studio durable training queue; legacy singleton training is disabled.")
+    global TRAINING_THREAD
+    with TRAINING_RUNTIME_LOCK:
+        if TRAINING_THREAD is not None and TRAINING_THREAD.is_alive():
+            raise RuntimeError("Legacy training is already running.")
+        TRAINING_STOP_EVENT.clear()
+        TRAINING_THREAD = threading.Thread(
+            target=_run_training_background,
+            args=(safe_word, language, allow_no_personal),
+            kwargs={"auto_run": auto_run, "tts_mode": tts_mode, "english_accent": english_accent,
+                    "train_openwakeword": train_openwakeword},
+            name="legacy-training-worker",
+            daemon=True,
+        )
+        TRAINING_THREAD.start()
+        return TRAINING_THREAD
 
 
 def _stop_current_training(timeout: float = 20.0) -> bool:
@@ -3447,9 +3466,16 @@ def _run_training_background(
 @app.on_event("startup")
 def start_auto_train_worker_event():
     STUDIO_RUNTIME.startup()
-    # Studio collection/manual labels replace the legacy STT/Tater automation.
-    # Never let the singleton background loop publish/train independently.
-    STUDIO_RUNTIME.start_workers()
+    if TRAINER_LEGACY_MODE:
+        _start_auto_train_worker()
+    else:
+        STUDIO_RUNTIME.start_workers()
+
+
+def _legacy_mode_required() -> JSONResponse | None:
+    if not TRAINER_LEGACY_MODE:
+        return JSONResponse({"ok": False, "error": "Legacy singleton actions are disabled in Studio mode. Use /api/studio workspaces and jobs, or restart with TRAINER_LEGACY_MODE=1 for isolated legacy behavior."}, status_code=409)
+    return None
 
 
 @app.on_event("shutdown")
@@ -3470,6 +3496,8 @@ def auto_train_status(request: Request):
 
 @app.put("/api/auto_train")
 def update_auto_train(payload: Dict[str, Any] = None):
+    if rejected := _legacy_mode_required():
+        return rejected
     incoming = dict(payload or {})
     for protected_key in (
         "tater_link_token",
@@ -3510,6 +3538,8 @@ def update_auto_train(payload: Dict[str, Any] = None):
 
 @app.post("/api/tater_link/claim")
 def tater_link_claim(payload: Dict[str, Any] = None):
+    if rejected := _legacy_mode_required():
+        return rejected
     body = payload if isinstance(payload, dict) else {}
     try:
         return _claim_tater_link(
@@ -3524,11 +3554,15 @@ def tater_link_claim(payload: Dict[str, Any] = None):
 
 @app.post("/api/tater_link/unlink")
 def tater_link_unlink():
+    if rejected := _legacy_mode_required():
+        return rejected
     return _unlink_tater()
 
 
 @app.post("/api/auto_train/action")
 def auto_train_action(payload: Dict[str, Any] = None):
+    if rejected := _legacy_mode_required():
+        return rejected
     action = str((payload or {}).get("action") or "").strip().lower()
     if action == "review_now":
         with AUTO_TRAIN_LOCK:
@@ -3567,6 +3601,8 @@ def index():
 
 @app.post("/api/start_session")
 def start_session(payload: Dict[str, Any]):
+    if rejected := _legacy_mode_required():
+        return rejected
     with STATE_LOCK:
         active_safe_word = STATE.get("safe_word")
     if active_safe_word:
@@ -4217,6 +4253,8 @@ def trained_wake_word_artifact(filename: str):
 
 @app.post("/api/train")
 def train_now(payload: Dict[str, Any] = None):
+    if rejected := _legacy_mode_required():
+        return rejected
     payload = payload or {}
     allow_no_personal = bool(payload.get("allow_no_personal", False))
     train_openwakeword = normalize_train_openwakeword(

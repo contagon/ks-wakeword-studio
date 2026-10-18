@@ -292,7 +292,7 @@ class AutoTrainTests(unittest.TestCase):
         )
 
     def test_ui_exposes_engine_selector_without_manual_runtime_fields(self):
-        source = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "TrainerApp.vue").read_text(
+        source = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "LegacyTrainer.vue").read_text(
             encoding="utf-8"
         )
         self.assertIn('v-model="trainer.autoForm.stt_engine"', source)

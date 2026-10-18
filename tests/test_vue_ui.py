@@ -11,7 +11,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 class VueTrainerUiTests(unittest.TestCase):
     def test_frontend_uses_typed_vue_and_vite(self) -> None:
         package = json.loads((REPO_ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
-        self.assertEqual(package["dependencies"]["vue"], "3.5.40")
+        self.assertEqual(package["dependencies"]["vue"], "3.5.44")
         self.assertIn("vue-tsc --noEmit", package["scripts"]["build"])
         self.assertIn("vite build", package["scripts"]["build"])
 
@@ -37,7 +37,7 @@ class VueTrainerUiTests(unittest.TestCase):
             self.assertNotIn(old_blue, styles)
 
     def test_reactive_ui_keeps_trainer_workflows(self) -> None:
-        app = (REPO_ROOT / "frontend" / "src" / "TrainerApp.vue").read_text(encoding="utf-8")
+        app = (REPO_ROOT / "frontend" / "src" / "LegacyTrainer.vue").read_text(encoding="utf-8")
         store = (REPO_ROOT / "frontend" / "src" / "trainerStore.ts").read_text(encoding="utf-8")
         trim = (REPO_ROOT / "frontend" / "src" / "components" / "AudioTrimModal.vue").read_text(encoding="utf-8")
 
@@ -72,7 +72,7 @@ class VueTrainerUiTests(unittest.TestCase):
         self.assertIn('{ id: "data", label: "Data"', app)
 
     def test_training_console_pauses_follow_mode_when_scrolled_up(self) -> None:
-        app = (REPO_ROOT / "frontend" / "src" / "TrainerApp.vue").read_text(encoding="utf-8")
+        app = (REPO_ROOT / "frontend" / "src" / "LegacyTrainer.vue").read_text(encoding="utf-8")
 
         self.assertIn("const consoleFollowing = ref(true)", app)
         self.assertIn("distanceFromBottom <= 32", app)
@@ -81,7 +81,7 @@ class VueTrainerUiTests(unittest.TestCase):
         self.assertIn("Jump to latest", app)
 
     def test_saved_positive_and_negative_cards_keep_stt_results_visible(self) -> None:
-        app = (REPO_ROOT / "frontend" / "src" / "TrainerApp.vue").read_text(encoding="utf-8")
+        app = (REPO_ROOT / "frontend" / "src" / "LegacyTrainer.vue").read_text(encoding="utf-8")
         types = (REPO_ROOT / "frontend" / "src" / "types.ts").read_text(encoding="utf-8")
 
         self.assertEqual(app.count('v-if="item.transcript" class="transcript"'), 2)
@@ -89,7 +89,7 @@ class VueTrainerUiTests(unittest.TestCase):
         self.assertIn("auto_review_guided_transcript?: string", types)
 
     def test_wake_word_card_uses_explicit_json_catalog_url(self) -> None:
-        app = (REPO_ROOT / "frontend" / "src" / "TrainerApp.vue").read_text(encoding="utf-8")
+        app = (REPO_ROOT / "frontend" / "src" / "LegacyTrainer.vue").read_text(encoding="utf-8")
         types = (REPO_ROOT / "frontend" / "src" / "types.ts").read_text(encoding="utf-8")
 
         self.assertIn("item.json_url || item.url || item.jsonUrl", app)
@@ -98,7 +98,7 @@ class VueTrainerUiTests(unittest.TestCase):
         self.assertIn("json_url?: string", types)
 
     def test_wake_words_tab_exposes_esphome_manifest_urls(self) -> None:
-        app = (REPO_ROOT / "frontend" / "src" / "TrainerApp.vue").read_text(encoding="utf-8")
+        app = (REPO_ROOT / "frontend" / "src" / "LegacyTrainer.vue").read_text(encoding="utf-8")
         types = (REPO_ROOT / "frontend" / "src" / "types.ts").read_text(encoding="utf-8")
 
         self.assertIn("ESPHome JSON", app)

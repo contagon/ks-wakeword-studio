@@ -52,3 +52,8 @@ export interface DeploymentCapabilities { requires_initially_clean_staging: bool
 export interface Pagination { offset?: number; limit?: number }
 export interface SampleQuery extends Pagination { label?: string; device_id?: string; near_miss?: boolean; source?: string; search?: string; after?: string; before?: string }
 export interface WorkspaceSummary { pending: number; modelCount: number; latestModel: ModelVersion | null; schedule: Schedule | null }
+
+export interface LegacyInventory { fingerprint: string; counts: { personal: number; negative: number; captured: number; models: number }; phrases: string[]; models: string[]; requires_phrase_assignment: boolean; requires_model_assignment: boolean }
+export interface LegacyImportSelection { word_id: string; phrase_assignments: Record<string, string>; model_assignments: Record<string, string> }
+export interface MigrationReport { fingerprint: string; word_id: string; imported_samples: number; imported_models: number; skipped_samples: number; skipped_models: number }
+export interface StudioCapabilities { legacy_mode: boolean; legacy_automation_enabled: boolean }

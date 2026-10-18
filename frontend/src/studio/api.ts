@@ -1,4 +1,4 @@
-import type { EnqueueScrapeJob, ModelMetrics, ScrapeJob, Page, Wakeword, CreateWakeword, UpdateWakeword, Device, SourceMapping, Recording, Sample, SampleQuery, Pagination, CollectionRun, Schedule, ScheduleInput, Job, WorkerHealth, Dataset, GenerationRecipe, GenerationCapability, Batch, TrainingSettings, TrainingCounts, RunManifest, ModelVersion, Publication, DeploymentCapabilities } from "./types";
+import type { EnqueueScrapeJob, ModelMetrics, ScrapeJob, Page, Wakeword, CreateWakeword, UpdateWakeword, Device, SourceMapping, Recording, Sample, SampleQuery, Pagination, CollectionRun, Schedule, ScheduleInput, Job, WorkerHealth, Dataset, GenerationRecipe, GenerationCapability, Batch, TrainingSettings, TrainingCounts, RunManifest, ModelVersion, Publication, DeploymentCapabilities, LegacyInventory, LegacyImportSelection, MigrationReport, StudioCapabilities } from "./types";
 
 const base = "/api/studio";
 const segment = encodeURIComponent;
@@ -45,6 +45,9 @@ const post = <T>(path: string, body?: unknown, signal?: AbortSignal) => request<
 const put = <T>(path: string, body: unknown, signal?: AbortSignal) => request<T>(path, "PUT", body, signal);
 
 export const studioApi = {
+  capabilities: (signal?: AbortSignal) => get<StudioCapabilities>("/capabilities", undefined, signal),
+  migration: (signal?: AbortSignal) => get<LegacyInventory>("/migration", undefined, signal),
+  importLegacy: (body: LegacyImportSelection, signal?: AbortSignal) => post<MigrationReport>("/migration/import", body, signal),
   wakewords: (params?: Pagination, signal?: AbortSignal) => get<Page<Wakeword>>("/wakewords", params, signal),
   wakeword: (id: string, signal?: AbortSignal) => get<Wakeword>(wordPath(id), undefined, signal),
   createWakeword: (body: CreateWakeword, signal?: AbortSignal) => post<Wakeword>("/wakewords", body, signal),

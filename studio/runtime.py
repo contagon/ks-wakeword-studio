@@ -16,12 +16,16 @@ from studio.datasets import DatasetService
 from studio.generation import GenerationService
 from studio.training import TrainingService
 from studio.deployment import DeploymentService
+from studio.migration import MigrationService
+from studio.models import StudioCapabilities
 
 
 class StudioRuntime:
-    def __init__(self, data_dir: Path, *, clock=utc_now, runner=None, groups=None):
+    def __init__(self, data_dir: Path, *, clock=utc_now, runner=None, groups=None, legacy_mode: bool = False,
+                 legacy_active=lambda: False):
         self.data_dir = Path(data_dir)
         self.clock, self.runner, self.groups = clock, runner, groups
+        self.legacy_mode, self.legacy_active = legacy_mode, legacy_active
         self._lock = threading.RLock()
         self._store: Store | None = None
         self._workspaces: WorkspaceService | None = None
@@ -36,6 +40,7 @@ class StudioRuntime:
         self._generation: GenerationService | None = None
         self._training: TrainingService | None = None
         self._deployment: DeploymentService | None = None
+        self._migration: MigrationService | None = None
 
     def startup(self) -> None:
         with self._lock:
@@ -55,6 +60,7 @@ class StudioRuntime:
                 self._generation = GenerationService(store, blobs, self._jobs, clock=self.clock)
                 self._training = TrainingService(store, blobs, self._jobs, self._datasets, clock=self.clock)
                 self._deployment = DeploymentService(store, self._devices, self._training, clock=self.clock)
+                self._migration = MigrationService(store, self._samples, self._training, legacy_active=self.legacy_active, clock=self.clock)
                 self._schedules = ScheduleService(store, self._jobs, clock=self.clock)
                 self._workers = WorkerPool(self._jobs, clock=self.clock, runner=self.runner, schedules=self._schedules,
                                            maintenance=self._deployment.retry_due)
@@ -69,6 +75,15 @@ class StudioRuntime:
             except BaseException:
                 store.close()
                 raise
+
+    @property
+    def migration(self) -> MigrationService:
+        self.startup()
+        assert self._migration is not None
+        return self._migration
+
+    def capabilities(self) -> StudioCapabilities:
+        return StudioCapabilities(self.legacy_mode, self.legacy_mode)
 
     def _collect_job(self, job, context):
         if context.cancelled():
@@ -177,3 +192,4 @@ class StudioRuntime:
                 self._generation = None
                 self._training = None
                 self._deployment = None
+                self._migration = None

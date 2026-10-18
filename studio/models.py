@@ -192,6 +192,12 @@ class WorkerHealth:
 
 
 @dataclass(frozen=True)
+class StudioCapabilities:
+    legacy_mode: bool
+    legacy_automation_enabled: bool
+
+
+@dataclass(frozen=True)
 class Device:
     # The stable kiosk identity, never an address or display name.
     id: str
