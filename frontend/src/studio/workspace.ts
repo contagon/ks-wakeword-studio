@@ -17,12 +17,12 @@ export function createWorkspace(routes: StudioRoutes) {
   let wordRequest: AbortController | undefined;
   let disposed = false;
 
+  const unavailable = "That wakeword is no longer available. Select another workspace.";
   function select(id: string) {
-    if (!wakewords.value.some(word => word.id === id)) {
-      notice.value = "That wakeword is no longer available. Select another workspace.";
-      id = wakewords.value[0]?.id ?? "";
-    }
-    selectedId.value = id;
+    const available = wakewords.value.some(word => word.id === id);
+    // A valid choice supersedes any earlier fallback; only a stale non-empty ID warrants a notice.
+    notice.value = available || !id ? "" : unavailable;
+    selectedId.value = available ? id : wakewords.value[0]?.id ?? "";
   }
   async function refreshSelected() {
     wordRequest?.abort();
@@ -49,10 +49,10 @@ export function createWorkspace(routes: StudioRoutes) {
     } catch (cause) {
       if (!current()) return;
       if (cause instanceof StudioApiError && cause.status === 404) {
-        notice.value = "That wakeword is no longer available. Select another workspace.";
         // Exclude the missing ID even if a concurrent list response still contains it.
         wakewords.value = wakewords.value.filter(word => word.id !== id);
         select(wakewords.value[0]?.id ?? "");
+        notice.value = unavailable;
       } else selectedError.value = cause instanceof Error ? cause.message : "Unable to load this workspace.";
     } finally {
       if (current()) selectedLoading.value = false;

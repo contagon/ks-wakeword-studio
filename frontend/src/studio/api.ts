@@ -1,4 +1,4 @@
-import type { Page, Wakeword, CreateWakeword, UpdateWakeword, Device, SourceMapping, Recording, Sample, SampleQuery, Pagination, CollectionRun, Schedule, ScheduleInput, Job, WorkerHealth, Dataset, GenerationRecipe, GenerationCapability, Batch, TrainingSettings, TrainingCounts, RunManifest, ModelVersion, Publication, DeploymentCapabilities } from "./types";
+import type { EnqueueScrapeJob, ModelMetrics, ScrapeJob, Page, Wakeword, CreateWakeword, UpdateWakeword, Device, SourceMapping, Recording, Sample, SampleQuery, Pagination, CollectionRun, Schedule, ScheduleInput, Job, WorkerHealth, Dataset, GenerationRecipe, GenerationCapability, Batch, TrainingSettings, TrainingCounts, RunManifest, ModelVersion, Publication, DeploymentCapabilities } from "./types";
 
 const base = "/api/studio";
 const segment = encodeURIComponent;
@@ -28,6 +28,15 @@ async function request<T>(path: string, method = "GET", body?: unknown, signal?:
   if (!response.ok) throw new StudioApiError(response.status);
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+function finiteOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+/** Narrow opaque archived calibration metrics; never trust shape or render unknown keys. */
+export function readModelMetrics(metrics: unknown): ModelMetrics {
+  const values = new Map<string, unknown>(typeof metrics === "object" && metrics !== null && !Array.isArray(metrics) ? Object.entries(metrics) : []);
+  const field = (key: keyof ModelMetrics) => finiteOrNull(values.get(key));
+  return { recall: field("recall"), false_accepts_per_hour: field("false_accepts_per_hour"), target_false_accepts_per_hour: field("target_false_accepts_per_hour") };
 }
 const wordPath = (id: string) => `/wakewords/${segment(id)}`;
 const samplePath = (word: string, id: string) => `${wordPath(word)}/samples/${segment(id)}`;
@@ -62,7 +71,7 @@ export const studioApi = {
   schedules: (signal?: AbortSignal) => get<Schedule[]>("/schedules", undefined, signal),
   saveSchedule: (scope: string, body: ScheduleInput, signal?: AbortSignal) => put<Schedule>(`/schedules/${segment(scope)}`, body, signal),
   jobs: (params?: Pagination, signal?: AbortSignal) => get<Page<Job>>("/jobs", params, signal),
-  enqueue: (body: { kind: string; word_id?: string; payload?: Record<string, unknown>; dedupe_key?: string }, signal?: AbortSignal) => post<Job>("/jobs", body, signal),
+  enqueueScrape: (body: EnqueueScrapeJob, signal?: AbortSignal) => post<ScrapeJob>("/jobs", body, signal),
   health: (signal?: AbortSignal) => get<WorkerHealth>("/jobs/health", undefined, signal),
   job: (id: string, signal?: AbortSignal) => get<Job>(`/jobs/${segment(id)}`, undefined, signal),
   jobLogs: (id: string, limit = 8192, signal?: AbortSignal) => get<{ text: string }>(`/jobs/${segment(id)}/logs`, { limit }, signal),

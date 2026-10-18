@@ -43,6 +43,16 @@ beforeEach(() => {
   }));
 });
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.unstubAllGlobals(); document.body.innerHTML = ""; });
+function mediaQuery(initial: boolean) {
+  const listeners = new Set<() => void>();
+  const query = {
+    matches: initial, media: "(max-width: 650px)",
+    addEventListener: (_: string, listener: () => void) => { listeners.add(listener); },
+    removeEventListener: (_: string, listener: () => void) => { listeners.delete(listener); },
+  };
+  vi.stubGlobal("matchMedia", vi.fn(() => query));
+  return { set(matches: boolean) { query.matches = matches; listeners.forEach(listener => listener()); } };
+}
 async function open() { wrapper = mount(TrainerApp, { attachTo: document.body }); await flushPromises(); return wrapper; }
 
 describe("compact studio workspace", () => {
@@ -50,10 +60,24 @@ describe("compact studio workspace", () => {
     const ui = await open();
     expect(ui.get('nav').findAll('a').map(a => a.text())).toEqual(["Wakewords", "Negative Datasets", "Artificial", "Scrape", "Classify", "Samples", "Train", "Deploy"]);
     expect(ui.get('nav').text()).toContain("Data");
+    expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
     await ui.get('[data-page="train"]').trigger('click');
     expect(ui.get('h1').text()).toBe("Train");
-    expect(ui.text()).toContain("Not implemented yet");
-    expect(ui.text()).not.toContain("Start training");
+    expect(ui.get('[data-studio-placeholder]').text()).toContain("not implemented yet");
+  });
+  it("keeps untouched legacy trainer workflows reachable from unfinished pages without a ninth page", async () => {
+    const ui = await open();
+    await ui.get('[data-page="train"]').trigger('click'); await flushPromises();
+    const legacy = ui.get('[data-legacy-trainer]');
+    expect(requests.some(r => r.path === '/api/train_status')).toBe(true);
+    expect(legacy.findAll('button').map(b => b.text())).toContain('Start training');
+    await ui.get('[data-page="samples"]').trigger('click'); await flushPromises();
+    expect(ui.get('[data-legacy-trainer]').text()).toContain('Current Training Samples');
+    await ui.get('[data-page="deploy"]').trigger('click'); await flushPromises();
+    expect(ui.get('[data-legacy-trainer]').text()).toContain('Trained Wake Words');
+    expect(ui.get('nav').findAll('a')).toHaveLength(8);
+    await ui.get('[data-page="wakewords"]').trigger('click'); await flushPromises();
+    expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
   });
   it("preserves selection across navigation, reload, and direct links", async () => {
     let ui = await open();
@@ -80,6 +104,14 @@ describe("compact studio workspace", () => {
     await ui.get('[data-action="refresh"]').trigger('click'); await flushPromises();
     expect((ui.get('#studio-word').element as HTMLSelectElement).value).toBe('b');
     expect(ui.text()).not.toContain('7 pending');
+  });
+  it("clears a stale fallback notice once a valid workspace is chosen", async () => {
+    history.replaceState(null, '', '/#/wakewords?word=deleted');
+    const ui = await open();
+    expect(ui.text()).toContain('no longer available');
+    await ui.get('#studio-word').setValue('b'); await flushPromises();
+    expect(ui.text()).not.toContain('no longer available');
+    expect(location.hash).toBe('#/wakewords?word=b');
   });
   it("aborts old word requests and ignores completions even when transport ignores abort", async () => {
     let finish!: (value: Response) => void;
@@ -114,23 +146,81 @@ describe("compact studio workspace", () => {
     expect((ui.get('#studio-word').element as HTMLSelectElement).value).toBe('c');
     expect(location.hash).toBe('#/wakewords?word=c');
   });
-  it("offers keyboard-focusable collapsing navigation and returns focus after Escape", async () => {
+  it("keeps wide-screen navigation always visible without a menu toggle", async () => {
+    mediaQuery(false);
     const ui = await open();
+    expect(ui.find('[aria-controls="studio-navigation"]').exists()).toBe(false);
+    expect(ui.get('nav').attributes('hidden')).toBeUndefined();
+    expect(ui.get('a[href="#studio-content"]').text()).toBe('Skip to content');
+  });
+  it("collapses narrow-screen navigation behind a keyboard-usable menu", async () => {
+    const screen = mediaQuery(true);
+    const ui = await open();
+    const nav = () => ui.get('#studio-navigation');
     const toggle = ui.get('[aria-controls="studio-navigation"]');
     expect(toggle.attributes('aria-expanded')).toBe('false');
+    expect(nav().attributes('hidden')).toBeDefined();
     (toggle.element as HTMLButtonElement).focus();
     await toggle.trigger('click');
     expect(toggle.attributes('aria-expanded')).toBe('true');
-    await ui.get('nav').trigger('keydown', { key: 'Escape' });
+    expect(nav().attributes('hidden')).toBeUndefined();
+    // Choosing a page collapses the menu and moves focus to the new content.
+    await ui.get('[data-page="classify"]').trigger('click'); await flushPromises();
+    expect(ui.get('h1').text()).toBe('Classify');
+    expect(nav().attributes('hidden')).toBeDefined();
+    expect(document.activeElement).toBe(ui.get('#studio-content').element);
+    // Escape pressed while the toggle itself is focused closes via the document listener.
+    (toggle.element as HTMLButtonElement).focus();
+    await toggle.trigger('click');
+    toggle.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await flushPromises();
     expect(toggle.attributes('aria-expanded')).toBe('false');
+    expect(nav().attributes('hidden')).toBeDefined();
     expect(document.activeElement).toBe(toggle.element);
-    expect(ui.get('a[href="#studio-content"]').text()).toBe('Skip to content');
+    // Escape from inside the open menu also closes it and restores focus.
+    await toggle.trigger('click');
+    (ui.get('[data-page="train"]').element as HTMLElement).focus();
+    document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await flushPromises();
+    expect(nav().attributes('hidden')).toBeDefined();
+    expect(document.activeElement).toBe(toggle.element);
+    // Widening the viewport reveals navigation and removes the collapsed menu.
+    await toggle.trigger('click');
+    screen.set(false); await flushPromises();
+    expect(ui.find('[aria-controls="studio-navigation"]').exists()).toBe(false);
+    expect(nav().attributes('hidden')).toBeUndefined();
+  });
+  it("shows visible pending states while list and selected-workspace requests are outstanding", async () => {
+    let releaseList!: () => void;
+    intercept = path => {
+      if (new URL(path, 'http://localhost').pathname === '/api/studio/wakewords') {
+        return new Promise(resolve => { releaseList = () => { intercept = undefined; resolve(json(page(records))); }; });
+      }
+    };
+    const ui = await open();
+    expect(ui.get('[role="status"]').text()).toBe('Loading workspaces…');
+    expect(ui.get('[data-action="refresh"]').attributes('disabled')).toBeDefined();
+    expect(ui.text()).not.toContain('No wakewords yet');
+    releaseList(); await flushPromises();
+    expect(ui.text()).not.toContain('Loading workspaces…');
+    expect(ui.text()).toContain('7 pending');
+    let releaseWord!: () => void;
+    intercept = path => {
+      if (path.includes('/wakewords/b/queue')) return new Promise(resolve => { releaseWord = () => resolve(json(page([], 2))); });
+    };
+    await ui.get('#studio-word').setValue('b'); await flushPromises();
+    expect(ui.text()).toContain('Loading selected workspace…');
+    expect(ui.text()).not.toContain('pending');
+    releaseWord(); await flushPromises();
+    expect(ui.text()).not.toContain('Loading selected workspace…');
+    expect(ui.text()).toContain('2 pending');
   });
   it("shows real empty/loading/error states with retry instead of invented counts", async () => {
     records = [];
     const ui = await open();
     expect(ui.text()).toContain('No wakewords yet');
     expect(ui.text()).not.toContain('pending');
+    expect(ui.text()).not.toContain('no longer available');
     ui.unmount(); wrapper = undefined;
     intercept = () => Promise.reject(new TypeError('offline'));
     const failed = await open();

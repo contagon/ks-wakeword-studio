@@ -204,7 +204,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", redraw));
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport to="body"><div class="legacy-scope">
     <div v-if="trainer.trimItem" class="modal-backdrop" @click.self="close">
       <section class="modal trim-modal" role="dialog" aria-modal="true" aria-label="Trim audio">
         <header class="modal-head">
@@ -231,5 +231,5 @@ onBeforeUnmount(() => window.removeEventListener("resize", redraw));
         </template>
       </section>
     </div>
-  </Teleport>
+  </div></Teleport>
 </template>
