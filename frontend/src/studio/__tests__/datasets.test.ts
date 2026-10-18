@@ -10,9 +10,16 @@ const words = [{ id: "a", phrase: "Hey Cedar", language: "en", model_id: "cedar"
 const dataset = (index: number, selected = false) => ({ id: `set-${index}`, name: `Corpus ${index}`, description: index === 150 ? "speech collection" : "negative classifier corpus", source: "Example source", license: "CC-BY", representation: "features", split: index === 151 ? "evaluation" : "train", adapter: "mww_mmap", purpose: "classifier_negative", download_bytes: 1000, installed_bytes: index === 0 ? 1000 : null, fingerprint: null, selected, status: index === 0 ? "installed" : index === 2 ? "running" : "available", job_id: index === 2 ? "download-2" : null, error_code: null });
 const catalog = Array.from({ length: 200 }, (_, index) => dataset(index));
 let workspace: Workspace;
+let selectedByWord: Record<string, Set<string>>;
+let delayDatasetSave = false;
+let resolveDatasetSave: ((response: Response) => void) | undefined;
+let delayDownload = false;
+let resolveDownload: ((response: Response) => void) | undefined;
 function host() { return { components: { NegativeDatasetsPage }, setup() { workspace = createWorkspace(useStudioRoutes()); provide(workspaceKey, workspace); }, template: "<NegativeDatasetsPage />" }; }
 
 beforeEach(() => {
+  selectedByWord = { a: new Set(["set-0"]), b: new Set(["set-1"]) };
+  delayDatasetSave = false; resolveDatasetSave = undefined; delayDownload = false; resolveDownload = undefined;
   history.replaceState(null, "", "#/negative-datasets?word=a");
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://localhost"); const path = url.pathname;
@@ -22,14 +29,14 @@ beforeEach(() => {
     if (path.endsWith("/models")) return json({ items: [], total: 0, offset: 0, limit: 1 });
     if (path === "/api/studio/schedules") return json([]);
     const match = path.match(/^\/api\/studio\/wakewords\/([ab])\/datasets$/);
-    if (match && init?.method === "PUT") return json({ items: [], total: 0, offset: 0, limit: 50 });
+    if (match && init?.method === "PUT") { const body = JSON.parse(String(init.body)) as { dataset_ids: string[] }; selectedByWord[match[1]] = new Set(body.dataset_ids); const response = json({ items: [], total: 0, offset: 0, limit: 50 }); return delayDatasetSave ? new Promise<Response>(resolve => { resolveDatasetSave = resolve; }) : response; }
     if (match) {
       const search = url.searchParams.get("search") ?? ""; const status = url.searchParams.get("status"); const offset = Number(url.searchParams.get("offset") ?? 0); const limit = Number(url.searchParams.get("limit") ?? 50);
-      const selected = match[1] === "a" ? new Set(["set-0"]) : new Set(["set-1"]);
+      const selected = selectedByWord[match[1]];
       const filtered = catalog.map(row => ({ ...row, selected: selected.has(row.id) })).filter(row => (!search || `${row.name} ${row.description}`.toLowerCase().includes(search.toLowerCase())) && (!status || (status === "selected" ? row.selected : row.status === status)));
       return json({ items: filtered.slice(offset, offset + limit), total: filtered.length, offset, limit });
     }
-    if (path === "/api/studio/datasets/set-2/download") return json({ id: "download-2", kind: "download", word_id: null, resource: "download", payload: { dataset_id: "set-2" }, status: "running", created_at: "", started_at: "", finished_at: null, result: {} }, 201);
+    if (path === "/api/studio/datasets/set-3/download") { const response = json({ id: "download-3", kind: "download", word_id: null, resource: "download", payload: { dataset_id: "set-3" }, status: "running", created_at: "", started_at: "", finished_at: null, result: {} }, 201); return delayDownload ? new Promise<Response>(resolve => { resolveDownload = resolve; }) : response; }
     if (path === "/api/studio/jobs/download-2") return json({ id: "download-2", kind: "download", word_id: null, resource: "download", payload: { dataset_id: "set-2" }, status: "running", created_at: "", started_at: "", finished_at: null, result: {} });
     if (path === "/api/studio/jobs/download-2/logs") return json({ text: "Downloading classifier dataset" });
     return json({ detail: `Unhandled ${path}` }, 500);
@@ -41,6 +48,7 @@ describe("NegativeDatasetsPage", () => {
   it("searches, filters, paginates a 200-entry real catalog, and exposes install state/progress and provenance", async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     expect(ui.text()).toContain("1–50 of 200"); expect(ui.text()).toContain("Corpus 0"); expect(ui.text()).toContain("Example source"); expect(ui.text()).toContain("CC-BY");
+    expect(ui.get('[data-oww-compatibility]').text()).toContain("MWW-only"); expect(ui.get('[data-oww-compatibility]').text()).toContain("dinner_party_eval");
     await ui.get('[data-action="next-page"]').trigger("click"); await flushPromises();
     expect(ui.text()).toContain("51–100 of 200"); expect(ui.text()).toContain("Corpus 50");
     await ui.get("input[name=dataset-search]").setValue("speech"); await flushPromises();
@@ -64,3 +72,29 @@ describe("NegativeDatasetsPage", () => {
     ui.unmount();
   });
 });
+
+  it("preserves selected IDs beyond the first 100 selected rows when saving a visible toggle", async () => {
+    selectedByWord.a = new Set([...Array.from({ length: 101 }, (_, index) => `set-${index}`), "set-150"]);
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    await ui.get('input[data-dataset-id="set-2"]').setValue(false); await ui.get('[data-action="save-datasets"]').trigger("click"); await flushPromises();
+    const call = vi.mocked(fetch).mock.calls.find(([input, init]) => String(input).endsWith("/wakewords/a/datasets") && init?.method === "PUT");
+    const ids = JSON.parse(String(call?.[1]?.body)) as { dataset_ids: string[] };
+    expect(ids.dataset_ids).toContain("set-100"); expect(ids.dataset_ids).toContain("set-150"); expect(ids.dataset_ids).not.toContain("set-2");
+    ui.unmount();
+  });
+
+  it("drops delayed prior-workspace save and download results and resets mutation busy state", async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    delayDatasetSave = true;
+    await ui.get('[data-action="save-datasets"]').trigger("click"); await flushPromises();
+    workspace.selectedId.value = "b"; await flushPromises();
+    expect(resolveDatasetSave).toBeTypeOf("function"); resolveDatasetSave?.(json({ items: [], total: 0, offset: 0, limit: 50 })); await flushPromises();
+    expect((ui.get('[data-action="save-datasets"]').element as HTMLButtonElement).disabled).toBe(false);
+    workspace.selectedId.value = "a"; await flushPromises(); await flushPromises();
+    delayDownload = true;
+    const download = ui.findAll("article").find(article => article.find('input[data-dataset-id="set-3"]').exists())?.find("button"); expect(download?.exists()).toBe(true);
+    await download?.trigger("click"); await flushPromises(); workspace.selectedId.value = "b"; await flushPromises();
+    expect(resolveDownload).toBeTypeOf("function"); resolveDownload?.(json({ id: "download-3", kind: "download", word_id: null, resource: "download", payload: { dataset_id: "set-3" }, status: "running", created_at: "", started_at: "", finished_at: null, result: {} }, 201)); await flushPromises();
+    expect(ui.find('[data-job-id="download-3"]').exists()).toBe(false);
+    ui.unmount();
+  });

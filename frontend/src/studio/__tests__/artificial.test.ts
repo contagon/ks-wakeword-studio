@@ -10,9 +10,12 @@ const words = [{ id: "a", phrase: "Hey Cedar", language: "en", model_id: "cedar"
 const recipe = { language: "en", english_accent: "us", tts_mode: "hybrid", samples: 20, batch_size: 5 };
 const job = (id: string, status: "queued" | "failed" | "cancelled") => ({ id, kind: "generation", word_id: "a", resource: "gpu", payload: { phrase: "Hey Cedar", recipe }, status, created_at: "", started_at: null, finished_at: status === "queued" ? null : "", result: {} });
 let workspace: Workspace;
+let delayRecipeSave = false;
+let resolveRecipeSave: ((response: Response) => void) | undefined;
 function host() { return { components: { ArtificialPage }, setup() { workspace = createWorkspace(useStudioRoutes()); provide(workspaceKey, workspace); onMounted(() => { void workspace.load(); }); }, template: "<ArtificialPage />" }; }
 
 beforeEach(() => {
+  delayRecipeSave = false; resolveRecipeSave = undefined;
   history.replaceState(null, "", "#/artificial?word=a");
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://localhost"); const path = url.pathname;
@@ -21,7 +24,7 @@ beforeEach(() => {
     if (path.endsWith("/queue")) return json({ items: [], total: 0, offset: 0, limit: 1 }); if (path.endsWith("/models")) return json({ items: [], total: 0, offset: 0, limit: 1 }); if (path === "/api/studio/schedules") return json([]);
     if (path === "/api/studio/generation/catalog") return json([{ language: "en", name: "English", accent_applies: true, english_accents: [{ code: "us", label: "US" }], engines: { hybrid: ["modern", "piper"], modern: ["modern"], piper: ["piper"] } }, { language: "fr", name: "French", accent_applies: false, english_accents: [], engines: { hybrid: ["modern"], modern: ["modern"], piper: [] } }]);
     const word = path.match(/^\/api\/studio\/wakewords\/([ab])\/generation\/(recipe|batches|jobs)$/);
-    if (word?.[2] === "recipe") { if (init?.method === "PUT") return json(JSON.parse(String(init.body))); return word[1] === "a" ? json(recipe) : json({ ...recipe, language: "fr", english_accent: "mixed", tts_mode: "modern" }); }
+    if (word?.[2] === "recipe") { if (init?.method === "PUT") { const response = json(JSON.parse(String(init.body))); return delayRecipeSave ? new Promise<Response>(resolve => { resolveRecipeSave = resolve; }) : response; } return word[1] === "a" ? json(recipe) : json({ ...recipe, language: "fr", english_accent: "mixed", tts_mode: "modern" }); }
     if (word?.[2] === "batches") { if (init?.method === "PUT") return json({ items: [], total: 0, offset: 0, limit: 50 }); return json({ items: word[1] === "a" ? [{ id: "ready", word_id: "a", phrase: "Hey Cedar", recipe, status: "complete", created_at: "", finished_at: "", audio: [{ audio_id: "x", original_hash: "o", normalized_hash: "n", family_id: "f" }], selected: true }, { id: "partial", word_id: "a", phrase: "Hey Cedar", recipe, status: "failed", created_at: "", finished_at: "", audio: [], selected: false }] : [], total: word[1] === "a" ? 2 : 0, offset: 0, limit: 50 }); }
     if (word?.[2] === "jobs") return json(job("generation-queued", "queued"), 201);
     if (path.match(/\/jobs\/generation-(queued|failed|cancelled)$/)) return json(job(`generation-${path.split("-").at(-1)}`, path.split("-").at(-1) as "queued" | "failed" | "cancelled"));
@@ -61,3 +64,15 @@ describe("ArtificialPage", () => {
     ui.unmount();
   });
 });
+
+  it("binds Generate to the word captured at click time and clears stale save busy state on a switch", async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    delayRecipeSave = true;
+    await ui.get('[data-action="generate"]').trigger("click"); await flushPromises();
+    workspace.selectedId.value = "b"; await flushPromises();
+    expect(resolveRecipeSave).toBeTypeOf("function"); resolveRecipeSave?.(json(recipe)); await flushPromises(); await flushPromises();
+    const generatedForB = vi.mocked(fetch).mock.calls.some(([input, init]) => String(input).endsWith("/wakewords/b/generation/jobs") && init?.method === "POST");
+    expect(generatedForB).toBe(false);
+    expect((ui.get('[data-action="generate"]').element as HTMLButtonElement).disabled).toBe(false);
+    ui.unmount();
+  });
