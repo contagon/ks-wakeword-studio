@@ -9,7 +9,7 @@
   </a>
 </p>
 
-Train paired microWakeWord and openWakeWord models in Docker with NVIDIA/CUDA acceleration, modern multilingual MWW TTS ensembles, device-captured samples, reviewed false-wake negatives, live training logs, and local wake-word links for Tater Native satellites.
+Kiosk Wakeword Studio manages independent wakeword workspaces, collects rolling kiosk diagnostics, supports manual review and synthetic batches, schedules NVIDIA/CUDA training, and publishes reversible archived models through one fleet leader plus standalone kiosks. microWakeWord is supported by the current dataset catalog; optional openWakeWord requires separately provisioned compatible inputs (see below).
 
 Real samples come from device-captured wake audio, close misses, or manual uploads. Every saved sample is normalized to `16 kHz / mono / 16-bit PCM WAV` before training.
 
@@ -65,7 +65,7 @@ The flags:
 
 - `--gpus all` enables GPU acceleration.
 - `--shm-size=8g` gives PyTorch DataLoader workers enough shared memory during openWakeWord training. This is separate from free disk space and requires recreating an existing container.
-- `--network host` exposes the trainer server directly so satellites can send captured audio and load trained wake-word files.
+- `--network host` exposes the trainer server directly on your host. Studio initiates authenticated requests to kiosks; it does not require legacy satellite push uploads.
 - `-e REC_PORT=8789` sets the trainer web UI and captured-audio port. Change this value if `8789` is already in use.
 - `-v $(pwd):/data` persists models, downloaded voices, datasets, samples, and generated wake-word artifacts.
 
@@ -77,11 +77,40 @@ Open:
 http://localhost:8789
 ```
 
-If you change `REC_PORT`, open that port instead and use the same port in the satellite `Trainer App URL`.
+If you change `REC_PORT`, open that port instead. For a local-only service without host networking, publish `127.0.0.1:8789:8789` instead; use a secured reverse proxy for remote access.
 
 ---
 
 ## Kiosk Studio setup and deployment safety
+
+**Security boundary: the trainer UI and `/api/studio` have no built-in user
+authentication. Anyone who can reach the trainer can review private recordings,
+change jobs, enroll targets, or trigger publication using its saved credentials.**
+Keep it on a trusted admin LAN or loopback, firewall the port, and use an
+authenticated HTTPS reverse proxy/VPN for other access. Never expose it directly
+to the Internet. Kiosk admin tokens authenticate the trainer *to each kiosk*, not
+users to this UI. Submit credentials only over a trusted transport (HTTPS outside
+loopback); browser request inspection can see a submitted token.
+
+1. Create a workspace in **Wakewords** with a unique stable model ID. Editing its
+   phrase does not rename device files or change historical versions.
+2. In **Scrape** or **Deploy**, add one leader URL and its admin Bearer token, or
+   add independent standalone kiosks. Multiple fleets/leaders are not supported.
+   Refresh the leader roster to discover followers. Each follower initially shows
+   **Credentials required**: enter that kiosk's own admin token. Discovery never
+   harvests/copies fleet tokens and does not make followers direct upload targets.
+3. Configure exact device/engine/source-phrase mappings to workspaces. Scraping is
+   global, independent of the word selected in the browser. Unknown phrases stay
+   unmapped until explicitly assigned. Collect twice safely: source tombstones
+   deduplicate recordings, including discarded/deleted clips. Collection never
+   clears kiosk diagnostics. Kiosk history is rolling and finite; scrape often
+   enough for the device's configured retention. Missed/evicted audio cannot be
+   recovered, and Studio does not invent an exact count of previously lost clips.
+4. **Classify** with P/N (positive/negative), Space (play/pause), R (replay), S
+   (skip this session), Z (undo), and D (confirm discard). Shortcuts pause while
+   editing fields/buttons. Acknowledged labels, not mere playback, control training.
+5. Select installed negative datasets and completed artificial batches per word;
+   save training settings and run manually or configure its training cron.
 
 Studio publication uploads archived models only to the configured fleet leader and
 standalone kiosks. Followers receive models through existing fleet synchronization;
@@ -108,11 +137,19 @@ endpoint, and republishing does not bypass quarantine. A journaled optional file
 with no current desired replacement also blocks publication rather than deleting
 it or committing obsolete bytes.
 
-After verified publication/synchronization, cache refresh restarts detection and
+The user-authorized `clearWakeWordModels` operation runs only after verified
+publication/synchronization. Cache refresh restarts detection and
 clears all engines' downloaded-model caches. Other selected remote models may need
 to be downloaded again. Custom uploads and settings remain intact. File verification
 and refresh acknowledgement are **not** proof of the version used by inference;
 offline, uncredentialed, excluded, and lagging followers are not reported as success.
+Rollback chooses an older immutable archive as the new desired version and uploads
+it under the **same stable filenames**; it never edits enabled slots or thresholds.
+Retries follow the latest desired revision, not an obsolete queued version.
+`refresh_pending`, manifest-unverified, and runtime-unverified states are not proof
+of live inference; refresh may remain pending until a follower has synchronized and
+its own credentials permit verification. The existing leader/fleet remains the
+authority for any fleet-controlled selections.
 
 Read-only API help (available even before any model is published):
 
@@ -128,13 +165,68 @@ Read-only API help (available even before any model is published):
 
 ## What The UI Does
 
-- The entire interface is reactive Vue 3 + TypeScript, following the same typed component pattern as Tater's newer UI surfaces.
-- `Trainer` starts a wake-word session, shows positive/negative sample counts, and launches an MWW + OWW build by default.
-- `Auto Training` transcribes real wake triggers, promotes phrase-misses to hard negatives, schedules retraining, and refreshes Tater Native satellites.
-- `Captured Audio` reviews clips sent by Tater Native or ESPHome sats, including wake hits, close misses, and false wakes.
-- `Samples` plays, removes, clears, and manually imports personal or negative samples.
-- `Wake Words` lists locally trained JSON/model links for live wake-word switching in Tater.
-- Popup consoles show colorized training logs while long-running jobs are active.
+- **Wakewords**: separate phrases, stable identities, summaries, explicit legacy import.
+- **Negative Datasets / Artificial**: searchable paginated catalog, actual per-word
+  selection, saved TTS recipes, immutable completed batches, queued job/log status.
+- **Scrape / Classify / Samples**: shared registry, global collection cron, keyboard
+  review, provenance, revision-safe labels, non-destructive trimming and audio import.
+- **Train / Deploy**: effective inputs, one shared GPU queue, per-word cron, retained
+  run manifests/checksums/logs, downloadable archives, publication history and rollback.
+
+### Storage, migration and scheduling
+
+Persist the entire `/data` volume (`DATA_DIR` outside Docker). Studio stores
+`studio/studio.sqlite3` (with WAL/SHM), content-addressed `studio/blobs/`, isolated
+`studio/jobs/`, versioned `studio/datasets/versions/`, immutable
+`studio/models/<word-id>/<version-id>/`, and migration records. Kiosk credentials
+are separate owner-only files in `studio/credentials/`; protect the volume and its
+backups as secrets. Credentials are omitted from public APIs and model exports,
+but a full-volume backup contains them. Do not manually delete retained blobs,
+dataset versions or archives referenced by old runs. Stop the server/workers for
+a consistent full-volume backup/restore; do not copy just a live SQLite main file.
+Shared downloaded tools/voices and training environments also occupy `/data`.
+
+No singleton data is silently assigned on startup. Back up the volume, stop legacy
+training, create/select a destination workspace, and inspect **Wakewords → Legacy
+import**. Explicitly assign unknown phrases/models to workspace IDs before import.
+Legacy `personal_samples/`, `negative_samples/`, `captured_audio/` and
+`trained_wake_words/` are copied with provenance, never moved or erased. Repeat
+imports are deduplicated. Unsupported/unsafe files are skipped and counted; inspect
+the report. To revert migration, restore the stopped-server backup rather than
+editing SQLite or deleting referenced files manually.
+
+Studio mode is the default and default-denies **all legacy `/api` routes** outside
+`/api/studio`. `TRAINER_LEGACY_MODE=1` is an explicit isolated compatibility opt-in
+for old clients, **not** a demo/stub switch; Studio GPU work is blocked there to
+avoid competing legacy GPU owners. The old embedded trainer is retired from the
+Studio UI. Instructions below marked legacy require this mode.
+
+Schedules use standard **five-field cron**, an explicit IANA timezone (UTC by
+default), and show the next UTC instant. DST gaps/folds follow pinned croniter
+6.0.0 + zoneinfo behavior, not a promise of one wall-clock execution every day:
+check the displayed next instant around transitions. Restart/delayed polling
+coalesces missed ticks to one pending occurrence rather than replaying every tick;
+in-flight scopes are not duplicated. Unchanged scheduled training skips a new
+build; global collection and each word's training schedule are independent.
+
+### TTS and dataset compatibility
+
+Recipes expose available languages and `modern`, `hybrid`, or `piper` modes through
+the server catalog. Piper availability depends on installed voices; English accent
+emphasis applies only where supported. Completed selected synthetic batches join
+explicitly reviewed real audio; generation is not silently rerun by training.
+Evaluation families remain stable across variants and historical runs.
+
+The current negative catalog contains **MWW feature tensors only** (`mww_mmap`),
+not generic WAV backgrounds or OWW embeddings. `dinner_party_eval` is evaluation-only
+and is never sampled as a training negative. Augmentation backgrounds are separate
+from classifier negatives. Optional OWW requires explicit compatible
+`oww_embeddings_npy` inputs, including evaluation embeddings, plus suitable reviewed
+negative families; raw-audio catalog conversion is not implemented. An incompatible
+selection fails with an actionable error—no silent stock-negative download or
+cross-engine reuse. Real training also requires independent positive train,
+validation and testing families (and corresponding reviewed-negative splits when
+used); a tiny smoke-test corpus is not sufficient for actual ML training.
 
 The production bundle is committed under `static/ui`, so neither NVIDIA Docker image needs Node.js. To change the UI, edit `frontend/src` and rebuild it before building the image:
 
@@ -146,9 +238,45 @@ npm run build
 
 `npm run build` type-checks every Vue component before writing the offline bundle copied into both the standard CUDA and Blackwell images.
 
+### Offline integration verification (no CUDA or live kiosks)
+
+Use an existing server/test Python environment, or create a lightweight venv; do
+not install the CUDA training requirements just to test the app. Python 3.12,
+`ffmpeg`, `openssl`, Bash, and Node/npm (development only) are used by the suite:
+
+```bash
+python3 -m venv /tmp/opencode/studio-tests
+/tmp/opencode/studio-tests/bin/python -m pip install fastapi==0.115.6 uvicorn==0.49.0 python-multipart==0.0.9 croniter==6.0.0 httpx==0.28.1 PyYAML numpy
+DATA_DIR=/tmp/opencode/studio-unit-data /tmp/opencode/studio-tests/bin/python -m unittest discover -s tests -v
+npm --prefix frontend ci
+npm --prefix frontend test -- --run
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
+cd frontend
+# Playwright 1.63.0 uses cached Chromium revision 1243; install only if absent:
+npx playwright install chromium
+STUDIO_TEST_PYTHON=/tmp/opencode/studio-tests/bin/python npm run test:e2e
+```
+
+Playwright launches the real app and committed static UI with a tests-only,
+constructor-injected GPU command runner, fresh temporary data under `/tmp/opencode`,
+and deterministic loopback HTTP kiosks. There is no production environment variable
+that enables fake GPU success; test code is not copied into either Docker image.
+These tests verify orchestration, not CUDA inference, downloaded ML weights, a
+container build, or real-device behavior. Live-device checks are opt-in only; review
+the test's environment variables and required authorization before enabling them,
+especially cache clearing/publication. Do not point the integration fixtures at a
+real LAN device. Neither image requires Node at runtime; both ship the complete
+`studio/` package, SQL/JSON resources, CLI helpers and prebuilt `static/ui` assets.
+
 ---
 
-## Captured Audio Workflow
+## Legacy compatibility reference (requires TRAINER_LEGACY_MODE=1)
+
+The remaining singleton workflow reference applies to explicit legacy API clients,
+not the default Studio UI. Legacy push-upload routes are rejected in Studio mode.
+
+### Captured Audio Workflow
 
 To collect samples from a sat, point its trainer feedback setting at this app. Tater Native satellites use the native settings popup in Tater. Older ESPHome satellites can still use their device entities.
 

@@ -1,4 +1,5 @@
 import io
+import fcntl
 import base64
 import json
 import sqlite3
@@ -8,6 +9,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -270,11 +272,32 @@ class CollectionTests(unittest.TestCase):
         self.addCleanup(second_store.close)
         second = CollectionService(second_store, SampleService(second_store, self.samples.blobs),
                                    DeviceService(second_store, self.client))
-        with ThreadPoolExecutor(2) as pool:
+        contended = threading.Event()
+        flock = fcntl.flock
+        second_thread = None
+
+        def observe_lock(fd, operation):
+            if threading.get_ident() == second_thread and operation == fcntl.LOCK_EX:
+                # Prove the second collector reached an actually held OS lock.
+                try:
+                    flock(fd, operation | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    contended.set()
+            return flock(fd, operation)
+
+        def collect_second():
+            nonlocal second_thread
+            second_thread = threading.get_ident()
+            return second.collect_device('a')
+
+        with patch('studio.collection.fcntl.flock', observe_lock), ThreadPoolExecutor(2) as pool:
             first = pool.submit(self.service.collect_device, 'a')
             self.assertTrue(entered.wait(5))
-            other = pool.submit(second.collect_device, 'a')
-            release.set()
+            other = pool.submit(collect_second)
+            try:
+                self.assertTrue(contended.wait(5))
+            finally:
+                release.set()
             results = [first.result(), other.result()]
         self.assertEqual(sum(r.new for r in results), 1)
         self.assertEqual(sum(r.already_seen for r in results), 1)

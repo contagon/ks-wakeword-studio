@@ -1,0 +1,11 @@
+.git
+.superpowers
+**/__pycache__
+**/*.py[cod]
+frontend/node_modules
+frontend/test-results
+frontend/playwright-report
+tests
+data
+personal_samples/*
+trim_history/*

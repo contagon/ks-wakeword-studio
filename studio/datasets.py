@@ -10,7 +10,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import stat
 import tempfile
 import zipfile
@@ -215,7 +214,13 @@ class DatasetService:
                         else:
                             target.parent.mkdir(parents=True, exist_ok=True)
                             with source.open(member) as reader, target.open('xb') as writer:
-                                shutil.copyfileobj(reader, writer, 1024 * 1024)
+                                while True:
+                                    if cancelled():
+                                        raise Conflict('Dataset installation cancelled')
+                                    block = reader.read(1024 * 1024)
+                                    if not block:
+                                        break
+                                    writer.write(block)
                                 writer.flush()
                                 os.fsync(writer.fileno())
                 content = stage / dataset_id if (stage / dataset_id).is_dir() else stage

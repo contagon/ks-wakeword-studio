@@ -26,6 +26,14 @@ def _cuda_path_probe() -> str:
 
 
 class RunShCudaLibraryPathTests(unittest.TestCase):
+    def test_production_launcher_keeps_real_app_and_port_without_test_harness(self):
+        source = RUN_SH.read_text(encoding='utf-8')
+        self.assertIn('PORT="${REC_PORT:-8789}"', source)
+        self.assertIn('trainer_server:app --host "${HOST}" --port "${PORT}"', source)
+        self.assertNotIn('studio_browser_server', source)
+        self.assertNotIn('StubGpuRunner', source)
+        self.assertNotIn('TRAINER_LEGACY_MODE=1', source)
+
     def test_croniter_is_exactly_pinned_and_validated_on_reuse(self):
         source = RUN_SH.read_text(encoding="utf-8")
         self.assertIn('CRONITER_VERSION="6.0.0"', source)

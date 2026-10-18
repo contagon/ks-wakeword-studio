@@ -34,14 +34,16 @@ function navigate(id: PageId) {
 }
 watch(narrow, isNarrow => { if (!isNarrow) navigationOpen.value = false; });
 updateNarrow();
-narrowQuery?.addEventListener("change", updateNarrow);
+if (narrowQuery?.addEventListener) narrowQuery.addEventListener("change", updateNarrow);
+else narrowQuery?.addListener(updateNarrow);
 onMounted(() => {
   document.addEventListener("keydown", onKeydown);
   void workspace.load();
 });
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", onKeydown);
-  narrowQuery?.removeEventListener("change", updateNarrow);
+  if (narrowQuery?.removeEventListener) narrowQuery.removeEventListener("change", updateNarrow);
+  else narrowQuery?.removeListener(updateNarrow);
 });
 </script>
 

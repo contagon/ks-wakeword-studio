@@ -132,6 +132,24 @@ class DatasetTests(unittest.TestCase):
             self.service.install_archive('speech', self.archive('readme.txt'))
         self.assertEqual(self.service.list(self.a, status='installed').total, 0)
 
+    def test_cancel_during_large_member_stops_before_copying_remaining_bytes(self):
+        archive = self.archive(content=b'x' * (5 * 1024 * 1024))
+        original = zipfile.ZipExtFile.read
+        copied = 0
+
+        def read(reader, *args, **kwargs):
+            nonlocal copied
+            block = original(reader, *args, **kwargs)
+            copied += len(block)
+            return block
+
+        with patch.object(zipfile.ZipExtFile, 'read', read):
+            with self.assertRaisesRegex(Conflict, 'cancelled'):
+                self.service.install_archive('speech', archive, cancelled=lambda: copied >= 1024 * 1024)
+        self.assertLessEqual(copied, 1024 * 1024)
+        self.assertEqual(self.service.list(self.a, status='installed').total, 0)
+        self.assertEqual(list((self.store.root / 'datasets/staging').iterdir()), [])
+
     def test_explicit_mww_inputs_omit_defaults_and_evaluation_is_zero_weight(self):
         self.install()
         self.install('dinner_party_eval')

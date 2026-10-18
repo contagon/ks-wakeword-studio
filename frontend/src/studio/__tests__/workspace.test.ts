@@ -157,6 +157,15 @@ describe("compact studio workspace", () => {
     expect(ui.get('nav').attributes('hidden')).toBeUndefined();
     expect(ui.get('a[href="#studio-content"]').text()).toBe('Skip to content');
   });
+  it("supports and cleans up the older Safari media-query listener API", async () => {
+    const addListener = vi.fn(); const removeListener = vi.fn();
+    vi.stubGlobal('matchMedia', () => ({ matches: true, addListener, removeListener }));
+    const ui = await open();
+    expect(addListener).toHaveBeenCalledWith(expect.any(Function));
+    expect(ui.get('nav').attributes('hidden')).toBeDefined();
+    ui.unmount(); wrapper = undefined;
+    expect(removeListener).toHaveBeenCalledWith(addListener.mock.calls[0][0]);
+  });
   it("collapses narrow-screen navigation behind a keyboard-usable menu", async () => {
     const screen = mediaQuery(true);
     const ui = await open();

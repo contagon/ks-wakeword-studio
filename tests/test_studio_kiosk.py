@@ -1,4 +1,5 @@
 import io
+import http.client
 import json
 import ssl
 import subprocess
@@ -7,6 +8,7 @@ import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from kiosk_fixture import KioskServer, TOKEN
 from studio.kiosk import KioskClient, normalize_url
@@ -91,6 +93,23 @@ class KioskTests(unittest.TestCase):
             self.client.command(self.device, "fleetStatus", {})
         with self.assertRaises(ValidationError):
             self.client.stage_model(self.device, "a.onnx", io.BytesIO(b"a" * 1025))
+
+    def test_rejected_response_is_closed_even_when_connection_releases_http10_socket(self):
+        original = http.client.HTTPConnection.getresponse
+        responses = []
+
+        def capture(connection):
+            response = original(connection)
+            responses.append(response)
+            return response
+
+        for result in ((500, {}, b'rejected'), (200, {}, b'x' * 8193)):
+            with self.subTest(result=result[0]):
+                self.server.responses['/kiosk/api/commands/fleetStatus'] = result
+                with patch.object(http.client.HTTPConnection, 'getresponse', capture):
+                    with self.assertRaises(RemoteRejected):
+                        self.client.command(self.device, 'fleetStatus', {})
+                self.assertTrue(responses[-1].isclosed())
 
     def test_upload_rejection_even_when_ok_true(self):
         self.server.responses["/kiosk/api/voice/wake-models/upload?name=a.onnx"] = {"ok": True, "data": {"rejected": {"file": "a.onnx", "reason": TOKEN}}}

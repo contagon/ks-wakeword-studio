@@ -83,6 +83,7 @@ class KioskClient:
         token = validate_token(self.credentials(device))
         parsed = urlsplit(normalize_url(device.url))
         connection = None
+        response = None
         try:
             if parsed.scheme == "https":
                 connection = http.client.HTTPSConnection(parsed.hostname, parsed.port,
@@ -130,6 +131,10 @@ class KioskClient:
         except (ValueError, RecursionError, UnicodeError):
             raise RemoteRejected("Invalid kiosk response") from None
         finally:
+            # HTTP/1.0 responses own their socket file after getresponse() has
+            # detached it from the connection, including rejected unread bodies.
+            if response is not None:
+                response.close()
             if connection is not None:
                 connection.close()
 

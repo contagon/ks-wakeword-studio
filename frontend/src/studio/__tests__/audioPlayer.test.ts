@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import AudioPlayer from "../components/AudioPlayer.vue";
+import { fakeMedia } from "./fakeStudio";
 
 interface Deferred<T> { promise: Promise<T>; resolve: (value: T) => void }
 function deferred<T>(): Deferred<T> {
@@ -22,6 +23,7 @@ let wrapper: VueWrapper | undefined;
 async function settle(): Promise<void> { for (let attempt = 0; attempt < 4; attempt += 1) await flushPromises(); }
 
 function mountPlayer(sampleId = "a", src = "/api/studio/wakewords/a/samples/a/audio") {
+  fakeMedia(); // jsdom cannot implement play/pause or browser blob URLs.
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(new Blob(["authorized sample audio"], { type: "audio/wav" })))));
   vi.stubGlobal("AudioContext", DecodeContext);
   vi.stubGlobal("webkitAudioContext", undefined);
@@ -56,6 +58,7 @@ describe("Studio review waveform", () => {
     expect(DecodeContext.decodes).toHaveLength(1);
     await ui.setProps({ sampleId: "b", src: "/api/studio/wakewords/b/samples/b/audio" });
     await settle();
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
     expect(DecodeContext.decodes).toHaveLength(2);
     DecodeContext.decodes[1].resolve(audioBuffer([0.2, 0.8]));
     await settle();

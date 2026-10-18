@@ -36,7 +36,23 @@ class VueTrainerUiTests(unittest.TestCase):
         for old_blue in ("#070b15", "#11192b", "#5db6ff", "#8d75ff", "#7fc7ff", "#78caff"):
             self.assertNotIn(old_blue, styles)
 
-    def test_reactive_ui_keeps_trainer_workflows(self) -> None:
+    def test_studio_mounts_real_pages_without_legacy_embedding(self) -> None:
+        app = (REPO_ROOT / 'frontend/src/TrainerApp.vue').read_text()
+        shell = (REPO_ROOT / 'frontend/src/studio/components/StudioShell.vue').read_text()
+        api = (REPO_ROOT / 'frontend/src/studio/api.ts').read_text()
+        self.assertIn('StudioShell', app)
+        self.assertNotIn('LegacyTrainer', app + shell)
+        for page in ('Wakewords', 'NegativeDatasets', 'Artificial', 'Scrape', 'Classify', 'Samples', 'Train', 'Deploy'):
+            self.assertIn(f'<{page}Page', shell)
+        for contract in ('/queue', '/label', '/generation/jobs', '/training/jobs', '/datasets', '/deployment/rollback'):
+            self.assertIn(contract, api)
+        classify = (REPO_ROOT / 'frontend/src/studio/pages/ClassifyPage.vue').read_text()
+        self.assertIn('expected_revision', api)
+        self.assertIn('editing(event)', classify)
+        self.assertIn('data-shortcuts', classify)
+        self.assertIn('AbortController', classify)
+
+    def test_retained_legacy_source_keeps_its_explicit_mode_workflows(self) -> None:
         app = (REPO_ROOT / "frontend" / "src" / "LegacyTrainer.vue").read_text(encoding="utf-8")
         store = (REPO_ROOT / "frontend" / "src" / "trainerStore.ts").read_text(encoding="utf-8")
         trim = (REPO_ROOT / "frontend" / "src" / "components" / "AudioTrimModal.vue").read_text(encoding="utf-8")
