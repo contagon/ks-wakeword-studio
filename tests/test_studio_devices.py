@@ -133,6 +133,60 @@ class DeviceTests(unittest.TestCase):
         self.assertEqual(device.credentials_status, "ready")
         self.assertTrue(all("fleet/export" not in r[0] for r in self.server.requests))
 
+    def test_inactive_explicit_credentials_verify_identity_without_enabling_actions(self):
+        self.server.identity["data"].update(leader=False, follows="Kitchen")
+        cached = self.service.add(self.server.url, TOKEN, "standalone")
+        obsolete = self.service.credentials.put("obsolete-admin-token")
+        with self.store.transaction() as db:
+            db.execute("UPDATE devices SET active=0, credential_ref=? WHERE id=?", (obsolete, cached.id))
+        before = len(self.server.requests)
+        updated = self.service.set_credentials(cached.id, TOKEN)
+        self.assertEqual(self.server.requests[before:], [
+            ("/kiosk/api/commands/fleetIdentity", f"Bearer {TOKEN}", b"{}")])
+        self.assertFalse(updated.active)
+        self.assertEqual((updated.role, updated.credentials_status), ("follower", "ready"))
+        with self.store.transaction() as db:
+            saved = db.execute("SELECT credential_ref FROM devices WHERE id=?", (cached.id,)).fetchone()[0]
+        self.assertNotEqual(saved, obsolete)
+        self.assertEqual(self.service.credentials.get(saved), TOKEN)
+        self.assertEqual(self.service.publication_targets(), [])
+        before = len(self.server.requests)
+        for device in (updated, cached):
+            for operation in (lambda: self.service.client.diagnostics(device),
+                              lambda: self.service.client.audio(device, "clip-1"),
+                              lambda: self.service.client.stage_model(device, "a.onnx", io.BytesIO(b"a")),
+                              lambda: self.service.client.commit_models(device)):
+                with self.assertRaises(RemoteRejected):
+                    operation()
+        self.assertEqual(len(self.server.requests), before)
+
+    def test_inactive_credentials_route_still_rejects_identity_mismatch_and_bad_token(self):
+        self.server.identity["data"].update(leader=False, follows="Kitchen")
+        device = self.service.add(self.server.url, TOKEN, "standalone")
+        with self.store.transaction() as db:
+            db.execute("UPDATE devices SET active=0, credential_ref=NULL WHERE id=?", (device.id,))
+        runtime = StudioRuntime(self.root)
+        self.addCleanup(runtime.shutdown)
+        app = FastAPI()
+        app.include_router(create_router(runtime))
+        with TestClient(app) as client:
+            path = f"/api/studio/devices/{device.id}/credentials"
+            self.server.identity["data"]["id"] = "different-kiosk"
+            response = client.post(path, json={"token": TOKEN})
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(self.service.get(device.id).credentials_status, "credentials_required")
+            self.server.identity["data"]["id"] = device.id
+            response = client.post(path, json={"token": "invalid-private-admin-token"})
+            self.assertEqual(response.status_code, 403)
+            self.assertNotIn("invalid-private-admin-token", response.text)
+            self.assertEqual(self.service.get(device.id).credentials_status, "credentials_required")
+            response = client.post(path, json={"token": TOKEN})
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(response.json()["active"])
+            self.assertEqual(response.json()["role"], "follower")
+            self.assertEqual(response.json()["credentials_status"], "ready")
+            self.assertNotIn(TOKEN, response.text)
+
     def test_additive_upgrade_v2_retains_workspace(self):
         self.store.close()
         other = self.root / "old"

@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import stat
+from dataclasses import replace
 from typing import Literal
 from uuid import uuid4
 
@@ -118,7 +119,10 @@ class DeviceService:
     def set_credentials(self, device_id: str, token: str) -> Device:
         device = self.get(device_id)
         validate_token(token)
-        identity = KioskClient(lambda _: token).identity(device)
+        # Explicit credential administration may probe an inactive kiosk. Only
+        # this identity call uses the temporary probe and newly supplied token;
+        # never persist/return it or grant scrape/upload access to the record.
+        identity = KioskClient(lambda _: token).identity(replace(device, active=True))
         ref = self.credentials.put(token)
         role = "follower" if device.role == "follower" or identity.follows else device.role
         with self.store.transaction() as db:
