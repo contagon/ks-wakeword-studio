@@ -1,5 +1,7 @@
 import type { EnqueueScrapeJob, ModelMetrics, ScrapeJob, Page, Wakeword, CreateWakeword, UpdateWakeword, Device, SourceMapping, Recording, Sample, SampleQuery, Pagination, CollectionRun, Schedule, ScheduleInput, Job, WorkerHealth, Dataset, GenerationRecipe, GenerationCapability, Batch, TrainingSettings, TrainingCounts, RunManifest, ModelVersion, Publication, DeploymentCapabilities, LegacyInventory, LegacyImportSelection, MigrationReport, StudioCapabilities } from "./types";
 
+import type { LegacyRun } from './types';
+
 const base = "/api/studio";
 const segment = encodeURIComponent;
 type Query = object;
@@ -87,6 +89,7 @@ export const studioApi = {
   saveGenerationRecipe: (word: string, body: GenerationRecipe, signal?: AbortSignal) => put<GenerationRecipe>(`${wordPath(word)}/generation/recipe`, body, signal),
   generate: (word: string, signal?: AbortSignal) => post<Job>(`${wordPath(word)}/generation/jobs`, undefined, signal),
   batches: (word: string, params?: Pagination, signal?: AbortSignal) => get<Page<Batch>>(`${wordPath(word)}/generation/batches`, params, signal),
+  batchSelection: (word: string, signal?: AbortSignal) => get<string[]>(`${wordPath(word)}/generation/selection`, undefined, signal),
   batch: (word: string, id: string, signal?: AbortSignal) => get<Batch>(`${wordPath(word)}/generation/batches/${segment(id)}`, undefined, signal),
   selectBatches: (word: string, batch_ids: string[], signal?: AbortSignal) => put<Page<Batch>>(`${wordPath(word)}/generation/batches`, { batch_ids }, signal),
   trainingSettings: (word: string, signal?: AbortSignal) => get<TrainingSettings>(`${wordPath(word)}/training/settings`, undefined, signal),
@@ -94,7 +97,7 @@ export const studioApi = {
   trainingCounts: (word: string, signal?: AbortSignal) => get<TrainingCounts>(`${wordPath(word)}/training/counts`, undefined, signal),
   train: (word: string, signal?: AbortSignal) => post<Job>(`${wordPath(word)}/training/jobs`, undefined, signal),
   trainingRuns: (word: string, params?: Pagination, signal?: AbortSignal) => get<Page<Job>>(`${wordPath(word)}/training/runs`, params, signal),
-  trainingManifest: (word: string, id: string, signal?: AbortSignal) => get<RunManifest>(`${wordPath(word)}/training/runs/${segment(id)}`, undefined, signal),
+  trainingManifest: (word: string, id: string, signal?: AbortSignal) => get<RunManifest | LegacyRun>(`${wordPath(word)}/training/runs/${segment(id)}`, undefined, signal),
   models: (word: string, params?: Pagination, signal?: AbortSignal) => get<Page<ModelVersion>>(`${wordPath(word)}/models`, params, signal),
   model: (word: string, id: string, signal?: AbortSignal) => get<ModelVersion>(`${wordPath(word)}/models/${segment(id)}`, undefined, signal),
   archiveUrl: (word: string, id: string, name?: string) => `${base}${wordPath(word)}/models/${segment(id)}/archive${name === undefined ? "" : `/${segment(name)}`}`,

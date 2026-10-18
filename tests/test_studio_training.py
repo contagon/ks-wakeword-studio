@@ -43,6 +43,8 @@ class TrainingTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        from studio_harness import augmentation_fixture
+        augmentation_fixture(self.root)
         self.runner = TrainingRunner()
         self.runtime = StudioRuntime(self.root, runner=self.runner)
         self.word = self.runtime.workspaces.create('Hello robot', 'en', 'hello_robot')
@@ -243,7 +245,7 @@ class TrainingTests(unittest.TestCase):
             store = Store.open(root)
             try:
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 11)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 12)
                     self.assertEqual(db.execute('SELECT phrase FROM wakewords').fetchone()[0], 'Old')
             finally:
                 store.close()

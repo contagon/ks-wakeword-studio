@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from studio.datasets import DatasetService
 from studio.runtime import StudioRuntime
-from studio_harness import FixtureOnlyClient, StubGpuRunner
+from studio_harness import FixtureOnlyClient, StubGpuRunner, augmentation_fixture
 from test_studio_workflow import FixtureKiosk, TOKEN
 
 
@@ -38,6 +38,7 @@ def main():
         os.environ.pop('TRAINER_LEGACY_MODE', None)
         follower = FixtureKiosk('fixture-follower', leader=False)
         leader = FixtureKiosk('fixture-leader', leader=True, follower=follower)
+        augmentation_fixture(Path(directory))
         runtime = BrowserRuntime(Path(directory), runner=StubGpuRunner())
         runtime.startup()
         runtime.devices.client = FixtureOnlyClient(runtime.devices._token, [leader.url, follower.url])

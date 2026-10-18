@@ -54,13 +54,16 @@ class DeploymentService:
 
     def version(self, version_id, word_id=None):
         with self.store.transaction() as db:
-            row = db.execute('SELECT v.version,j.status FROM model_versions v JOIN studio_jobs j ON j.id=v.run_id '
+            row = db.execute('SELECT v.version,j.status,EXISTS(SELECT 1 FROM legacy_model_validations a WHERE a.version_id=v.id) validated,EXISTS(SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id) legacy FROM model_versions v JOIN studio_jobs j ON j.id=v.run_id '
                              'WHERE v.id=?', (version_id,)).fetchone()
         if row is None:
             raise NotFound('Model version not found')
         if row['status'] != 'complete':
             raise Conflict('Model version is not complete')
         version = ModelVersion(**json.loads(row['version']))
+        if row['legacy']:
+            from dataclasses import replace
+            version = replace(version, origin='legacy', validation_state='validated' if row['validated'] else 'unvalidated')
         if word_id is not None and version.word_id != word_id:
             raise Conflict('Model version belongs to another workspace')
         return version
@@ -108,7 +111,15 @@ class DeploymentService:
     def archive(self, version_id, word_id):
         """Validated complete archive stream, with bounded memory and cleanup."""
         version = self.version(version_id, word_id)
-        self.artifacts(version)
+        if version.origin != 'legacy':
+            self.artifacts(version)
+        else:
+            root = self.store.root / 'models' / version.word_id / version.id
+            if Path(version.path) != root:
+                raise ValidationError('Invalid archive path')
+            for name, expected in version.checksums.items():
+                if sha256(checked_file(root / name, root)) != expected:
+                    raise ValidationError('Archive checksum mismatch')
         handle = TemporaryFile(dir=self.store.root)
         try:
             with ZipFile(handle, 'w', compression=ZIP_DEFLATED) as bundle:
@@ -177,9 +188,11 @@ class DeploymentService:
         # manual rollback. This also recovers the finish->callback crash window.
         with self.store.transaction() as db:
             db.execute("INSERT OR IGNORE INTO deployment_events(version_id) SELECT v.id FROM model_versions v "
-                       "JOIN studio_jobs j ON j.id=v.run_id WHERE j.status='complete'")
+                       "JOIN studio_jobs j ON j.id=v.run_id WHERE j.status='complete' AND j.kind='train' AND NOT EXISTS "
+                       "(SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id)")
             rows = db.execute("SELECT v.version FROM deployment_events e JOIN model_versions v ON v.id=e.version_id "
-                              "JOIN studio_jobs j ON j.id=v.run_id WHERE e.consumed=0 AND j.status='complete' ORDER BY v.rowid").fetchall()
+                              "JOIN studio_jobs j ON j.id=v.run_id WHERE e.consumed=0 AND j.status='complete' AND NOT EXISTS "
+                              "(SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id) ORDER BY v.rowid").fetchall()
             for row in rows:
                 version = ModelVersion(**json.loads(row[0]))
                 self._intent(db, version)
@@ -195,12 +208,46 @@ class DeploymentService:
     def publish(self, version_id):
         version = self.version(version_id)
         self.artifacts(version)  # reject tampering before changing desired intent
+        if version.origin == 'legacy':
+            version = self._validate_legacy(version)
         with self._lock('intent'):
             self._reconcile()
             with self.store.transaction() as db:
                 self._intent(db, version)
             self._run_due(aware_utc(self.clock()), word_id=version.word_id)
             return self.status(version.word_id)
+
+    def _validate_legacy(self, version):
+        """Explicit publication only: real engine acceptance, never a magic-byte gate.
+
+        Import and reconciliation never run this or initiate remote operations.
+        Validate every explicit publication, even a previously validated archive.
+        """
+        import subprocess
+        from dataclasses import replace
+        from tempfile import TemporaryDirectory
+        from studio.legacy_training import REPO, training_environment
+        shared = self.store.root.parent
+        python = shared / '.venv/bin/python'
+        if not python.is_file():
+            raise ValidationError('Legacy validation requires the training environment; run bash cli/setup_python_venv --data-dir=' + str(shared))
+        env, _ = training_environment(shared)
+        with TemporaryDirectory(prefix='legacy-validation-', dir=self.store.root) as temporary:
+            command = [str(python), str(REPO / 'cli/validate_studio_model.py'), '--engine=mww',
+                       '--data-dir=' + temporary, '--model-id=' + version.model_id,
+                       '--model-file=' + str(Path(version.path) / (version.model_id + '.tflite'))]
+            try:
+                subprocess.run(command, env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+                accepted = json.loads((Path(temporary) / 'validation.json').read_text()).get('microWakeWord') is True
+            except (OSError, ValueError, subprocess.SubprocessError):
+                accepted = False
+        if not accepted:
+            raise ValidationError('Legacy structural engine validation failed; prepare the TensorFlow training environment and inspect the original model; no publication requested')
+        self.artifacts(version)
+        validated = replace(version, validation_state='validated')
+        with self.store.transaction() as db:
+            db.execute('INSERT INTO legacy_model_validations VALUES (?,?) ON CONFLICT(version_id) DO UPDATE SET validated_at=excluded.validated_at', (version.id, self._now()))
+        return validated
 
     def rollback(self, word_id, version_id):
         self.version(version_id, word_id)
@@ -278,7 +325,10 @@ class DeploymentService:
                 current = Publication(**dict(publication))
                 if not self._current(current):
                     raise StagingFailure('staging_desired_missing')
-                affected[current.word_id] = (current, self.artifacts(self.version(current.desired_version, current.word_id)))
+                version = self.version(current.desired_version, current.word_id)
+                if version.validation_state != 'validated':
+                    raise StagingFailure('staging_archive_unvalidated')
+                affected[current.word_id] = (current, self.artifacts(version))
             desired_names = set(affected[row['word_id']][1])
             if not set(json.loads(row['filenames'])) <= desired_names:
                 # No discard API exists. Never restore a no-longer-desired OWW
@@ -345,6 +395,8 @@ class DeploymentService:
         p = self._save(p, state='pending', attempts=p.attempts + 1, next_retry=None)
         try:
             version = self.version(p.desired_version, p.word_id)
+            if version.validation_state != 'validated':
+                raise ValidationError('Legacy structural validation required')
             content = self.artifacts(version)
             expected = self._expected(content)
             device = self._device(p, indirect=indirect)

@@ -388,5 +388,5 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(WorkspaceService(self.store).get(self.word.id).phrase, 'Hello')
         self.assertEqual(DeviceService(self.store).get('a').id, 'a')
         with self.store.transaction() as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 11)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 12)
             self.assertEqual(db.execute('SELECT id FROM recordings').fetchone()[0], recording.id)

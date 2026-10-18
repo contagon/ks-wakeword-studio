@@ -122,6 +122,8 @@ class DeploymentTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.now = datetime(2026, 10, 18, tzinfo=timezone.utc)
         self.runner = VersionedTrainingRunner()
+        from studio_harness import augmentation_fixture
+        augmentation_fixture(Path(self.temp.name))
         self.runtime = StudioRuntime(Path(self.temp.name), runner=self.runner, clock=lambda: self.now)
         self.word = self.runtime.workspaces.create('Hello robot', 'en', 'hello_robot')
         self.runtime.samples.import_audio(self.word.id, 'positive', io.BytesIO(wav(1)))
@@ -432,7 +434,7 @@ class DeploymentTests(unittest.TestCase):
             store = Store.open(root)
             try:
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 11)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 12)
                     self.assertEqual(db.execute('SELECT phrase FROM wakewords').fetchone()[0], 'Retained')
                     self.assertEqual(db.execute('SELECT count(*) FROM publications').fetchone()[0], 0)
             finally:
@@ -654,7 +656,7 @@ class DeploymentTests(unittest.TestCase):
         with self.runtime.devices.store.transaction() as db:
             names = db.execute("SELECT filenames FROM deployment_staging WHERE device_id='leader' AND word_id=?", (self.word.id,)).fetchone()
             self.assertEqual(set(json.loads(names[0])), {'hello_robot.json', 'hello_robot.tflite'})
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 11)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 12)
         other = self.other_version()
         self.service.publish(other.id)
         self.assertEqual(self.client.files['leader']['microwakeword/hello_robot.tflite'],

@@ -112,6 +112,37 @@ loopback); browser request inspection can see a submitted token.
 5. Select installed negative datasets and completed artificial batches per word;
    save training settings and run manually or configure its training cron.
 
+### Prepare immutable augmentation inputs before Studio training
+
+Classifier-negative feature datasets are separate from raw augmentation inputs.
+Studio requires all four real installed corpora before an execution snapshot can
+be committed. Prepare them explicitly (substitute your mounted `DATA_DIR`):
+
+```bash
+bash cli/setup_python_venv --data-dir=/data
+bash cli/setup_mit_audio --data-dir=/data
+bash cli/setup_audioset --data-dir=/data
+bash cli/setup_fma --data-dir=/data
+bash cli/setup_chime --data-dir=/data
+```
+
+These setup commands perform real, potentially large downloads/conversions. Run
+them to completion while training is stopped; Studio does not silently install
+corpora after taking a snapshot. Missing/empty/unsafe roots fail training with
+setup guidance. Studio hashes each installed file and retains independent copies
+under `studio/augmentation/<content-fingerprint>/`. Both MWW and optional OWW use
+only these pinned paths, never the mutable shared roots. Raw corpus copies are
+**not classifier-negative features**, nor are they labeled human negatives.
+
+Intentional cost: the first snapshot of each distinct corpus version needs an
+additional full corpus copy plus temporary staging space; changed versions remain
+retained for old manifests. Unchanged versions share retained storage across words
+and runs. Every snapshot scans/hashes the shared and retained bytes, and the engine
+boundary verifies retained checksums again (OWW verifies at its boundary too).
+Expect substantial disk I/O and snapshot latency on large installations, even for
+an unchanged scheduled run. No automatic corpus pruning is performed; retain these
+directories with the database and archives. Do not edit retained copies manually.
+
 Studio publication uploads archived models only to the configured fleet leader and
 standalone kiosks. Followers receive models through existing fleet synchronization;
 eligible followers need their own admin credentials for hash verification and the
@@ -194,6 +225,27 @@ Legacy `personal_samples/`, `negative_samples/`, `captured_audio/` and
 imports are deduplicated. Unsupported/unsafe files are skipped and counted; inspect
 the report. To revert migration, restore the stopped-server backup rather than
 editing SQLite or deleting referenced files manually.
+
+Imports now serialize across processes and commit each source path/content/workspace
+claim atomically with its sample/archive record. After a conversion failure or
+interruption, retry the import: already admitted sources are skipped, not duplicated.
+The inventory completion marker is only a summary, not the admission boundary.
+
+**Legacy archive policy:** import is not successful new training. Imported models
+remain browsable/downloadable as `legacy` / `unvalidated` archives and never create
+automatic publication events or change the desired version by import order.
+Their provenance run endpoint returns a separate `kind: legacy` record, not a
+fabricated modern training manifest. In Deploy, explicitly choose **Validate and
+publish** (rollback also requires this validation). This invokes the existing
+`cli/validate_studio_model.py` using `/data/.venv/bin/python`: TensorFlow must load
+the TFLite model, allocate tensors, and expose input/output tensors. Prepare that
+environment with `cli/setup_python_venv` first. Checksums or a `TFL3` identifier alone
+are not engine validation. Missing runtime, incompatible metadata, or rejected bytes
+leave the archive available without publication or remote cache refresh. Successful
+explicit validation is recorded separately from immutable archive metadata, and
+only then may that explicit action set publication intent under the normal staging
+and cache-refresh constraints. Importing further historical versions does not replace
+the explicitly chosen version.
 
 Studio mode is the default and default-denies **all legacy `/api` routes** outside
 `/api/studio`. `TRAINER_LEGACY_MODE=1` is an explicit isolated compatibility opt-in

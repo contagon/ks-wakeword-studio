@@ -60,6 +60,7 @@ describe("provenance-aware sample library", () => {
 
   it("relabels with the row's server revision and applies the acknowledged record", async () => {
     const ui = await open();
+    expect(row(ui, 's2').get('select[data-action=relabel]').element.closest('.sr-only')).toBeNull();
     await row(ui, "s2").get("select[data-action=relabel]").setValue("discarded"); await settle();
     const request = server.mutations().at(-1)!;
     expect([request.url.pathname, request.body]).toEqual(["/api/studio/wakewords/a/samples/s2/label", { label: "discarded", expected_revision: 2 }]);

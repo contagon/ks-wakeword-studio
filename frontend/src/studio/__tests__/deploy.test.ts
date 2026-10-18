@@ -13,19 +13,21 @@ const publication = (word: string, state = "published") => ({ word_id: word, dev
 let actionSignal: AbortSignal | undefined;
 let resolveAction: ((response: Response) => void) | undefined;
 let deviceRequests: number;
+let legacy = false;
 
 beforeEach(() => {
   history.replaceState(null, "", "#/deploy?word=a");
   actionSignal = undefined;
   resolveAction = undefined;
   deviceRequests = 0;
+  legacy = false;
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     const path = new URL(url, "http://localhost").pathname;
     if (path === "/api/studio/wakewords") return json({ items: [{ id: "a", phrase: "Cedar", language: "en", model_id: "cedar", created_at: "", updated_at: "" }, { id: "b", phrase: "Birch", language: "en", model_id: "birch", created_at: "", updated_at: "" }], total: 2, offset: 0, limit: 100 });
     if (path.endsWith("/wakewords/a") || path.endsWith("/wakewords/b")) return json({ id: path.endsWith("/a") ? "a" : "b", phrase: "Cedar", language: "en", model_id: "cedar", created_at: "", updated_at: "" });
     if (path.endsWith("/queue")) return json({ items: [], total: 0, offset: 0, limit: 1 });
     if (path === "/api/studio/schedules") return json([]);
-    if (path.endsWith("/models")) return json({ items: [version("new", path.includes("/b/") ? "b" : "a"), version("old", path.includes("/b/") ? "b" : "a")], total: 2, offset: 0, limit: 50 });
+    if (path.endsWith("/models")) return json({ items: [{ ...version("new", path.includes("/b/") ? "b" : "a"), ...(legacy ? { origin: 'legacy', validation_state: 'unvalidated' } : {}) }, version("old", path.includes("/b/") ? "b" : "a")], total: 2, offset: 0, limit: 50 });
     if (path.endsWith("/deployment/status")) return json([publication(path.includes("/b/") ? "b" : "a")]);
     if (path === "/api/studio/devices") { deviceRequests += 1; return json([{ id: "leader", url: "http://leader", role: "leader", active: true, leader_id: null, credentials_status: "ready", profile_id: null, model_eligible: true }, { id: "follower", url: "http://follower", role: "follower", active: true, leader_id: "leader", credentials_status: "ready", profile_id: "voice", model_eligible: true }]); }
     if (path === "/api/studio/deployment/capabilities") return json({ requires_initially_clean_staging: true, requires_exclusive_staging: true, automatic_clean_check: false, remote_staging_inspection: false, remote_staging_discard: false, remote_staging_lock: false, notice: "clean staging required", quarantine_notice: "Unexpected accepted models quarantine this target until an operator resolves staging.", operator_action: "stop uploads" });
@@ -56,6 +58,18 @@ describe("Deploy page", () => {
     expect(ui.text()).toContain("new");
     await ui.get('[data-action="cancel-rollback"]').trigger("click");
     expect(ui.find('[role="dialog"]').exists()).toBe(false);
+    ui.unmount();
+  });
+
+  it('keeps unvalidated legacy archives downloadable and explains explicit engine validation before publication', async () => {
+    legacy = true;
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    const archive = ui.get('[data-version-id="new"]');
+    expect(archive.text()).toContain('Legacy import');
+    expect(archive.text()).toContain('unvalidated');
+    expect(archive.text()).toContain('TensorFlow');
+    expect(archive.get('a').text()).toBe('Download archive');
+    expect(archive.get('button').text()).toBe('Validate and publish');
     ui.unmount();
   });
 

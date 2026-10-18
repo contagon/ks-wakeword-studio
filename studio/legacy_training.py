@@ -214,6 +214,8 @@ def main(argv=None):
     root.mkdir(parents=True, exist_ok=True)
     try:
         validate_inputs(manifest)
+        from studio.augmentation import pinned_paths
+        augmentation = pinned_paths(manifest)
         if manifest['config']['train_openwakeword'] and not (shared / 'tools/piper-sample-generator/generate_samples.py').is_file():
             raise ValidationError(PREFLIGHT_MESSAGES['oww_prerequisites'])
     except ValidationError as exc:
@@ -230,10 +232,6 @@ def main(argv=None):
     except (OSError, subprocess.CalledProcessError):
         _run(['bash', cli / 'setup_python_venv', f'--data-dir={shared}'], cwd=shared, env=env)
         _run([python, cli / 'check_training_venv'], cwd=root, env=env)
-    for resource, setup in (('mit_rirs_16k', 'setup_mit_audio'), ('audioset_16k', 'setup_audioset'),
-                            ('fma_16k', 'setup_fma'), ('chime_16k', 'setup_chime')):
-        if not (shared / 'training_datasets' / resource).is_dir():
-            _run(['bash', cli / setup, f'--data-dir={shared}'], cwd=shared, env=env)
     split_path = stage_inputs(manifest, root)
     # Engine-specific explicit manifests: never fall back to catalog defaults.
     mww_datasets = [d for d in manifest['datasets'] if d['adapter'] != 'oww_embeddings_npy']
@@ -241,7 +239,7 @@ def main(argv=None):
     dataset_path.write_text(json.dumps({'schema_version': 1, 'datasets': mww_datasets}))
     _run([python, cli / 'wake_word_sample_augmenter', f'--data-dir={root}', f'--split-manifest={split_path}', f'--seed={manifest["seed"]}',
           f'--personal-dir={root / "empty-personal"}', f'--negative-dir={root / "work/reviewed_negatives"}',
-          *[f'--{flag}={shared / "training_datasets" / name}' for flag, name in
+          *[f'--{flag}={augmentation[name]}' for flag, name in
             (('mit-rirs-16k-dir', 'mit_rirs_16k'), ('audioset-16k-dir', 'audioset_16k'), ('fma-16k-dir', 'fma_16k'), ('chime-16k-dir', 'chime_16k'))]], cwd=root, env=env)
     _run([cli / 'wake_word_sample_trainer', f'--data-dir={root}', f'--tool-data-dir={shared}', f'--dataset-manifest={dataset_path}',
           f'--artifact-slug={manifest["model_id"]}', f'--language={manifest["language"]}',
@@ -258,6 +256,8 @@ def main(argv=None):
 
 
 def train_oww(manifest, root, shared, env):
+    from studio.augmentation import pinned_paths
+    augmentation = pinned_paths(manifest)
     from openwakeword_stage import (prepare_openwakeword_stage, publish_openwakeword_artifacts,
                                     OWW_TRAINER_REPOSITORY, OWW_TRAINER_REVISION)
     # A job-local pinned checkout prevents mutable shared trainer source/config.
@@ -313,8 +313,8 @@ def train_oww(manifest, root, shared, env):
         shutil.copyfile(audio['path'], clips / f'{audio["label"]}_{split}' / f'{index}.wav')
     assets = oww / 'assets'
     assets.mkdir()
-    (assets / 'mit_rirs').symlink_to(shared / 'training_datasets/mit_rirs_16k', target_is_directory=True)
-    (assets / 'audioset_16k').symlink_to(shared / 'training_datasets/audioset_16k', target_is_directory=True)
+    (assets / 'mit_rirs').symlink_to(augmentation['mit_rirs_16k'], target_is_directory=True)
+    (assets / 'audioset_16k').symlink_to(augmentation['audioset_16k'], target_is_directory=True)
     output = next((root / 'output').glob(f'*/{slug}.json')).parent
     env = {**env, 'TATER_OWW_TRAINER_DIR': str(checkout), 'OWW_PYTHON_BIN': str(py),
            'OWW_OPENWAKEWORD_DIR': str(vendor), 'OWW_PIPER_DIR': str(piper)}

@@ -11,6 +11,26 @@ from studio.kiosk import KioskClient
 from studio.models import RemoteRejected
 
 
+def augmentation_fixture(root):
+    """Tiny real installed corpora: exercise production retention, never bypass it."""
+    for name in ('mit_rirs_16k', 'audioset_16k', 'fma_16k', 'chime_16k'):
+        path = Path(root) / 'training_datasets' / name
+        path.mkdir(parents=True, exist_ok=True)
+        (path / 'fixture.wav').write_bytes(StubGpuRunner._wav())
+
+
+def pinned_augmentation_fixture(root):
+    from dataclasses import asdict
+    from studio.db import Store
+    from studio.augmentation import snapshot
+    augmentation_fixture(root)
+    store = Store.open(root)
+    try:
+        return [asdict(item) for item in snapshot(store)]
+    finally:
+        store.close()
+
+
 class FixtureOnlyClient(KioskClient):
     """Fail closed before transport unless the URL belongs to our own fixtures."""
 

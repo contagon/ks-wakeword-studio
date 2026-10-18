@@ -116,6 +116,8 @@ class StudioWorkflowTests(unittest.TestCase):
         self.now = datetime(2026, 10, 18, tzinfo=timezone.utc)
         self.follower = FixtureKiosk("fixture-follower", leader=False)
         self.leader = FixtureKiosk("fixture-leader", leader=True, follower=self.follower)
+        from studio_harness import augmentation_fixture
+        augmentation_fixture(Path(self.temp.name))
         self.runtime = StudioRuntime(Path(self.temp.name), runner=StubGpuRunner(), clock=lambda: self.now)
         self.runtime.devices.client = FixtureOnlyClient(self.runtime.devices._token, [self.leader.url, self.follower.url])
         self.app = FastAPI(); self.app.include_router(create_router(self.runtime))

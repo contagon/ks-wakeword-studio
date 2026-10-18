@@ -10,9 +10,10 @@ def main():
     parser.add_argument('--data-dir', type=Path, required=True)
     parser.add_argument('--model-id', required=True)
     parser.add_argument('--engine', choices=('mww', 'oww'), required=True)
+    parser.add_argument('--model-file', type=Path, help='Explicit retained legacy archive artifact')
     args = parser.parse_args()
     extension = '.tflite' if args.engine == 'mww' else '.oww.onnx'
-    files = list((args.data_dir / 'output').glob(f'*/{args.model_id}{extension}'))
+    files = [args.model_file] if args.model_file else list((args.data_dir / 'output').glob(f'*/{args.model_id}{extension}'))
     if len(files) != 1 or files[0].is_symlink():
         raise ValueError('Missing or ambiguous model output')
     if args.engine == 'mww':

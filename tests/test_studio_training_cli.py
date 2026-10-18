@@ -13,6 +13,21 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class TrainingCLITests(unittest.TestCase):
+    def test_cli_rejects_unpinned_corpora_before_any_environment_setup(self):
+        from studio import legacy_training as training
+        from studio.models import ValidationError
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / 'manifest.json'
+            manifest.write_text(json.dumps({'schema_version': 1, 'audio': [
+                {'label': label, 'split': split} for label in ('positive', 'negative')
+                for split in ('training', 'validation', 'testing')], 'datasets': [], 'config': {'train_openwakeword': False}}))
+            with patch.object(training, '_run') as command:
+                with self.assertRaisesRegex(ValidationError, 'pinned augmentation'):
+                    training.main([f'--input-manifest={manifest}', f'--data-dir={root / "run"}', f'--tool-data-dir={root / "shared"}'])
+            command.assert_not_called()
+            self.assertFalse((root / 'shared').exists())
     def test_structural_validator_requires_real_engine_acceptance_before_marker(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -159,7 +174,9 @@ else:
                 path.touch()
                 datasets.append({'id': name, 'path': str(path), 'split': split, 'representation': 'features',
                                  'adapter': 'oww_embeddings_npy', 'fingerprint': 'a' * 64})
-            manifest = {'model_id': 'robot', 'phrase': 'Robot', 'audio': audio, 'datasets': datasets, 'config': {'training_steps': 123}}
+            from studio_harness import pinned_augmentation_fixture
+            augmentation = pinned_augmentation_fixture(shared)
+            manifest = {'model_id': 'robot', 'phrase': 'Robot', 'audio': audio, 'datasets': datasets, 'config': {'training_steps': 123}, 'augmentation': augmentation}
             env = {**os.environ, 'PATH': str(binaries) + os.pathsep + os.environ['PATH'],
                    'OWW_BOOTSTRAP_PYTHON': str(bootstrap), 'TRAINER_FIXTURE': str(fixture)}
             original = training._run
@@ -172,6 +189,8 @@ else:
             self.assertTrue((output / 'robot.oww.onnx').is_file())
             self.assertTrue((output / 'robot.wake-bundle.json').is_file())
             self.assertEqual(json.loads((root / 'openwakeword/output/robot/effective.json').read_text())['feature_data_files'], {'oww-train': datasets[0]['path']})
+            self.assertEqual((root / 'openwakeword/assets/mit_rirs').resolve(), Path(augmentation[0]['path']))
+            self.assertEqual((root / 'openwakeword/assets/audioset_16k').resolve(), Path(augmentation[1]['path']))
 
     def test_explicit_oww_bridge_never_accepts_failed_command_with_partial_onnx(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -226,8 +245,8 @@ def main():
             (shared / '.venv/bin').mkdir(parents=True)
             (shared / '.venv/bin/python').symlink_to(sys.executable)
             (shared / '.venv/bin/activate').write_text('')
-            for resource in ('mit_rirs_16k', 'audioset_16k', 'fma_16k', 'chime_16k'):
-                (shared / 'training_datasets' / resource).mkdir(parents=True)
+            from studio_harness import pinned_augmentation_fixture
+            augmentation = pinned_augmentation_fixture(shared)
             capture = base / 'calls.jsonl'
             stub = "#!/usr/bin/env python3\nimport json, os, sys\nfrom pathlib import Path\nwith open(os.environ['CAPTURE'], 'a') as f: f.write(json.dumps([Path(__file__).name, sys.argv[1:]])+'\\n')\n"
             for name in ('check_training_venv', 'wake_word_sample_augmenter', 'wake_word_sample_trainer', 'validate_studio_model.py'):
@@ -242,7 +261,7 @@ def main():
                     audio.append({'audio_id': f'{index}-{label}', 'label': label, 'path': str(source),
                                   'normalized_hash': hashlib.sha256(b'fixture').hexdigest(), 'split': split})
             manifest = {'schema_version': 1, 'model_id': 'stable_robot', 'phrase': 'こんにちは', 'language': 'ja',
-                        'audio': audio, 'datasets': [], 'config': {'training_steps': 123, 'train_openwakeword': False}, 'seed': 10}
+                        'audio': audio, 'datasets': [], 'config': {'training_steps': 123, 'train_openwakeword': False}, 'seed': 10, 'augmentation': augmentation}
             path = base / 'manifest.json'
             path.write_text(json.dumps(manifest))
             result = subprocess.run(['bash', str(repo / 'train_wake_word'), f'--input-manifest={path}',
@@ -253,6 +272,9 @@ def main():
             self.assertEqual([c[0] for c in calls], ['check_training_venv', 'wake_word_sample_augmenter', 'wake_word_sample_trainer', 'validate_studio_model.py'])
             split_path = Path(next(a.split('=', 1)[1] for a in calls[1][1] if a.startswith('--split-manifest=')))
             self.assertEqual(set(json.loads(split_path.read_text()).values()), {'training', 'validation', 'testing'})
+            for flag, item in zip(('mit-rirs-16k-dir', 'audioset-16k-dir', 'fma-16k-dir', 'chime-16k-dir'), augmentation):
+                self.assertIn(f'--{flag}={item["path"]}', calls[1][1])
+            self.assertFalse(any('setup_' in call[0] for call in calls))
             trainer = calls[2][1]
             self.assertIn('--artifact-slug=stable_robot', trainer)
             self.assertIn('--training-steps=123', trainer)

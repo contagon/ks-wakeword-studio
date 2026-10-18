@@ -1,7 +1,7 @@
 """Shared domain records; no filesystem or network dependencies."""
 
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 
 
 class NotFound(Exception):
@@ -136,6 +136,13 @@ class TrainingAudio:
 
 
 @dataclass(frozen=True)
+class AugmentationInput:
+    id: str
+    path: str
+    fingerprint: str
+
+
+@dataclass(frozen=True)
 class RunManifest:
     schema_version: int
     run_id: str
@@ -150,6 +157,21 @@ class RunManifest:
     selected_batches: tuple[str, ...]
     fingerprint: str
     created_at: str
+    augmentation: tuple[AugmentationInput, ...] = ()
+
+
+@dataclass(frozen=True)
+class LegacyRun:
+    schema_version: int
+    run_id: str
+    word_id: str
+    model_id: str
+    phrase: str
+    language: str
+    fingerprint: str
+    created_at: str
+    legacy_identity: str
+    kind: Literal['legacy'] = 'legacy'
 
 
 @dataclass(frozen=True)
@@ -171,6 +193,8 @@ class ModelVersion:
     fingerprint: str
     checksums: dict[str, str]
     metrics: dict
+    origin: str = 'training'
+    validation_state: str = 'validated'
 
 
 @dataclass(frozen=True)

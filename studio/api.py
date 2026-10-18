@@ -11,7 +11,7 @@ from studio.models import (CollectionRun, Conflict, CredentialsRequired, Device,
                            RemoteRejected, RemoteUnavailable, NotFound, Page, Recording, Sample, SampleQuery,
                            ValidationError, Wakeword, WakewordUpdate, Job, Schedule, WorkerHealth, Dataset,
                            Batch, GenerationRecipe, TrainingSettings, RunManifest, ModelVersion, Publication,
-                           DeploymentCapabilities, StudioCapabilities)
+                           DeploymentCapabilities, StudioCapabilities, LegacyRun)
 from studio.migration import LegacyImportSelection, LegacyInventory, MigrationReport
 from studio.runtime import StudioRuntime
 from studio.storage import AUDIO_MIMES
@@ -198,7 +198,7 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     def training_runs(word_id: str, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
         return runtime.training.runs(word_id, offset, limit)
 
-    @router.get('/wakewords/{word_id}/training/runs/{run_id}', response_model=RunManifest)
+    @router.get('/wakewords/{word_id}/training/runs/{run_id}', response_model=RunManifest | LegacyRun)
     def training_manifest(word_id: str, run_id: str):
         return runtime.training.get_manifest(word_id, run_id)
 
@@ -249,6 +249,10 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.get('/generation/catalog')
     def generation_catalog():
         return runtime.generation.catalog()
+
+    @router.get('/wakewords/{word_id}/generation/selection', response_model=list[str])
+    def generation_selection(word_id: str):
+        return runtime.generation.selection(word_id)
 
     @router.get('/wakewords/{word_id}/generation/recipe', response_model=GenerationRecipe)
     def generation_recipe(word_id: str) -> GenerationRecipe:

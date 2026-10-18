@@ -23,6 +23,11 @@ def encode(value):
 
 def load_manifest(value):
     data = json.loads(value)
+    if 'legacy_identity' in data:
+        from studio.models import LegacyRun
+        return LegacyRun(**{key: data[key] for key in LegacyRun.__dataclass_fields__ if key in data})
+    from studio.augmentation import AugmentationInput
+    data['augmentation'] = tuple(AugmentationInput(**item) for item in data.get('augmentation', []))
     data['config'] = TrainingSettings(**data['config'])
     data['audio'] = tuple(TrainingAudio(**a) for a in data['audio'])
     data['datasets'] = tuple(DatasetInput(**d) for d in data['datasets'])
@@ -64,6 +69,16 @@ class TrainingService:
         return self.jobs.enqueue('train', word_id, {'trigger': trigger})
 
     def snapshot(self, word_id, run_id):
+        # Large raw corpus hashing/copying precedes the final metadata snapshot;
+        # never block label/job/cancellation writes for the duration of that I/O.
+        with self.store.transaction() as db:
+            existing = db.execute('SELECT manifest FROM training_runs WHERE id=? AND word_id=?', (run_id, word_id)).fetchone()
+            if existing:
+                return load_manifest(existing[0])
+            if db.execute('SELECT 1 FROM wakewords WHERE id=?', (word_id,)).fetchone() is None:
+                raise NotFound('Workspace not found')
+        from studio.augmentation import snapshot
+        augmentation = snapshot(self.store)
         # Hold the Store lock across the dataset-service snapshot and transaction;
         # use one SQLite transaction so other processes cannot edit selections.
         with self.store.transaction() as db:
@@ -99,10 +114,10 @@ class TrainingService:
                                           row['sample_id'], row['revision'], row['batch_id']))
             effective = dict(model_id=word['model_id'], phrase=word['phrase'], language=word['language'],
                              config=asdict(settings), seed=seed, audio=[asdict(a) for a in audio],
-                             datasets=[asdict(d) for d in datasets], selected_batches=batches, adapter_version=1)
+                             datasets=[asdict(d) for d in datasets], augmentation=[asdict(a) for a in augmentation], selected_batches=batches, adapter_version=2)
             fingerprint = hashlib.sha256(encode(effective).encode()).hexdigest()
             manifest = RunManifest(1, run_id, word_id, word['model_id'], word['phrase'], word['language'], settings,
-                                   seed, tuple(audio), datasets, batches, fingerprint, self._now())
+                                   seed, tuple(audio), datasets, batches, fingerprint, self._now(), augmentation)
             db.execute('INSERT INTO training_runs VALUES (?,?,?)', (run_id, word_id, encode(asdict(manifest))))
             return manifest
 
@@ -141,13 +156,21 @@ class TrainingService:
         WorkspaceService(self.store).get(word_id)
         self._page(offset, limit)
         with self.store.transaction() as db:
-            rows = db.execute("SELECT v.version FROM model_versions v JOIN studio_jobs j ON j.id=v.run_id WHERE v.word_id=? AND j.status='complete' ORDER BY v.rowid DESC", (word_id,)).fetchall()
-            return Page([ModelVersion(**json.loads(r[0])) for r in rows[offset:offset + limit]], len(rows), offset, limit)
+            rows = db.execute("SELECT v.version,EXISTS(SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id) legacy,EXISTS(SELECT 1 FROM legacy_model_validations a WHERE a.version_id=v.id) validated FROM model_versions v JOIN studio_jobs j ON j.id=v.run_id WHERE v.word_id=? AND j.status='complete' ORDER BY v.rowid DESC", (word_id,)).fetchall()
+            items = []
+            for row in rows[offset:offset + limit]:
+                data = json.loads(row[0])
+                if row['legacy']:
+                    data.update(origin='legacy', validation_state='validated' if row['validated'] else 'unvalidated')
+                items.append(ModelVersion(**data))
+            return Page(items, len(rows), offset, limit)
 
     def successful_version(self, job_id):
         """Task-9 completion hook lookup. Never returns running/partial archives."""
         with self.store.transaction() as db:
             row = db.execute("SELECT v.version FROM model_versions v JOIN studio_jobs j ON j.id=v.run_id WHERE v.run_id=? AND j.status='complete'", (job_id,)).fetchone()
+            if row and db.execute('SELECT 1 FROM migration_model_provenance WHERE version_id=json_extract(?,\'$.id\')', (row[0],)).fetchone():
+                return None
             return ModelVersion(**json.loads(row[0])) if row else None
 
     def execute(self, job, context=None):
@@ -159,7 +182,7 @@ class TrainingService:
         with open_directory(root):
             pass
         (root / 'run-manifest.json').write_text(encode(asdict(manifest)), encoding='utf-8')
-        previous = self.versions(job.word_id).items
+        previous = [version for version in self.versions(job.word_id).items if version.origin == 'training']
         with self.store.transaction() as db:
             scope = db.execute('SELECT schedule_scope FROM studio_jobs WHERE id=?', (job.id,)).fetchone()[0]
         scheduled = job.payload.get('trigger') == 'scheduled' or scope == 'train:' + job.word_id

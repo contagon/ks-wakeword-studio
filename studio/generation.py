@@ -132,6 +132,11 @@ class GenerationService:
                               (word_id, limit, offset)).fetchall()
             return Page([self._batch(db, word_id, row[0]) for row in rows], total, offset, limit)
 
+    def selection(self, word_id):
+        with self.store.transaction() as db:
+            self._word(db, word_id)
+            return [row[0] for row in db.execute('SELECT batch_id FROM generation_selection WHERE word_id=? ORDER BY batch_id', (word_id,))]
+
     def select_batches(self, word_id, batch_ids):
         if (not isinstance(batch_ids, list) or not all(isinstance(item, str) for item in batch_ids)
                 or len(set(batch_ids)) != len(batch_ids)):

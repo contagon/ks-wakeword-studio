@@ -10,6 +10,7 @@ const workspace = useWorkspace();
 const capabilities = ref<GenerationCapability[]>([]); const batches = ref<Batch[]>([]); const total = ref(0); const offset = ref(0); const recipe = ref<GenerationRecipe>({ language: "en", english_accent: "mixed", tts_mode: "hybrid", samples: 1, batch_size: 1 });
 const selected = ref<Set<string>>(new Set()); const loading = ref(false); const saving = ref(false); const error = ref(""); const job = ref<Job | null>(null);
 let loadRequest: AbortController | undefined; let mutationRequest: AbortController | undefined; let loadGeneration = 0; let mutationGeneration = 0;
+let selectionLoaded = false;
 const activeId = computed(() => workspace.selectedId.value); const word = computed(() => workspace.selected.value); const capability = computed(() => capabilities.value.find(item => item.language === recipe.value.language) ?? null);
 const modes = computed(() => capability.value ? (Object.entries(capability.value.engines) as [TtsMode, string[]][]).filter(([, engines]) => engines.length) : []);
 const accentEnabled = computed(() => Boolean(capability.value?.accent_applies) && recipe.value.tts_mode !== "piper");
@@ -19,8 +20,8 @@ function normalizeRecipe(): void { const cap = capability.value; if (!cap) retur
 function abortWorkspaceMutations(): void { mutationRequest?.abort(); mutationRequest = undefined; mutationGeneration += 1; saving.value = false; job.value = null; }
 async function load(): Promise<void> {
   loadRequest?.abort(); const controller = new AbortController(); loadRequest = controller; const token = ++loadGeneration; const id = activeId.value;
-  batches.value = []; selected.value = new Set(); total.value = 0; job.value = null; error.value = ""; if (!id) return; loading.value = true;
-  try { const [catalog, saved, page] = await Promise.all([studioApi.generationCatalog(controller.signal), studioApi.generationRecipe(id, controller.signal).catch(cause => cause instanceof StudioApiError && cause.status === 404 ? null : Promise.reject(cause)), studioApi.batches(id, { offset: offset.value, limit: 50 }, controller.signal)]); if (!loadCurrent(id, token, controller)) return; capabilities.value = catalog; if (saved) recipe.value = saved; else { const language = workspace.selected.value?.language ?? catalog[0]?.language ?? "en"; recipe.value = { language, english_accent: "mixed", tts_mode: "hybrid", samples: 1, batch_size: 1 }; } normalizeRecipe(); batches.value = page.items; total.value = page.total; selected.value = new Set(page.items.filter(batch => batch.selected).map(batch => batch.id)); }
+  batches.value = []; total.value = 0; error.value = ""; if (!id) return; loading.value = true;
+  try { const [catalog, saved, page, selection] = await Promise.all([studioApi.generationCatalog(controller.signal), studioApi.generationRecipe(id, controller.signal).catch(cause => cause instanceof StudioApiError && cause.status === 404 ? null : Promise.reject(cause)), studioApi.batches(id, { offset: offset.value, limit: 50 }, controller.signal), selectionLoaded ? Promise.resolve(null) : studioApi.batchSelection(id, controller.signal)]); if (!loadCurrent(id, token, controller)) return; capabilities.value = catalog; if (!selectionLoaded) { if (saved) recipe.value = saved; else { const language = workspace.selected.value?.language ?? catalog[0]?.language ?? "en"; recipe.value = { language, english_accent: "mixed", tts_mode: "hybrid", samples: 1, batch_size: 1 }; } normalizeRecipe(); selected.value = new Set(selection ?? []); selectionLoaded = true; } batches.value = page.items; total.value = page.total; }
   catch (cause) { if (loadCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Unable to load generation settings."; }
   finally { if (loadCurrent(id, token, controller)) loading.value = false; }
 }
@@ -37,10 +38,10 @@ async function save(startGeneration = false): Promise<void> {
   finally { if (mutationCurrent(id, token, controller)) saving.value = false; }
 }
 function toggle(batch: Batch, checked: boolean): void { if (batch.status !== "complete") return; const next = new Set(selected.value); checked ? next.add(batch.id) : next.delete(batch.id); selected.value = next; }
-async function saveBatches(): Promise<void> { const id = activeId.value; if (!id) return; mutationRequest?.abort(); const controller = new AbortController(); mutationRequest = controller; const token = ++mutationGeneration; const batchIds = [...selected.value]; saving.value = true;
+async function saveBatches(): Promise<void> { const id = activeId.value; if (!id || !selectionLoaded || loading.value) return; mutationRequest?.abort(); const controller = new AbortController(); mutationRequest = controller; const token = ++mutationGeneration; const batchIds = [...selected.value]; saving.value = true;
   try { await studioApi.selectBatches(id, batchIds, controller.signal); if (mutationCurrent(id, token, controller)) await load(); } catch (cause) { if (mutationCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Batch selection was not saved."; } finally { if (mutationCurrent(id, token, controller)) saving.value = false; }
 }
-watch(activeId, () => { abortWorkspaceMutations(); void load(); }, { immediate: true });
+watch(activeId, () => { abortWorkspaceMutations(); selectionLoaded = false; selected.value = new Set(); recipe.value = { language: word.value?.language ?? 'en', english_accent: 'mixed', tts_mode: 'hybrid', samples: 1, batch_size: 1 }; offset.value = 0; void load(); }, { immediate: true });
 watch(offset, () => { void load(); });
 onBeforeUnmount(() => { loadRequest?.abort(); mutationRequest?.abort(); });
 </script>

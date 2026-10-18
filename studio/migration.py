@@ -5,12 +5,14 @@ import io
 import json
 import os
 import stat
+import fcntl
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from studio.models import Conflict, ModelVersion, NotFound, ValidationError
+from studio.storage import open_directory
 
 
 @dataclass(frozen=True)
@@ -261,19 +263,18 @@ class MigrationService:
 
     def _backup(self, fingerprint: str, inputs: _LegacyInputs, inventory: LegacyInventory) -> None:
         destination = self.migration_root / "backups" / fingerprint
-        if not destination.exists():
-            for category, path, _label in inputs.audio:
-                if self._backup_file(path, destination / category / path.path.name):
-                    sidecar = self._checked_file(path.path.with_suffix(".json"), path.root)
-                    if sidecar:
-                        self._backup_file(sidecar, destination / category / sidecar.path.name)
-            for _identity, weights, metadata, _phrase in inputs.models:
-                if self._backup_file(weights, destination / "models" / weights.path.name) and metadata:
-                    self._backup_file(metadata, destination / "models" / metadata.path.name)
+        for category, path, _label in inputs.audio:
+            if self._backup_file(path, destination / category / path.path.name):
+                sidecar = self._checked_file(path.path.with_suffix(".json"), path.root)
+                if sidecar:
+                    self._backup_file(sidecar, destination / category / sidecar.path.name)
+        for _identity, weights, metadata, _phrase in inputs.models:
+            if self._backup_file(weights, destination / "models" / weights.path.name) and metadata:
+                self._backup_file(metadata, destination / "models" / metadata.path.name)
         destination.parent.mkdir(parents=True, exist_ok=True)
         (self.migration_root / "inventory.json").write_text(json.dumps(asdict(inventory), sort_keys=True), encoding="utf-8")
 
-    def _import_model(self, word, identity: str, source: _LegacyFile, metadata: _LegacyFile | None, fingerprint: str) -> bool:
+    def _import_model(self, word, identity: str, source: _LegacyFile, metadata: _LegacyFile | None, fingerprint: str, db) -> str | None:
         source_data = self._read_file(source)
         if source_data is None:
             return False
@@ -289,32 +290,87 @@ class MigrationService:
         manifest = stage / f"{word['model_id']}.json"
         manifest.write_text(json.dumps(data, sort_keys=True), encoding="utf-8")
         checksums = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in (weights, manifest)}
-        version = ModelVersion(version_id, word['id'], word['model_id'], run_id, now, str(destination), fingerprint, checksums, {"source": "legacy"})
+        version = ModelVersion(version_id, word['id'], word['model_id'], run_id, now, str(destination), fingerprint, checksums, {"source": "legacy"}, 'legacy', 'unvalidated')
         run = {"schema_version": 1, "run_id": run_id, "word_id": word['id'], "model_id": word['model_id'],
                "phrase": word['phrase'], "language": word['language'], "audio": [], "datasets": [], "selected_batches": [],
-               "fingerprint": fingerprint, "created_at": now, "legacy_identity": identity}
+                "fingerprint": fingerprint, "created_at": now, "legacy_identity": identity, "kind": "legacy"}
+        (stage / 'run-manifest.json').write_text(json.dumps(run, sort_keys=True))
+        checksums['run-manifest.json'] = hashlib.sha256((stage / 'run-manifest.json').read_bytes()).hexdigest()
+        for path in stage.iterdir():
+            with path.open('rb') as handle:
+                os.fsync(handle.fileno())
+        with open_directory(stage) as fd:
+            os.fsync(fd)
         stage.rename(destination)
-        with self.store.transaction() as db:
-            db.execute("INSERT INTO studio_jobs(id,kind,word_id,resource,payload,status,created_at,started_at,finished_at,result) VALUES (?,?,?,?,?,'complete',?,?,?,?)",
-                       (run_id, "train", word['id'], "gpu", "{}", now, now, now, json.dumps({"legacy": True})))
-            db.execute("INSERT INTO training_runs VALUES (?,?,?)", (run_id, word['id'], json.dumps(run, sort_keys=True)))
-            db.execute("INSERT INTO model_versions VALUES (?,?,?,?)", (version_id, word['id'], run_id, json.dumps(asdict(version), sort_keys=True)))
-            db.execute("INSERT INTO migration_model_provenance VALUES (?,?,?)", (version_id, str(source.path.relative_to(self.root)), fingerprint))
-        return True
+        with open_directory(parent) as fd:
+            os.fsync(fd)
+        db.execute("INSERT INTO studio_jobs(id,kind,word_id,resource,payload,status,created_at,started_at,finished_at,result) VALUES (?,?,?,?,?,'complete',?,?,?,?)",
+                   (run_id, "legacy_import", word['id'], "gpu", "{}", now, now, now, json.dumps({"legacy": True, "validation": "unvalidated"})))
+        db.execute("INSERT INTO training_runs VALUES (?,?,?)", (run_id, word['id'], json.dumps(run, sort_keys=True)))
+        db.execute("INSERT INTO model_versions VALUES (?,?,?,?)", (version_id, word['id'], run_id, json.dumps(asdict(version), sort_keys=True)))
+        db.execute("INSERT INTO migration_model_provenance VALUES (?,?,?)", (version_id, str(source.path.relative_to(self.root)), fingerprint))
+        return version_id
 
-    def _import_audio(self, word_id: str, path: _LegacyFile, label: str):
+    def _import_audio(self, word_id: str, path: _LegacyFile, label: str, db):
         data = self._read_file(path)
         if data is None:
             return None
-        if label != "pending":
-            return self.samples.import_audio(word_id, label, io.BytesIO(data))
         original, normalized = self.samples._prepare(io.BytesIO(data))
-        with self.store.transaction() as db:
-            self.samples._word(db, word_id)
-            audio_id = self.samples._audio(db, original, normalized)
-            return self.samples._new_sample(db, word_id, None, audio_id, "pending", "import")
+        self.samples._word(db, word_id)
+        audio_id = self.samples._audio(db, original, normalized)
+        return self.samples._new_sample(db, word_id, None, audio_id, label, "import")
 
     def import_into(self, word_id: str, selection: LegacyImportSelection) -> MigrationReport:
+        # Cross-runtime/process serialization also protects backup creation. Each
+        # individual admission and its durable source claim share one SQL commit.
+        with open_directory(self.migration_root) as directory:
+            fd = os.open('import.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            return self._import_into(word_id, selection)
+        finally:
+            os.close(fd)
+
+    def _claim_key(self, path, metadata=None):
+        data = self._read_file(path)
+        if data is None:
+            return None
+        digest = hashlib.sha256(data)
+        if metadata:
+            digest.update(self._read_file(metadata) or b'')
+        return str(path.path.relative_to(self.root)), digest.hexdigest()
+
+    def _already_admitted(self, db, word_id, key, source, *, model=False):
+        if db.execute('SELECT 1 FROM migration_source_claims WHERE word_id=? AND source_path=? AND content_hash=?', (word_id, *key)).fetchone():
+            return True
+        # Recover pre-v12 completed per-source admissions using *both* their
+        # recorded path/workspace and original bytes, never global audio dedup.
+        # Once claimed, normal content+sidecar versioning takes over.
+        data = self._read_file(source)
+        if data is None:
+            return False
+        digest = hashlib.sha256(data).hexdigest()
+        if model:
+            rows = db.execute('SELECT v.id,v.version FROM migration_model_provenance p JOIN model_versions v ON v.id=p.version_id '
+                              'WHERE v.word_id=? AND p.legacy_path=? AND NOT EXISTS '
+                              '(SELECT 1 FROM migration_source_claims c WHERE c.record_id=v.id)', (word_id, key[0])).fetchall()
+            record = None
+            for row in rows:
+                version = json.loads(row[1])
+                if version['checksums'].get(version['model_id'] + '.tflite') == digest:
+                    record = row[0]
+                    break
+        else:
+            row = db.execute('SELECT s.id FROM migration_sample_provenance p JOIN samples s ON s.id=p.sample_id '
+                             'JOIN audio_records a ON a.id=s.audio_id WHERE s.word_id=? AND p.legacy_path=? AND a.original_hash=? '
+                             'AND NOT EXISTS (SELECT 1 FROM migration_source_claims c WHERE c.record_id=s.id) LIMIT 1',
+                             (word_id, key[0], digest)).fetchone()
+            record = row[0] if row else None
+        if record:
+            db.execute('INSERT INTO migration_source_claims VALUES (?,?,?,?)', (word_id, *key, record))
+        return record is not None
+
+    def _import_into(self, word_id: str, selection: LegacyImportSelection) -> MigrationReport:
         word = self.store._connection.execute("SELECT * FROM wakewords WHERE id=?", (word_id,)).fetchone()
         if word is None:
             raise NotFound("Workspace not found")
@@ -333,21 +389,37 @@ class MigrationService:
         imported_samples, skipped_samples = 0, inventory.skipped_samples
         for category, path, label in inputs.audio:
             # Captures retain human review as pending, instead of silently classifying them.
-            sample = self._import_audio(word_id, path, label)
-            if sample is None:
-                skipped_samples += 1
-                continue
             with self.store.transaction() as db:
+                key = self._claim_key(path, self._checked_file(path.path.with_suffix('.json'), path.root))
+                if key is None or self._already_admitted(db, word_id, key, path):
+                    skipped_samples += 1
+                    continue
+                sample = self._import_audio(word_id, path, label, db)
+                if sample is None:
+                    skipped_samples += 1
+                    continue
+                if self._claim_key(path, self._checked_file(path.path.with_suffix('.json'), path.root)) != key:
+                    raise Conflict('Legacy source changed during import; retry with a stable installation')
                 db.execute("INSERT INTO migration_sample_provenance VALUES (?,?,?,?)", (sample.id, "legacy", str(path.path.relative_to(self.root)), inventory.fingerprint))
+                db.execute('INSERT INTO migration_source_claims VALUES (?,?,?,?)', (word_id, *key, sample.id))
             imported_samples += 1
         imported_models, skipped_models = 0, inventory.skipped_models
         for identity, weights, metadata, _phrase in inputs.models:
             assignment = (selection.model_assignments or {}).get(identity)
             if identity == word["model_id"] or assignment == word_id:
-                if self._import_model(word, identity, weights, metadata, inventory.fingerprint):
-                    imported_models += 1
-                else:
-                    skipped_models += 1
+                with self.store.transaction() as db:
+                    key = self._claim_key(weights, metadata)
+                    if key is None or self._already_admitted(db, word_id, key, weights, model=True):
+                        skipped_models += 1
+                        continue
+                    version_id = self._import_model(word, identity, weights, metadata, inventory.fingerprint, db)
+                    if version_id:
+                        if self._claim_key(weights, metadata) != key:
+                            raise Conflict('Legacy source changed during import; retry with a stable installation')
+                        db.execute('INSERT INTO migration_source_claims VALUES (?,?,?,?)', (word_id, *key, version_id))
+                        imported_models += 1
+                    else:
+                        skipped_models += 1
         report = MigrationReport(inventory.fingerprint, word_id, imported_samples, imported_models, skipped_samples, skipped_models)
         with self.store.transaction() as db:
             db.execute("INSERT INTO migration_imports VALUES (?,?,?,?)", (inventory.fingerprint, word_id, self._now(), json.dumps(asdict(report), sort_keys=True)))

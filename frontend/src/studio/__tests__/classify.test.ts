@@ -26,6 +26,39 @@ async function contentOf(src: string | undefined) { return (await media.contents
 const playerSrc = (ui: VueWrapper) => ui.find("audio[data-audio-player]").attributes("src");
 
 describe("keyboard-first classification", () => {
+  it("refills beyond 100 acknowledged labels without false queue completion", async () => {
+    server.db.samples = Array.from({ length: 125 }, (_, index) => sample(`many-${index}`, "a"));
+    const ui = await open();
+    for (let index = 0; index < 101; index++) { expect(current(ui)).toBe(`many-${index}`); press("p"); await settle(); }
+    expect(current(ui)).toBe("many-101");
+    expect(ui.get("[data-progress]").text()).toContain("24 pending");
+  });
+
+  it("advances past a fully skipped window, keeps pending labels, and scopes session skips by word", async () => {
+    server.db.samples = [...Array.from({ length: 125 }, (_, index) => sample(`skip-${index}`, "a")), sample("skip-0", "b")];
+    const ui = await open();
+    for (let index = 0; index < 125; index++) { expect(current(ui)).toBe(`skip-${index}`); press("s"); await settle(); }
+    expect(ui.text()).toContain("skipped for this session");
+    expect(ui.text()).not.toContain("No pending recordings");
+    expect(server.db.samples.every(item => item.label === "pending")).toBe(true);
+    expect(labels()).toHaveLength(0);
+    await ui.get("#studio-word").setValue("b"); await settle();
+    expect(current(ui)).toBe("skip-0");
+    await ui.get("#studio-word").setValue("a"); await settle();
+    expect(ui.find("[data-classify-current]").exists()).toBe(false);
+  });
+  it('rejects a stale refill response after switching words', async () => {
+    server.db.samples = [...Array.from({ length: 125 }, (_, index) => sample(`window-${index}`, 'a')), sample('other-window', 'b')];
+    const ui = await open();
+    const stale = server.hold(r => r.url.pathname.endsWith('/a/queue') && r.url.searchParams.get('offset') === '100');
+    for (let index = 0; index < 100; index++) { press('s'); await settle(); }
+    expect(stale.request()).toBeDefined();
+    await ui.get('#studio-word').setValue('b'); await settle();
+    stale.release(); await settle();
+    expect(current(ui)).toBe('other-window');
+    expect(ui.get('[data-progress]').text()).toContain('1 pending');
+    expect(ui.get('[data-progress]').text()).toContain('0 skipped');
+  });
   it("retires the legacy mapping and shows a real workspace queue with a visible shortcut legend", async () => {
     const ui = await open();
     expect(ui.get("h1").text()).toBe("Classify");

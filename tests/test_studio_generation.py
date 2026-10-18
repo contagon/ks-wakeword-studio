@@ -86,6 +86,20 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(catalog['en']['engines']['hybrid'], ['omnivoice', 'qwen3', 'moss', 'piper'])
         self.assertFalse(catalog['fi']['accent_applies'])
 
+    def test_selection_endpoint_includes_batches_beyond_visible_page(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from studio.api import create_router
+        ids = [self.generate()[0].id for _ in range(55)]
+        self.service.select_batches(self.word.id, [ids[0], ids[-1]])
+        app = FastAPI()
+        app.include_router(create_router(self.runtime))
+        with TestClient(app) as client:
+            base = f'/api/studio/wakewords/{self.word.id}/generation'
+            self.assertEqual(len(client.get(base + '/batches').json()['items']), 50)
+            self.assertEqual(set(client.get(base + '/selection').json()), {ids[0], ids[-1]})
+            self.assertEqual(client.get(f'/api/studio/wakewords/{self.other.id}/generation/selection').json(), [])
+
     def test_invalid_recipes_are_rejected_not_silently_defaulted(self):
         for changes in ({'language': 'invented'}, {'tts_mode': 'unknown'}, {'tts_mode': 'piper'},
                         {'language': 'de'}, {'english_accent': 'unknown'}, {'samples': 0},
@@ -130,7 +144,7 @@ class GenerationTests(unittest.TestCase):
             store = Store.open(root)
             try:
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 11)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 12)
                     self.assertEqual(db.execute("SELECT phrase FROM wakewords WHERE id='old'").fetchone()[0], 'Old robot')
                     self.assertEqual(db.execute("SELECT family_id FROM audio_records WHERE id='audio'").fetchone()[0], 'family')
             finally:
