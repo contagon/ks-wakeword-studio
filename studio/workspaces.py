@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from studio.db import Store
-from studio.models import Conflict, NotFound, Page, ValidationError, Wakeword, WakewordUpdate
+from studio.models import Conflict, NotFound, Page, SourceMapping, ValidationError, Wakeword, WakewordUpdate
 
 
 def utc_now() -> datetime:
@@ -21,6 +21,33 @@ class WorkspaceService:
 
     def _timestamp(self) -> str:
         return self.clock().astimezone(timezone.utc).isoformat()
+
+    def set_source_mapping(self, device_id: str, engine: str, source_phrase: str, word_id: str) -> None:
+        # Exact per-device/engine names only. Display phrases are not identities.
+        for value, bound in ((engine, 100), (source_phrase, 200)):
+            if self._text(value, bound) != value:
+                raise ValidationError("Source mappings require exact names")
+        with self.store.transaction() as db:
+            if db.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone() is None:
+                raise NotFound("Device not found")
+            if db.execute("SELECT 1 FROM wakewords WHERE id=?", (word_id,)).fetchone() is None:
+                raise NotFound("Wakeword not found")
+            db.execute("""INSERT INTO source_mappings VALUES (?,?,?,?)
+                          ON CONFLICT(device_id,engine,source_phrase) DO UPDATE SET word_id=excluded.word_id""",
+                       (device_id, engine, source_phrase, word_id))
+
+    def source_mappings(self, device_id: str) -> list[SourceMapping]:
+        with self.store.transaction() as db:
+            if db.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone() is None:
+                raise NotFound("Device not found")
+            return [SourceMapping(**dict(row)) for row in db.execute(
+                "SELECT * FROM source_mappings WHERE device_id=? ORDER BY engine,source_phrase", (device_id,))]
+
+    def resolve_source(self, device_id: str, engine: str, source_phrase: str) -> str | None:
+        with self.store.transaction() as db:
+            rows = db.execute("SELECT word_id FROM source_mappings WHERE device_id=? AND engine=? AND source_phrase=?",
+                              (device_id, engine, source_phrase)).fetchall()
+            return rows[0][0] if len(rows) == 1 else None
 
     @staticmethod
     def _text(value: str, maximum: int) -> str:

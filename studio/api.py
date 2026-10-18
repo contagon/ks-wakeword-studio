@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict
 
-from studio.models import (Conflict, CredentialsRequired, Device, IdentityMismatch,
+from studio.models import (CollectionRun, Conflict, CredentialsRequired, Device, IdentityMismatch, SourceMapping,
                            RemoteRejected, RemoteUnavailable, NotFound, Page, Recording, Sample, SampleQuery,
                            ValidationError, Wakeword, WakewordUpdate)
 from studio.runtime import StudioRuntime
@@ -82,6 +82,16 @@ class AssignBody(BaseModel):
     word_id: str
 
 
+class ScrapeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    device_ids: list[str] | None = None
+
+
+class SourceMappingBody(AssignBody):
+    engine: str
+    source_phrase: str
+
+
 def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
                  label: str | None = None, device_id: str | None = None,
                  near_miss: bool | None = None, source: str | None = None,
@@ -91,6 +101,23 @@ def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=1
 
 def create_router(runtime: StudioRuntime) -> APIRouter:
     router = APIRouter(prefix="/api/studio", route_class=StudioRoute)
+
+    @router.post("/scrape", response_model=CollectionRun)
+    def scrape(body: ScrapeBody = ScrapeBody()) -> CollectionRun:
+        return runtime.collection.run(body.device_ids)
+
+    @router.get("/scrape/runs", response_model=Page[CollectionRun])
+    def scrape_runs(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)) -> Page[CollectionRun]:
+        return runtime.collection.list_runs(offset, limit)
+
+    @router.get("/devices/{device_id}/source-mappings", response_model=list[SourceMapping])
+    def source_mappings(device_id: str) -> list[SourceMapping]:
+        return runtime.workspaces.source_mappings(device_id)
+
+    @router.put("/devices/{device_id}/source-mappings", response_model=SourceMapping)
+    def set_source_mapping(device_id: str, body: SourceMappingBody) -> SourceMapping:
+        runtime.workspaces.set_source_mapping(device_id, body.engine, body.source_phrase, body.word_id)
+        return SourceMapping(device_id, body.engine, body.source_phrase, body.word_id)
 
     @router.get("/devices", response_model=list[Device])
     def list_devices() -> list[Device]:

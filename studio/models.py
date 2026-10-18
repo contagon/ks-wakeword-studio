@@ -151,6 +151,40 @@ T = TypeVar("T")
 
 
 @dataclass(frozen=True)
+class SourceMapping:
+    device_id: str
+    engine: str
+    source_phrase: str
+    word_id: str
+
+
+@dataclass
+class CollectionCounters:
+    listed: int = 0
+    new: int = 0
+    already_seen: int = 0
+    unmapped: int = 0
+    evicted: int = 0
+    failed: int = 0
+
+
+@dataclass
+class DeviceCollectionResult(CollectionCounters):
+    device_id: str = ""
+    status: str = "running"
+    errors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CollectionRun(CollectionCounters):
+    id: str = ""
+    started_at: str = ""
+    finished_at: str | None = None
+    status: str = "running"
+    devices: list[DeviceCollectionResult] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class Page(Generic[T]):
     items: list[T]
     total: int
