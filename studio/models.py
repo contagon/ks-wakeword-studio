@@ -33,6 +33,29 @@ class RemoteUnavailable(Exception):
 
 
 @dataclass(frozen=True)
+class Schedule:
+    scope: str
+    cron: str
+    timezone: str
+    enabled: bool
+    next_run_at: str
+
+
+@dataclass(frozen=True)
+class Job:
+    id: str
+    kind: str
+    word_id: str | None
+    resource: str
+    payload: dict
+    status: str
+    created_at: str
+    started_at: str | None
+    finished_at: str | None
+    result: dict
+
+
+@dataclass(frozen=True)
 class Device:
     # The stable kiosk identity, never an address or display name.
     id: str

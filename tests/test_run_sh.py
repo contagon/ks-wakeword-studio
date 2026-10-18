@@ -26,6 +26,33 @@ def _cuda_path_probe() -> str:
 
 
 class RunShCudaLibraryPathTests(unittest.TestCase):
+    def test_croniter_is_exactly_pinned_and_validated_on_reuse(self):
+        source = RUN_SH.read_text(encoding="utf-8")
+        self.assertIn('CRONITER_VERSION="6.0.0"', source)
+        self.assertIn('"croniter==${CRONITER_VERSION}"', source)
+        probe = re.search(r"import importlib.metadata as md\n(?P<probe>.*?)\nPY", source, re.DOTALL).group(0)[:-3]
+        import types
+        versions = {'fastapi': '0.115.6', 'uvicorn': '0.30.6', 'python-multipart': '0.0.9',
+                    'croniter': '6.0.0', 'silero-vad': '5.0.0', 'numpy': '1.24.0',
+                    'faster-whisper': '1.0.0', 'onnx-asr': '0.12.0', 'nvidia-cudnn-cu12': '9.0.0'}
+        from unittest.mock import patch
+        for version in ('6.0.0', '5.0.1', None):
+            def installed(package):
+                if package == 'croniter':
+                    if version is None:
+                        import importlib.metadata
+                        raise importlib.metadata.PackageNotFoundError(package)
+                    return version
+                return versions.get(package, '1.0.0')
+            with self.subTest(version=version), patch('importlib.metadata.version', side_effect=installed), \
+                 patch.object(sys, 'argv', ['-', '0.115.6', '0.30.6', '0.0.9', '6.0.0']), \
+                 patch.dict(sys.modules, {'onnxruntime': types.SimpleNamespace(get_available_providers=lambda: ['CUDAExecutionProvider'])}):
+                if version == '6.0.0':
+                    exec(probe, {})
+                else:
+                    with self.assertRaises((SystemExit, __import__('importlib.metadata', fromlist=['PackageNotFoundError']).PackageNotFoundError)):
+                        exec(probe, {})
+
     def _run_probe(self, python_path: Path) -> subprocess.CompletedProcess[str]:
         env = dict(os.environ)
         env["PYTHONPATH"] = str(python_path)

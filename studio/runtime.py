@@ -9,11 +9,14 @@ from studio.devices import DeviceService
 from studio.storage import BlobStore
 from studio.samples import SampleService
 from studio.workspaces import WorkspaceService
+from studio.jobs import JobQueue, WorkerPool, utc_now
+from studio.schedules import ScheduleService
 
 
 class StudioRuntime:
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path, *, clock=utc_now, runner=None, groups=None):
         self.data_dir = Path(data_dir)
+        self.clock, self.runner, self.groups = clock, runner, groups
         self._lock = threading.RLock()
         self._store: Store | None = None
         self._workspaces: WorkspaceService | None = None
@@ -21,6 +24,9 @@ class StudioRuntime:
         self._samples: SampleService | None = None
         self._devices: DeviceService | None = None
         self._collection: CollectionService | None = None
+        self._jobs: JobQueue | None = None
+        self._schedules: ScheduleService | None = None
+        self._workers: WorkerPool | None = None
 
     def startup(self) -> None:
         with self._lock:
@@ -34,11 +40,44 @@ class StudioRuntime:
                 self._workspaces = WorkspaceService(store)
                 self._samples = SampleService(store, blobs)
                 self._devices = DeviceService(store)
-                self._collection = CollectionService(store, self._samples, self._devices)
+                self._collection = CollectionService(store, self._samples, self._devices, clock=self.clock)
+                self._jobs = JobQueue(store, clock=self.clock, groups=self.groups)
+                self._schedules = ScheduleService(store, self._jobs, clock=self.clock)
+                self._workers = WorkerPool(self._jobs, clock=self.clock, runner=self.runner, schedules=self._schedules)
+                self._workers.register('scrape', 'collection', self._collect_job)
+                self._jobs.recover()
                 self._store = store
             except BaseException:
                 store.close()
                 raise
+
+    def _collect_job(self, job, context):
+        if context.cancelled():
+            return {}
+        assert self._collection is not None
+        result = self._collection.run(job.payload.get('device_ids'))
+        return {'run_id': result.id, 'status': result.status}
+
+    @property
+    def jobs(self) -> JobQueue:
+        self.startup()
+        assert self._jobs is not None
+        return self._jobs
+
+    @property
+    def schedules(self) -> ScheduleService:
+        self.startup()
+        assert self._schedules is not None
+        return self._schedules
+
+    @property
+    def workers(self) -> WorkerPool:
+        self.startup()
+        assert self._workers is not None
+        return self._workers
+
+    def start_workers(self) -> None:
+        self.workers.start()
 
     @property
     def collection(self) -> CollectionService:
@@ -71,6 +110,9 @@ class StudioRuntime:
         return self._blobs
 
     def shutdown(self) -> None:
+        # Join outside the runtime lock: a handler may need a runtime property.
+        if self._workers is not None:
+            self._workers.stop()
         with self._lock:
             if self._store is not None:
                 self._store.close()
@@ -80,3 +122,6 @@ class StudioRuntime:
                 self._blobs = None
                 self._devices = None
                 self._collection = None
+                self._jobs = None
+                self._schedules = None
+                self._workers = None

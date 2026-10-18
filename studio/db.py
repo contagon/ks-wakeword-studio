@@ -43,7 +43,7 @@ class Store:
             connection.execute("PRAGMA synchronous = FULL")
             with store.transaction() as db:
                 version = db.execute("PRAGMA user_version").fetchone()[0]
-                if version > 4:
+                if version > 5:
                     raise ValidationError("Unsupported studio schema version")
                 if version == 0:
                     # execute complete statements individually: executescript commits implicitly.
@@ -58,6 +58,9 @@ class Store:
                 if version < 4:
                     store._apply_schema(db, "schema_collection.sql")
                     db.execute("PRAGMA user_version = 4")
+                if version < 5:
+                    store._apply_schema(db, "schema_jobs.sql")
+                    db.execute("PRAGMA user_version = 5")
             return store
         except BaseException:
             store.close()

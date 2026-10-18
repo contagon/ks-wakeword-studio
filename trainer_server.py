@@ -3198,34 +3198,10 @@ def _start_training_thread(
     english_accent: str = DEFAULT_SERVER_ENGLISH_ACCENT,
     train_openwakeword: bool = True,
 ) -> threading.Thread:
-    global TRAINING_THREAD
-    thread = threading.Thread(
-        target=_run_training_background,
-        args=(
-            safe_word,
-            language,
-            allow_no_personal,
-            auto_run,
-            tts_mode,
-            english_accent,
-            train_openwakeword,
-        ),
-        daemon=True,
-        name="wake-word-training",
-    )
-    with TRAINING_RUNTIME_LOCK:
-        if TRAINING_THREAD is not None and TRAINING_THREAD.is_alive():
-            raise RuntimeError("Training is already running.")
-        TRAINING_STOP_EVENT.clear()
-        TRAINING_THREAD = thread
-    try:
-        thread.start()
-    except Exception:
-        with TRAINING_RUNTIME_LOCK:
-            if TRAINING_THREAD is thread:
-                TRAINING_THREAD = None
-        raise
-    return thread
+    # The singleton command regenerates mutable global inputs and can publish
+    # through Tater outside the studio resource/provenance contracts. It is not
+    # a safe fallback while the explicit studio training adapter is pending.
+    raise RuntimeError("Use the Studio durable training queue; legacy singleton training is disabled.")
 
 
 def _stop_current_training(timeout: float = 20.0) -> bool:
@@ -3494,7 +3470,9 @@ def _run_training_background(
 @app.on_event("startup")
 def start_auto_train_worker_event():
     STUDIO_RUNTIME.startup()
-    _start_auto_train_worker()
+    # Studio collection/manual labels replace the legacy STT/Tater automation.
+    # Never let the singleton background loop publish/train independently.
+    STUDIO_RUNTIME.start_workers()
 
 
 @app.on_event("shutdown")
