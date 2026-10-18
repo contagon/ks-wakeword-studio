@@ -36,6 +36,9 @@ from fastapi import FastAPI, UploadFile, File, Form, Header, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from studio.api import create_router as create_studio_router
+from studio.runtime import StudioRuntime
+
 ROOT_DIR = Path(__file__).resolve().parent
 
 from tts_config import (
@@ -212,6 +215,8 @@ AUTO_TRAIN_DEFAULT_STATE: Dict[str, Any] = {
 
 
 app = FastAPI(title="microWakeWord Personal Samples")
+STUDIO_RUNTIME = StudioRuntime(DATA_DIR)
+app.include_router(create_studio_router(STUDIO_RUNTIME))
 
 # Serve static UI
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -3488,6 +3493,7 @@ def _run_training_background(
 # -------------------- Routes --------------------
 @app.on_event("startup")
 def start_auto_train_worker_event():
+    STUDIO_RUNTIME.startup()
     _start_auto_train_worker()
 
 
@@ -3495,6 +3501,7 @@ def start_auto_train_worker_event():
 def stop_auto_train_worker_event():
     _stop_auto_train_worker()
     _stop_current_training(timeout=20.0)
+    STUDIO_RUNTIME.shutdown()
 
 
 @app.get("/api/auto_train")
