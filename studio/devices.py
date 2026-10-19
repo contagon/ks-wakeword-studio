@@ -58,13 +58,21 @@ class DeviceService:
     def __init__(self, store: Store, client: KioskClient | None = None):
         self.store = store
         self.credentials = CredentialStore(store)
-        self.client = client if client is not None else KioskClient(self._token)
+        self.client = client if client is not None else KioskClient(self._token, on_identity=self._remember_name)
+
+    def _remember_name(self, identity):
+        # Routine verified identity checks also backfill migrated standalone
+        # registries. An omitted name never clears a previously learned label.
+        if identity.name is not None:
+            with self.store.transaction() as db:
+                db.execute('UPDATE devices SET name=? WHERE id=? AND removed=0 AND active=1',
+                           (identity.name, identity.id))
 
     @staticmethod
     def _device(row: sqlite3.Row) -> Device:
         return Device(row["id"], row["url"], row["role"], bool(row["active"]),
                       row["leader_id"], "ready" if row["credential_ref"] else "credentials_required",
-                      row["profile_id"], bool(row["model_eligible"]))
+                      row["profile_id"], bool(row["model_eligible"]), row['name'])
 
     def _token(self, device: Device) -> str:
         with self.store.transaction() as db:
@@ -134,12 +142,12 @@ class DeviceService:
                     role = "follower"
                 # Re-adding retained followers never reactivates automatic actions.
                 if existing is None:
-                    db.execute("INSERT INTO devices (id,url,role,credential_ref,model_eligible) VALUES (?,?,?,?,?)",
-                               (identity.id, url, role, ref, role != "follower"))
+                    db.execute("INSERT INTO devices (id,url,role,credential_ref,model_eligible,name) VALUES (?,?,?,?,?,?)",
+                               (identity.id, url, role, ref, role != "follower", identity.name))
                 else:
-                    db.execute("UPDATE devices SET url=?, url_override=?, role=?, credential_ref=?, model_eligible=?, removed=0, active=? WHERE id=?",
+                    db.execute("UPDATE devices SET url=?, url_override=?, role=?, credential_ref=?, model_eligible=?, removed=0, active=?,name=COALESCE(?,name) WHERE id=?",
                                (url, url, role, ref, bool(existing["model_eligible"]) if role == "follower" else True,
-                                True if existing['removed'] else existing['active'], identity.id))
+                                 True if existing['removed'] else existing['active'], identity.name, identity.id))
         except sqlite3.IntegrityError:
             raise Conflict("Only one configured fleet leader is supported") from None
         return self.get(identity.id)
@@ -154,7 +162,7 @@ class DeviceService:
         ref = self.credentials.put(token)
         role = "follower" if device.role == "follower" or identity.follows else device.role
         with self.store.transaction() as db:
-            db.execute("UPDATE devices SET credential_ref=?, role=? WHERE id=?", (ref, role, device_id))
+            db.execute("UPDATE devices SET credential_ref=?, role=?,name=COALESCE(?,name) WHERE id=?", (ref, role, identity.name, device_id))
         return self.get(device_id)
 
     def refresh_fleet(self, leader_id: str) -> list[Device]:
@@ -201,7 +209,8 @@ class DeviceService:
                 # these nonmember phases disable actions; offline/error/update
                 # phases still describe members and must remain retryable.
                 active = follower.get("phase") not in ("left", "pending", "declined")
-                rows.append((device_id, url, profile_id, profiles[profile_id], active))
+                rows.append((device_id, url, profile_id, profiles[profile_id], active,
+                             KioskClient.display_name(follower.get('name'))))
         except (KeyError, TypeError, ValueError, ValidationError):
             raise RemoteRejected("Invalid fleet roster") from None
         with self.store.transaction() as db:
@@ -211,12 +220,15 @@ class DeviceService:
             if current is None or current['removed'] or not current['active'] or current['role'] != 'leader':
                 raise Conflict('Fleet leader changed while refreshing')
             db.execute("UPDATE devices SET active=0 WHERE role='follower' AND leader_id=?", (leader_id,))
-            for device_id, url, profile_id, eligible, active in rows:
-                db.execute("""INSERT INTO devices (id,url,role,leader_id,profile_id,model_eligible,active)
-                              VALUES (?,?,'follower',?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+            db.execute('UPDATE devices SET name=COALESCE(?,name) WHERE id=?',
+                       (KioskClient.display_name(data['self'].get('name')) or identity.name, leader_id))
+            for device_id, url, profile_id, eligible, active, name in rows:
+                db.execute("""INSERT INTO devices (id,url,role,leader_id,profile_id,model_eligible,active,name)
+                              VALUES (?,?,'follower',?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
                                url=COALESCE(devices.url_override,excluded.url), removed=0, role='follower', active=excluded.active, leader_id=excluded.leader_id,
-                              profile_id=excluded.profile_id, model_eligible=excluded.model_eligible""",
-                           (device_id, url, leader_id, profile_id, eligible, active))
+                               profile_id=excluded.profile_id, model_eligible=excluded.model_eligible,
+                               name=COALESCE(excluded.name,devices.name)""",
+                           (device_id, url, leader_id, profile_id, eligible, active, name))
         return [self.get(row[0]) for row in rows]
 
     def publication_targets(self) -> list[Device]:

@@ -59,6 +59,41 @@ def write_tone(
 
 
 class ModernTtsTests(unittest.TestCase):
+    def test_direct_generation_progress_counts_candidates_and_announces_qualification(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            args = argparse.Namespace(phrase='hey tater', language='en', tts_mode='modern', samples=2,
+                                      batch_size=1, data_dir=root, output_dir=root / 'samples',
+                                      ffmpeg='ffmpeg', dry_run=False)
+            instance = generator_module.Generator(args)
+            instance.build_dir.mkdir(parents=True, exist_ok=True)
+            events = []
+            def emit(stage, **fields):
+                events.append({'stage': stage, **fields})
+            def provider(command, *args, **kwargs):
+                inputs = next(Path(value) for index, value in enumerate(command) if index and command[index - 1] == '--test_list')
+                entries = [json.loads(line) for line in inputs.read_text().splitlines()]
+                destination = Path(command[command.index('--res_dir') + 1])
+                for entry in entries:
+                    write_tone(destination / f"{entry['id']}.wav")
+            def qa(command, **kwargs):
+                source = Path(command[command.index('--input-jsonl') + 1])
+                target = Path(command[command.index('--output-jsonl') + 1])
+                target.write_text('\n'.join(json.dumps({'id': json.loads(line)['id'], 'accepted': True}) for line in source.read_text().splitlines()))
+            with patch.object(instance, 'ensure_environment', return_value=Path('/unused/python')), \
+                 patch.object(instance, '_reference_qa_python', return_value=Path('/unused/python')), \
+                 patch.object(generator_module, 'run_with_batch_retry', side_effect=provider), \
+                 patch.object(generator_module, 'run', side_effect=qa), \
+                 patch.object(generator_module, 'studio_progress', side_effect=emit):
+                entries, paths = instance.generate_direct_engine('omnivoice', 2, [])
+                qualified = instance.qualify_direct_candidates('omnivoice', entries, paths)
+            self.assertEqual(len(paths), 3)  # OmniVoice intentionally over-generates.
+            self.assertIn({'stage': 'generating', 'engine': 'omnivoice', 'completed': 0, 'total': 3}, events)
+            self.assertIn({'stage': 'generating', 'engine': 'omnivoice', 'completed': 3, 'total': 3}, events)
+            self.assertIn({'stage': 'qualifying', 'engine': 'omnivoice', 'completed': 0, 'total': 3}, events)
+            self.assertIn({'stage': 'qualified', 'engine': 'omnivoice', 'completed': 3, 'total': 3}, events)
+            self.assertEqual(len(qualified), 3)
+
     def test_direct_generator_uses_one_wake_phrase(self) -> None:
         self.assertEqual(generator_module.reference_text("hey tater"), "hey tater.")
         self.assertEqual(generator_module.reference_text("hey tater!"), "hey tater.")

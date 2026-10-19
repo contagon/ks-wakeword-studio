@@ -170,6 +170,10 @@ def delete_workspace(store, word_id, blobs=None):
             audio = {r[0] for r in db.execute('SELECT audio_id FROM samples WHERE word_id=? UNION SELECT audio_id FROM recordings WHERE word_id=?', (word_id, word_id))}
             audio.update(r[0] for r in db.execute(f'SELECT old_audio_id FROM sample_history WHERE sample_id IN ({samples}) UNION SELECT new_audio_id FROM sample_history WHERE sample_id IN ({samples})', (word_id, word_id)))
             audio.update(r[0] for r in db.execute(f'SELECT audio_id FROM generation_batch_audio WHERE batch_id IN ({batches})', (word_id,)))
+            # A deleted generated batch can leave audio retained only by a run
+            # snapshot. Capture those identities before removing run history.
+            for row in db.execute('SELECT manifest FROM training_runs WHERE word_id=?', (word_id,)):
+                audio.update(item['audio_id'] for item in json.loads(row[0]).get('audio', []) if 'audio_id' in item)
             hashes = {r[0] for r in db.execute(f'SELECT original_hash FROM recording_conflicts WHERE recording_id IN ({recordings})', (word_id,))}
             # Conflicts retain their raw hash but ingest also published a decoded
             # blob. Recover that exact candidate from these sources only; never

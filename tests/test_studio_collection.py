@@ -53,6 +53,19 @@ class FakeKiosk:
 
 
 class CollectionTests(unittest.TestCase):
+    def test_global_collection_revalidates_inference_atomically_at_admission(self):
+        from studio.models import WakewordUpdate
+        self.words.update(self.word.id, WakewordUpdate(phrase='Hey Cedar'))
+        self.client.clips['a'] = [self.clip('race', 'Hey Cedar')]
+        original = self.samples.ingest
+        def introduce_duplicate(*args, **kwargs):
+            self.words.create('HEY  CEDAR', 'en', 'duplicate')
+            return original(*args, **kwargs)
+        with patch.object(self.samples, 'ingest', side_effect=introduce_duplicate):
+            result = self.service.run()
+        self.assertEqual((result.new, result.unmapped), (1, 1))
+        self.assertEqual(self.samples.queue(self.word.id, SampleQuery()).total, 0)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -387,11 +400,12 @@ class CollectionTests(unittest.TestCase):
             db.execute('DROP INDEX one_studio_leader')
             db.execute('ALTER TABLE devices DROP COLUMN url_override')
             db.execute('ALTER TABLE devices DROP COLUMN removed')
+            db.execute('ALTER TABLE devices DROP COLUMN name')
             db.execute("CREATE UNIQUE INDEX one_studio_leader ON devices(role) WHERE role='leader'")
             db.execute('PRAGMA user_version=3')
         self.store = Store.open(self.root)
         self.assertEqual(WorkspaceService(self.store).get(self.word.id).phrase, 'Hello')
         self.assertEqual(DeviceService(self.store).get('a').id, 'a')
         with self.store.transaction() as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 14)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 15)
             self.assertEqual(db.execute('SELECT id FROM recordings').fetchone()[0], recording.id)

@@ -103,6 +103,7 @@ export const studioApi = {
   batchSelection: (word: string, signal?: AbortSignal) => get<string[]>(`${wordPath(word)}/generation/selection`, undefined, signal),
   batch: (word: string, id: string, signal?: AbortSignal) => get<Batch>(`${wordPath(word)}/generation/batches/${segment(id)}`, undefined, signal),
   selectBatches: (word: string, batch_ids: string[], signal?: AbortSignal) => put<Page<Batch>>(`${wordPath(word)}/generation/batches`, { batch_ids }, signal),
+  deleteBatch: (word: string, batch: string, signal?: AbortSignal) => request<void>(`${wordPath(word)}/generation/batches/${segment(batch)}`, 'DELETE', undefined, signal),
   trainingSettings: (word: string, signal?: AbortSignal) => get<TrainingSettings>(`${wordPath(word)}/training/settings`, undefined, signal),
   saveTrainingSettings: (word: string, body: TrainingSettings, signal?: AbortSignal) => put<TrainingSettings>(`${wordPath(word)}/training/settings`, body, signal),
   trainingCounts: (word: string, signal?: AbortSignal) => get<TrainingCounts>(`${wordPath(word)}/training/counts`, undefined, signal),

@@ -19,6 +19,37 @@ from studio.runtime import StudioRuntime
 
 
 class DeviceTests(unittest.TestCase):
+    def test_existing_standalone_names_refresh_during_routine_identity_checks(self):
+        self.server.identity['data'].update(leader=False)
+        device = self.service.add(self.server.url, TOKEN, 'standalone')
+        with self.store.transaction() as db:
+            db.execute('UPDATE devices SET name=NULL WHERE id=?', (device.id,))
+        self.server.identity['data']['name'] = 'Renamed satellite'
+        self.service.client.diagnostics(self.service.get(device.id))
+        self.assertEqual(self.service.get(device.id).name, 'Renamed satellite')
+        del self.server.identity['data']['name']
+        self.service.client.diagnostics(self.service.get(device.id))
+        self.assertEqual(self.service.get(device.id).name, 'Renamed satellite')
+        self.server.identity['data'].update(id='impostor', name='Wrong name')
+        with self.assertRaises(IdentityMismatch):
+            self.service.client.diagnostics(self.service.get(device.id))
+        self.assertEqual(self.service.get(device.id).name, 'Renamed satellite')
+
+    def test_satellite_names_survive_discovery_and_rename(self):
+        leader = self.service.add(self.server.url, TOKEN, 'leader')
+        self.assertEqual(leader.name, 'Kitchen')
+        self.service.refresh_fleet(leader.id)
+        self.assertEqual(self.service.get('kiosk-follower').name, 'Hall')
+        self.server.fleet['data']['followers'][0]['name'] = 'Kitchen satellite'
+        self.server.fleet['data']['self']['name'] = 'Main kiosk'
+        self.service.refresh_fleet(leader.id)
+        self.assertEqual(self.service.get('kiosk-follower').name, 'Kitchen satellite')
+        self.assertEqual(self.service.get(leader.id).name, 'Main kiosk')
+        del self.server.fleet['data']['followers'][0]['name']
+        self.service.refresh_fleet(leader.id)
+        self.assertEqual(self.service.get('kiosk-follower').name, 'Kitchen satellite')
+        self.assertEqual(self.service.get('kiosk-follower').id, 'kiosk-follower')
+
     def test_pending_roster_cannot_restore_followers_after_leader_removal(self):
         leader = self.service.add(self.server.url, TOKEN, 'leader')
         self.service.refresh_fleet(leader.id)

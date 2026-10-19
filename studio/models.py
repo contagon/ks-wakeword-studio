@@ -271,6 +271,7 @@ class Device:
     credentials_status: str = "credentials_required"
     profile_id: str | None = None
     model_eligible: bool = False
+    name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -278,6 +279,7 @@ class KioskIdentity:
     id: str
     leader: bool
     follows: bool
+    name: str | None = None
 
 
 @dataclass(frozen=True)

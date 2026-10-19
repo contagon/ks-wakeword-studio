@@ -59,7 +59,7 @@ function recordInput(id: string, element: Element | ComponentPublicInstance | nu
   if (element instanceof HTMLInputElement) credentialInputs.set(id, element);
   else credentialInputs.delete(id);
 }
-function parent(device: Device): string { return device.leader_id ? `Parent ${device.leader_id}` : "Direct registry target"; }
+function parent(device: Device): string { return device.leader_id ? `Parent ${registry.deviceLabel(device.leader_id)}` : "Direct registry target"; }
 function sync(): void { emit("changed", [...registry.devices.value]); }
 async function add(): Promise<void> {
   const password = passwordInput.value?.value ?? "";
@@ -112,7 +112,7 @@ onBeforeUnmount(() => registry.abort());
     <p v-if="registry.loading.value" class="studio-muted mt-3">Loading registered devices…</p>
     <div v-else class="mt-4 grid gap-2">
       <article v-for="device in registry.devices.value" :key="device.id" class="studio-device-row" :data-device-id="device.id">
-        <div><strong>{{ device.id }}</strong> <span class="studio-status" :class="device.role === 'follower' ? 'studio-status-muted' : 'studio-status-neutral'">{{ device.role === 'follower' ? 'Follower' : device.role }}</span><p class="studio-muted text-xs">{{ parent(device) }} · {{ device.url }}{{ device.active ? '' : ' · Inactive member' }}</p></div>
+        <div><strong>{{ registry.deviceLabel(device.id) }}</strong> <span class="studio-status" :class="device.role === 'follower' ? 'studio-status-muted' : 'studio-status-neutral'">{{ device.role === 'follower' ? 'Follower' : device.role }}</span><p class="studio-muted text-xs">{{ parent(device) }} · {{ device.url }}{{ device.active ? '' : ' · Inactive member' }}</p></div>
         <div class="flex flex-wrap gap-2 items-center"><span class="studio-status" :class="device.credentials_status === 'ready' ? 'studio-status-neutral' : 'studio-status-warning'">{{ device.credentials_status === 'ready' ? 'Credentials ready' : 'Credentials required' }}</span><span class="studio-status" :class="device.model_eligible ? 'studio-status-neutral' : 'studio-status-warning'">{{ device.model_eligible ? 'Profile covered' : 'Not covered' }}</span><button v-if="device.role === 'leader'" type="button" :disabled="busy === `refresh:${device.id}`" @click="refresh(device)">Refresh followers</button><form v-if="device.role === 'follower' && device.credentials_status !== 'ready'" class="flex gap-2" @submit.prevent="setCredentials(device)"><input :ref="element => recordInput(device.id, element)" :name="`credentials-${device.id}`" required type="password" autocomplete="off" aria-label="Follower admin password"><button type="submit" :disabled="busy === `credentials:${device.id}`">Authenticate</button></form></div>
         <div class="flex gap-2"><button type="button" data-action="edit-device" :disabled="!!busy" @click="edit(device)">Edit</button><button type="button" data-action="delete-device" :disabled="!!busy" @click="confirmDelete(device, $event)">Delete</button></div>
         <form v-if="editing === device.id" data-device-edit class="studio-card grid gap-3" style="grid-column: 1 / -1; width: 100%" @submit.prevent="saveAddress(device)">
@@ -125,7 +125,7 @@ onBeforeUnmount(() => registry.abort());
     </div>
     </div>
       <dialog v-if="deleting" ref="confirmation" tabindex="-1" role="alertdialog" aria-modal="true" aria-label="Remove kiosk from Studio?" class="studio-card studio-device-dialog" @cancel.prevent="!busy && closeDelete()" @keydown.esc="!busy && closeDelete()" @keydown="containFocus" @click.self="!busy && closeDelete()">
-        <h2>Remove {{ deleting.id }} from Studio?</h2>
+        <h2>Remove {{ registry.deviceLabel(deleting.id) }} from Studio?</h2>
         <p v-if="deleting.role === 'leader'">This also removes its discovered followers from the Studio registry.</p>
         <p v-else-if="deleting.role === 'follower'">This follower can be rediscovered on the next fleet refresh.</p>
         <p>Saved recordings and models are kept. This does not change the kiosk itself.</p>

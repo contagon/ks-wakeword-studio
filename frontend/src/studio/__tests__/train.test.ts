@@ -41,6 +41,35 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("TrainPage", () => {
+  it.each([0, 2, 101])('counts %s selected training datasets across pages without counting evaluation inputs', async count => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname.endsWith('/datasets')) {
+        const items = Array.from({ length: count + 1 }, (_, i) => ({ id: `negative-${i}`, name: `Negative ${i}`, selected: true, purpose: 'classifier_negative', split: i === count ? 'evaluation' : 'train', representation: 'features', adapter: 'mww_mmap' }));
+        const offset = Number(url.searchParams.get('offset') ?? 0);
+        return Promise.resolve(json({ items: items.slice(offset, offset + 100), total: items.length, offset, limit: 100 }));
+      }
+      return transport(input, init);
+    });
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    expect(ui.get('[data-negative-datasets-count]').text()).toBe(`${count} selected negative datasets`);
+    expect(ui.text()).toContain('1 evaluation-only dataset');
+    expect(ui.text()).toContain('4 reviewed negatives');
+    ui.unmount();
+  });
+
+  it('does not render stale dataset counts after changing workspaces', async () => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/a/datasets')
+      ? new Promise<Response>(resolve => { finish = resolve; }) : transport(input, init));
+    const ui = mount(host()); await flushPromises();
+    workspace.selectedId.value = 'b'; await flushPromises();
+    finish(json({ items: [], total: 0, offset: 0, limit: 100 })); await flushPromises();
+    expect(ui.get('[data-negative-datasets-count]').text()).toBe('1 selected negative datasets');
+    ui.unmount();
+  });
   it('reconciles stale initial history when the queue completes a run before counts load', async () => {
     const transport = vi.mocked(fetch).getMockImplementation()!;
     let finish!: (response: Response) => void;
@@ -68,8 +97,7 @@ describe("TrainPage", () => {
   it("shows effective inputs, MWW-only settings, queued state, cancellation and scheduled skips", async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     expect(ui.text()).toContain("3 reviewed positives"); expect(ui.text()).toContain("4 reviewed negatives"); expect(ui.text()).toContain("5 selected artificial"); expect(ui.text()).not.toContain("unreviewed");
-    expect(ui.get('[data-effective-counts]').classes()).toContain("sm:grid-cols-3");
-    expect(ui.get('[data-effective-counts]').findAll("p").map(item => item.text())).toEqual(["3 reviewed positives", "4 reviewed negatives", "5 selected artificial"]);
+    expect(ui.get('[data-effective-counts]').findAll("p").map(item => item.text())).toEqual(["3 reviewed positives", "4 reviewed negatives", "5 selected artificial", "1 selected negative datasets"]);
     expect(ui.find('[data-cron-editor]').exists()).toBe(false);
     expect(ui.find('a[href*="automate"]').exists()).toBe(false);
     expect(ui.text()).not.toContain('Automatic training');

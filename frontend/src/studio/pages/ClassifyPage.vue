@@ -12,8 +12,11 @@ import type { Recording, Job } from "../types";
 import CollectionHistory from '../components/CollectionHistory.vue';
 import SourceInbox from '../components/SourceInbox.vue';
 import { useJobQueue } from '../jobs';
+import { useDeviceRegistry } from '../devices';
 
 const workspace = useWorkspace();
+const registry = useDeviceRegistry();
+onMounted(() => { void registry.load(); });
 const jobs = useJobQueue();
 const { classifyTab: tab } = workspace.routes;
 const collectionJob = ref<Job | null>(null), collecting = ref(false), collectionError = ref('');
@@ -37,6 +40,7 @@ async function updateCollection(job: Job) {
   if (!previous || job.id !== previous.id || job.word_id !== workspace.selectedId.value) return;
   collectionJob.value = job;
   if (job.status !== 'complete' || previous.status === 'complete') return;
+  void registry.load(true);
   void refreshInbox();
   const word = workspace.selectedId.value, beforeReview = reviewedCount.value;
   const controller = new AbortController(); collectionRequest?.abort(); collectionRequest = controller;
@@ -208,13 +212,12 @@ onBeforeUnmount(() => { document.removeEventListener("keydown", shortcut); inbox
     <div class="studio-tabs" role="tablist" aria-label="Classification sections"><button v-for="entry in (['review', 'collect', 'unmapped'] as const)" :id="`classify-tab-${entry}`" :key="entry" role="tab" :aria-selected="tab === entry" :aria-controls="`classify-panel-${entry}`" :class="{ active: tab === entry }" @click="workspace.routes.selectClassifyTab(entry)">{{ entry === 'review' ? 'Review' : entry === 'collect' ? 'Collect' : 'Unmapped' }}</button></div>
     <p v-if="collectionError" class="studio-note" role="alert">{{ collectionError }}</p>
     <p v-if="collectionOutcome" data-collection-outcome class="studio-note" :class="{ 'studio-collection-warning': collectionWarning }" :role="collectionWarning ? 'alert' : 'status'"><strong>{{ collectionWarning ? 'Collection needs attention' : 'Collection finished' }}</strong> · {{ collectionOutcome.status }} · {{ collectionOutcome.new ?? 0 }} imported · {{ collectionOutcome.failed ?? 0 }} failed · {{ collectionOutcome.unmapped ?? 0 }} unmapped · {{ collectionOutcome.evicted ?? 0 }} evicted. <a :href="collectionHistoryHref" @click.prevent="workspace.routes.selectClassifyTab('collect')">View collection run →</a></p>
-    <button v-if="collectionJob" type="button" class="mt-3" @click="jobs.show(collectionJob.id)">View collection {{ collectionJob.id }} in queue</button>
     <div v-show="tab === 'review'" id="classify-panel-review" role="tabpanel" aria-labelledby="classify-tab-review">
     <div class="studio-card studio-toolbar mb-4"><label>Recording type<select name="kind" v-model="kind"><option value="">All pending</option><option value="true">Near misses</option><option value="false">Activations</option></select></label></div>
     <p v-if="notice" class="studio-note" role="status" aria-live="polite">{{ notice }}</p><p v-if="error" data-classify-error class="studio-note" role="alert" aria-live="assertive">{{ error }}</p>
     <div v-if="loading" class="studio-card" aria-busy="true">Loading review queue…</div>
     <div v-else-if="active" data-classify-current :data-sample-id="active.id" class="studio-card grid gap-4">
-      <div class="flex flex-wrap justify-between gap-3"><div><h2>Recording {{ active.recording?.clip_id ?? active.id }}</h2><p class="studio-muted text-sm">{{ active.recording?.device_id ?? active.source }} · {{ active.recording?.near_miss ? "Near miss" : "Activation" }} · {{ active.recording?.timestamp ?? active.created_at }}</p></div><span class="studio-muted">Revision {{ active.revision }}</span></div>
+      <div class="flex flex-wrap justify-between gap-3"><div><h2>Recording {{ active.recording?.clip_id ?? active.id }}</h2><p class="studio-muted text-sm">{{ active.recording ? registry.deviceLabel(active.recording.device_id) : active.source }} · {{ active.recording?.near_miss ? "Near miss" : "Activation" }} · {{ active.recording?.timestamp ?? active.created_at }}</p></div><span class="studio-muted">Revision {{ active.revision }}</span></div>
       <AudioPlayer ref="player" :sample-id="active.id" :src="source" :autoplay-requested="autoplayNext" @ready="autoplayNext = false; readySampleId = active.id" @playback-error="error = $event" />
       <p v-if="readySampleId === active.id" class="studio-muted text-xs">Press Space once to enable playback; then acknowledged labels play the next clip.</p>
       <div class="flex flex-wrap gap-2"><button type="button" class="studio-primary" :disabled="saving" @click="label('positive')">Positive (P)</button><button type="button" :disabled="saving" @click="label('negative')">Negative (N)</button><button type="button" :disabled="saving" @click="skip">Skip (S)</button><button type="button" :disabled="saving" data-action="discard" @click="discardOpen = true">Discard (D)</button><button type="button" :disabled="saving || !persistedUndo.length" @click="undo">Undo (Z)</button></div>

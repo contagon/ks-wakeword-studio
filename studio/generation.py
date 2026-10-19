@@ -199,6 +199,10 @@ class GenerationService:
             self._word(db, word_id)
             return self._batch(db, word_id, batch_id)
 
+    def delete_batch(self, word_id: str, batch_id: str) -> None:
+        from studio.batch_deletion import delete_batch
+        delete_batch(self.store, self.blobs, word_id, batch_id)
+
     def list(self, word_id, offset=0, limit=50):
         if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
             raise ValidationError('Invalid pagination')
@@ -242,6 +246,7 @@ class GenerationService:
         # share the GC write lock, so another workspace cannot collect a blob
         # between these two operations, even if its content is identical.
         output = self._run_generator(job, context, phrase, recipe)
+        context.log(f'Validating and saving {recipe.samples} samples')
         with self.store.transaction() as db:
             if db.execute('SELECT status FROM studio_jobs WHERE id=?', (job.id,)).fetchone()[0] != 'running' or context.stop_event.is_set():
                 raise Conflict('Generation cancelled')
@@ -258,7 +263,7 @@ class GenerationService:
                            (audio_id, original, canonical, family, self._now()))
                 db.execute('INSERT INTO generation_batch_audio VALUES (?,?,?)', (job.id, index, audio_id))
             db.execute('UPDATE generation_batches SET committed_at=? WHERE id=?', (self._now(), job.id))
-        context.log('Synthetic batch validated')
+        context.log(f'Synthetic batch validated and saved: {recipe.samples}/{recipe.samples}')
         return self.get_batch(job.word_id, job.id)
 
     def _run_generator(self, job, context, phrase, recipe):
@@ -274,7 +279,7 @@ class GenerationService:
                    f'--tts-mode={recipe.tts_mode}', f'--samples={recipe.samples}', f'--batch-size={recipe.batch_size}',
                    *([f'--engines={",".join(recipe.engines)}'] if recipe.engines is not None else []),
                    '--', phrase]
-        context.log('Generating synthetic batch')
+        context.log(f'Generating synthetic batch: {recipe.samples} samples, batch size {recipe.batch_size}')
         context.run(command, cwd=str(root))
         if context.cancelled():
             raise Conflict('Generation cancelled')

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useDeviceRegistry } from '../devices';
 import { studioApi, StudioApiError } from "../api";
 import AudioTrimModal from "../../components/AudioTrimModal.vue";
 import AudioPlayer from "../components/AudioPlayer.vue";
@@ -8,6 +9,8 @@ import { useWorkspace } from "../workspace";
 import type { Sample, SampleQuery } from "../types";
 
 const workspace = useWorkspace();
+const registry = useDeviceRegistry();
+onMounted(() => { void registry.load(); });
 const items = ref<Sample[]>([]); const total = ref(0); const offset = ref(0); const limit = ref(25); const loading = ref(false); const error = ref(""); const status = ref("");
 const filters = ref({ label: "", source: "", kind: "", after: "", before: "", search: "" });
 const trimTarget = ref<Sample | null>(null); const deleteTarget = ref<Sample | null>(null); const selectedAudio = ref<Sample | null>(null); const importFile = ref<File | null>(null); const importLabel = ref<"positive" | "negative">("positive");
@@ -46,7 +49,7 @@ onBeforeUnmount(() => { request?.abort(); mutation?.abort(); });
           <tr v-for="item in items" :key="item.id" :data-row-id="item.id">
             <td>{{ item.recording?.clip_id ?? item.id }}<small v-if="item.recording" class="block studio-muted">{{ item.recording.phrase }} · {{ item.recording.engine }} · {{ rowKind(item) }}</small></td>
             <td>{{ item.label }}</td>
-            <td>{{ item.source }}<small v-if="item.recording" class="block studio-muted">{{ item.recording.device_id }}</small></td>
+            <td>{{ item.source }}<small v-if="item.recording" class="block studio-muted">{{ registry.deviceLabel(item.recording.device_id) }}</small></td>
             <td>rev {{ item.revision }}</td>
             <td><div class="flex flex-wrap gap-1">
               <button type="button" data-action="play" @click="selectedAudio = item">Play</button>

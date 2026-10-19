@@ -1,16 +1,19 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useDeviceRegistry } from '../devices';
 import { studioApi } from '../api';
 import { isActiveJob, useJobQueue } from '../jobs';
 import { useWorkspace } from '../workspace';
 import type { Job } from '../types';
 
 const props = defineProps<{ job: Job }>();
+const registry = useDeviceRegistry();
+onMounted(() => { void registry.load(); });
 const queue = useJobQueue(), workspace = useWorkspace();
 const names: Record<string, string> = { train: 'Train wakeword', generation: 'Generate artificial samples', preview: 'Preview voice', scrape: 'Collect recordings', download: 'Download negative dataset', classify: 'Classify recordings', deploy: 'Deploy model' };
 const scope = computed(() => props.job.word_id ? workspace.wakewords.value.find(word => word.id === props.job.word_id)?.phrase ?? props.job.word_id : props.job.kind === 'download' ? 'Shared dataset' : 'All wakewords');
 const devices = computed(() => {
-  if (props.job.kind === 'scrape') return props.job.payload.device_ids?.join(', ') || 'All registered kiosks and followers';
+  if (props.job.kind === 'scrape') return props.job.payload.device_ids?.map(registry.deviceLabel).join(', ') || 'All registered kiosks and followers';
   return props.job.kind === 'download' ? props.job.payload.dataset_id : 'Trainer';
 });
 const expanded = ref(false), logs = ref(''), error = ref(''), loading = ref(false);

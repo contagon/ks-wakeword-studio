@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import type { Job, Recording, Sample } from "../types";
+import type { Device, Job, Recording, Sample } from "../types";
 
 export const words = [
   { id: "a", phrase: "Hey Cedar", language: "en", model_id: "cedar", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
@@ -31,6 +31,7 @@ interface Hold { match: (r: Req) => boolean; gate: Promise<void>; used: boolean;
 
 export function fakeStudio() {
   const db = {
+    devices: [] as Device[],
     samples: [] as Sample[],
     unmapped: [] as Recording[],
     jobs: [] as Job[],
@@ -68,6 +69,7 @@ export function fakeStudio() {
     const q = r.url.searchParams;
     const off = Number(q.get("offset") ?? 0), lim = Number(q.get("limit") ?? 50);
     let m: RegExpMatchArray | null;
+    if (p === '/devices') return json(db.devices);
     if (p === "/wakewords") return json(page(words, 0, 100));
     if (p === "/schedules") return json([]);
     if (p === '/jobs') {

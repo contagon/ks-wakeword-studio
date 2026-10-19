@@ -94,6 +94,7 @@ class AutomationService:
                 db.execute('INSERT INTO automation_events(event_key,word_id) VALUES (?,?)', ('collection:' + row['id'], row['word_id']))
 
     def handle_deploy(self, job, context):
+        context.log('Checking deployment policy and available archives')
         if context.cancelled() or self.scheduled_disabled(job) or not self.get(job.word_id).settings.deployment.enabled:
             return {'skipped': True, 'reason': 'disabled'}
         with self.store.transaction() as db:
@@ -105,4 +106,5 @@ class AutomationService:
         if not row:
             return {'skipped': True, 'reason': 'no_new_archive'}
         self.deployment.publish(row['id'], automatic=True)
+        context.log('Model archive published; target delivery reconciliation requested')
         return {'version_id': row['id']}

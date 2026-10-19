@@ -329,6 +329,11 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     def batch(word_id: str, batch_id: str) -> Batch:
         return runtime.generation.get_batch(word_id, batch_id)
 
+    @router.delete('/wakewords/{word_id}/generation/batches/{batch_id}', status_code=204)
+    def delete_batch(word_id: str, batch_id: str):
+        runtime.generation.delete_batch(word_id, batch_id)
+        return Response(status_code=204)
+
     @router.put('/wakewords/{word_id}/generation/batches', response_model=Page[Batch])
     def select_batches(word_id: str, body: BatchSelectionBody) -> Page[Batch]:
         runtime.generation.select_batches(word_id, body.batch_ids)

@@ -47,9 +47,24 @@ class WorkspaceService:
 
     def resolve_source(self, device_id: str, engine: str, source_phrase: str) -> str | None:
         with self.store.transaction() as db:
-            rows = db.execute("SELECT word_id FROM source_mappings WHERE device_id=? AND engine=? AND source_phrase=?",
-                              (device_id, engine, source_phrase)).fetchall()
-            return rows[0][0] if len(rows) == 1 else None
+            return self._resolve_source(db, device_id, engine, source_phrase)
+
+    @staticmethod
+    def _resolve_source(db, device_id: str, engine: str, source_phrase: str) -> str | None:
+        explicit = db.execute("SELECT word_id FROM source_mappings WHERE device_id=? AND engine=? AND source_phrase=?",
+                              (device_id, engine, source_phrase)).fetchone()
+        if explicit:
+            return explicit[0]
+        if not isinstance(source_phrase, str) or not source_phrase.strip():
+            return None
+
+        def normalize(phrase):
+            return ' '.join(unicodedata.normalize('NFKC', phrase).casefold().split())
+
+        phrase = normalize(source_phrase)
+        candidates = {row['id'] for row in db.execute('SELECT id,phrase,model_id FROM wakewords')
+                      if normalize(row['phrase']) == phrase or row['model_id'] == source_phrase}
+        return next(iter(candidates)) if len(candidates) == 1 else None
 
     @staticmethod
     def _text(value: str, maximum: int) -> str:

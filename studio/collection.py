@@ -128,7 +128,7 @@ class CollectionService:
         self._finish(run_id)
 
     def run(self, device_ids: list[str] | None = None, *, word_id: str | None = None,
-            cancelled=lambda: False) -> CollectionRun:
+            cancelled=lambda: False, progress=lambda message: None) -> CollectionRun:
         if word_id is not None:
             self.workspaces.get(word_id)
         if device_ids is not None and (not isinstance(device_ids, list) or
@@ -157,10 +157,11 @@ class CollectionService:
                     result = DeviceCollectionResult(device_id=device.id, status="queued")
                     db.execute("INSERT INTO collection_devices VALUES (?,?,'queued',?)",
                                (run_id, device.id, json.dumps(asdict(result))))
-            for device in selected:
+            for index, device in enumerate(selected, 1):
+                progress(f'Collecting kiosk {index}/{len(selected)}')
                 with self._lock("device:" + device.id):
                     self._recover_device(device.id)
-                    self._collect(run_id, device.id, refresh_failed, word_id=word_id, cancelled=cancelled)
+                    self._collect(run_id, device.id, refresh_failed, word_id=word_id, cancelled=cancelled, progress=progress)
             self._finish(run_id)
         return self.get_run(run_id)
 
@@ -188,7 +189,8 @@ class CollectionService:
             return db.execute("SELECT 1 FROM recordings WHERE device_id=? AND clip_id=?",
                               (device_id, clip_id)).fetchone() is not None
 
-    def _collect(self, run_id: str, device_id: str, refresh_failed: set[str], *, word_id=None, cancelled=lambda: False) -> None:
+    def _collect(self, run_id: str, device_id: str, refresh_failed: set[str], *, word_id=None, cancelled=lambda: False,
+                 progress=lambda message: None) -> None:
         result = DeviceCollectionResult(device_id=device_id)
         self._save(run_id, result)
         try:
@@ -204,6 +206,7 @@ class CollectionService:
                 return
             listing = self.devices.client.diagnostics(device)  # Client verifies pinned identity.
             result.listed = len(listing.clips)
+            progress(f'Listed {result.listed} recordings')
             if not listing.enabled:
                 result.errors.append("diagnostics_disabled")
             self._save(run_id, result)
@@ -250,7 +253,8 @@ class CollectionService:
                             os.fsync(staged.fileno())
                             staged.seek(0)
                             mapped = self.workspaces.resolve_source(device_id, clip.engine, clip.phrase)
-                            recording = self.samples.ingest(device_id, clip, staged, mapped, scoped_word_id=word_id)
+                            recording = self.samples.ingest(device_id, clip, staged, mapped, scoped_word_id=word_id,
+                                                            resolve_source=True)
                     if recording is None:
                         with self.store.transaction() as db:
                             db.execute('DELETE FROM collection_attempts WHERE device_id=? AND clip_id=? AND run_id=?',
@@ -280,6 +284,8 @@ class CollectionService:
                         self._attempt(run_id, device_id, clip.id, "failed", code)
                     result.errors.append(code)
                 self._save(run_id, result)
+                if (result.new + result.failed + result.already_seen) % 25 == 0:
+                    progress(f'Collection progress: {result.new} imported, {result.already_seen} already seen, {result.failed} failed')
             result.status = "partial" if result.failed or result.evicted else ("diagnostics_disabled" if not listing.enabled else "complete")
         except Exception as error:
             code = error_code(error)

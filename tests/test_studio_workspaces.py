@@ -14,6 +14,30 @@ from studio.workspaces import WorkspaceService
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_resolve_source_infers_unique_phrase(self):
+        word = self.service.create('Hey Café', 'fr', 'hey_cafe')
+        for phrase in ('  HEY   CAFE\u0301  ', 'Ｈｅｙ Café', 'hey_cafe'):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(self.service.resolve_source('kiosk', 'mww', phrase), word.id)
+
+    def test_explicit_mapping_overrides_inference(self):
+        first = self.service.create('Hello', 'en', 'hello')
+        other = self.service.create('Other', 'en', 'other')
+        with self.store.transaction() as db:
+            db.execute("INSERT INTO devices(id,url,role) VALUES ('kiosk','http://kiosk','standalone')")
+        self.service.set_source_mapping('kiosk', 'mww', 'Hello', other.id)
+        self.assertEqual(self.service.resolve_source('kiosk', 'mww', 'Hello'), other.id)
+        self.assertEqual(self.service.resolve_source('different', 'mww', 'Hello'), first.id)
+
+    def test_ambiguous_and_unknown_sources_stay_unmapped(self):
+        self.service.create('Hey Robot', 'en', 'hey_robot')
+        self.service.create('HEY  ROBOT', 'en', 'different')
+        for phrase in ('hey robot', '', 'robot', 'Unknown'):
+            self.assertIsNone(self.service.resolve_source('kiosk', 'mww', phrase))
+        # Exact model ID and another workspace phrase disagree: fail closed.
+        self.service.create('hey_robot', 'en', 'third')
+        self.assertIsNone(self.service.resolve_source('kiosk', 'mww', 'hey_robot'))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -83,7 +107,7 @@ class WorkspaceTests(unittest.TestCase):
         with self.store.transaction() as db:
             self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()[0], 1)
             self.assertEqual(db.execute("PRAGMA journal_mode").fetchone()[0], "wal")
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 14)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 15)
 
 
 class WorkspaceAPITests(unittest.TestCase):

@@ -14,6 +14,10 @@ function message(cause: unknown): string {
 
 /** One registry cache for collection and publication surfaces. No credential values live here. */
 export function useDeviceRegistry() {
+  function deviceLabel(id: string): string {
+    const device = deviceItems.value.find(item => item.id === id);
+    return device?.name?.trim() || device?.url || 'Unknown kiosk';
+  }
   async function load(force = false): Promise<void> {
     if (initialized && !force) return;
     request?.abort();
@@ -63,5 +67,5 @@ export function useDeviceRegistry() {
     await load(true);
   }
   function abort(): void { request?.abort(); }
-  return { devices: readonly(deviceItems), loading: readonly(loading), error: readonly(error), load, add, refresh, credentials, update, remove, abort };
+  return { devices: readonly(deviceItems), loading: readonly(loading), error: readonly(error), deviceLabel, load, add, refresh, credentials, update, remove, abort };
 }

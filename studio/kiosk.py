@@ -71,11 +71,13 @@ def _clean(value: object, token: str) -> object:
 
 class KioskClient:
     def __init__(self, credentials: Callable[[Device], str], *, timeout: float = 10,
-                 max_body: int = 32 * 1024 * 1024, max_upload: int = 64 * 1024 * 1024):
+                 max_body: int = 32 * 1024 * 1024, max_upload: int = 64 * 1024 * 1024,
+                 on_identity=None):
         self.credentials = credentials
         self.timeout = timeout
         self.max_body = max_body
         self.max_upload = max_upload
+        self.on_identity = on_identity
 
     def _request(self, device: Device, path: str, body: bytes, *, login: bool = False) -> dict:
         if not device.active:
@@ -172,7 +174,18 @@ class KioskClient:
             raise RemoteRejected("Invalid kiosk identity")
         if device.id and device.id != kiosk_id:
             raise IdentityMismatch("Kiosk identity changed")
-        return KioskIdentity(kiosk_id, data["leader"], data.get("follows") is not None)
+        identity = KioskIdentity(kiosk_id, data["leader"], data.get("follows") is not None,
+                                 self.display_name(data.get('name')))
+        if self.on_identity is not None:
+            self.on_identity(identity)
+        return identity
+
+    @staticmethod
+    def display_name(value):
+        if (isinstance(value, str) and 0 < len(value.strip()) <= 200
+                and not any(ord(char) < 32 or ord(char) == 127 for char in value)):
+            return value.strip()
+        return None
 
     def _verify(self, device: Device, *, upload: bool = False) -> None:
         identity = self.identity(device)

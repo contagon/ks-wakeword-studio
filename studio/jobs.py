@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -352,12 +353,39 @@ class JobContext:
 
 class ProcessRunner:
     """Gate exec until ownership metadata commits; EOF before commit exits safely."""
+    @staticmethod
+    def _progress(context, raw):
+        # The child can submit only enumerated stages and bounded counters, never
+        # free-form messages, paths, exception text or model responses.
+        try:
+            event = json.loads(raw)
+            if not isinstance(event, dict) or set(event) - {'stage', 'engine', 'completed', 'total'}:
+                return
+            stage = event.get('stage')
+            if stage not in ('preparing', 'loading', 'generating', 'qualifying', 'qualified',
+                             'normalizing', 'validating', 'saved'):
+                return
+            engine = event.get('engine')
+            if engine is not None and engine not in ('omnivoice', 'qwen3', 'moss', 'piper'):
+                return
+            count = ''
+            if 'completed' in event or 'total' in event:
+                done, total = event.get('completed'), event.get('total')
+                if type(done) is not int or type(total) is not int or not 0 <= done <= total <= 100000000:
+                    return
+                count = f' {done}/{total}'
+            context.log(f'{stage.capitalize()}{" " + engine if engine else ""}{count}')
+        except (ValueError, UnicodeError, RecursionError):
+            return
+
     def run(self, context, argv, *, cwd=None):
         if not isinstance(argv, (list, tuple)) or not argv or not all(isinstance(a, str) for a in argv):
             raise ValidationError('Expected argument vector')
         if context.cancelled():
             raise Conflict('Cancelled')
         read_fd, write_fd = os.pipe()
+        progress_read, progress_write = os.pipe()
+        os.set_blocking(progress_read, False)
         process = None
         opened = False
         token = uuid.uuid4().hex
@@ -365,8 +393,9 @@ class ProcessRunner:
                 'ready == b"1" or sys.exit(125); os.execvpe(sys.argv[2],sys.argv[2:],os.environ)')
         try:
             process = subprocess.Popen([sys.executable, '-c', gate, str(read_fd), *argv],
-                                       cwd=cwd, env={**os.environ, 'STUDIO_JOB_TOKEN': token},
-                                       start_new_session=True, pass_fds=(read_fd,),
+                                       cwd=cwd, env={**os.environ, 'STUDIO_JOB_TOKEN': token,
+                                                     'STUDIO_PROGRESS_FD': str(progress_write)},
+                                       start_new_session=True, pass_fds=(read_fd, progress_write),
                                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             identity = {'pid': process.pid, 'start': ChildGroups().process(process.pid)[3],
                         'boot': ChildGroups().boot(), 'token': token}
@@ -376,21 +405,52 @@ class ProcessRunner:
         finally:
             os.close(read_fd)
             os.close(write_fd)
+            os.close(progress_write)
             # If attachment failed, EOF makes the gate exit, without executing argv.
             if process is not None and not opened:
                 process.wait()
+            if not opened:
+                os.close(progress_read)
+        pending = b''
+        dropping = False
+        started = heartbeat = time.monotonic()
+
+        def drain():
+            nonlocal pending, dropping
+            try:
+                data = os.read(progress_read, 65536)
+            except BlockingIOError:
+                return
+            for part in data.splitlines(keepends=True):
+                end = part.endswith(b'\n')
+                if not dropping:
+                    pending += part
+                    if len(pending) > 2048:
+                        pending, dropping = b'', True
+                if end:
+                    if not dropping:
+                        self._progress(context, pending)
+                    pending, dropping = b'', False
         try:
             while True:
+                drain()
+                now = time.monotonic()
+                if now - heartbeat >= 15:
+                    context.log(f'Child operation still running ({int(now - started)}s elapsed)')
+                    heartbeat = now
                 if context.cancelled():
                     context.queue.groups.stop(identity)
                 try:
                     code = process.wait(timeout=0.1)
+                    drain()
                     if code != 0:
+                        context.log(f'Child operation exited with code {code}')
                         raise Conflict('Child command failed')
                     return code
                 except subprocess.TimeoutExpired:
                     continue
         finally:
+            os.close(progress_read)
             context.queue.groups.stop(identity)
 
 
@@ -464,20 +524,22 @@ class WorkerPool:
             return False
         context = JobContext(self.queue, job, self.stop_event, self.runner)
         try:
-            context.log('started')
+            context.log(f'{job.kind} started')
             result = self.handlers[job.kind](job, context)
             if self.stop_event.is_set():
                 self.queue.cancel(job.id)
             completed = self.queue.finish(job.id, result or {})
+            context.log(f'{job.kind} {completed.status}' + (' (skipped)' if (result or {}).get('skipped') else ''))
             if completed.status == 'complete' and job.kind in self.completion_hooks:
                 try:
                     self.completion_hooks[job.kind](completed)
                 except Exception:
                     context.log('completion_hook_failed')
         except Exception:
-            context.log('handler_failed')
+            context.log(f'{job.kind} handler_failed')
             try:
-                self.queue._finish(job.id, {'error': 'handler_failed'}, 'failed')
+                completed = self.queue._finish(job.id, {'error': 'handler_failed'}, 'failed')
+                context.log(f'{job.kind} {completed.status}')
             except Conflict:
                 # The handler exited but a surviving/unknown child still owns
                 # the resource. Release only the flock, never the SQL claim.

@@ -56,6 +56,69 @@ class FixtureRunner:
 
 
 class GenerationTests(unittest.TestCase):
+    def test_workspace_deletion_collects_audio_retained_only_by_deleted_batch_history(self):
+        from uuid import uuid4
+        job, batch = self.generate()
+        with self.service.store.transaction() as db:
+            db.execute('INSERT INTO training_runs VALUES (?,?,?)',
+                       (uuid4().hex, self.word.id, json.dumps({'audio': [{'audio_id': a.audio_id} for a in batch.audio]})))
+        self.service.delete_batch(self.word.id, batch.id)
+        self.runtime.workspaces.delete(self.word.id)
+        with self.service.store.transaction() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM audio_records').fetchone()[0], 0)
+        for audio in batch.audio:
+            self.assertFalse((self.runtime.blobs.root / audio.normalized_hash).exists())
+
+    def test_delete_batch_removes_selection_but_preserves_snapshot_audio(self):
+        job, batch = self.generate()
+        self.service.select_batches(self.word.id, [batch.id])
+        retained = batch.audio[0]
+        manifest = {'audio': [{'audio_id': retained.audio_id}]}
+        with self.service.store.transaction() as db:
+            db.execute('INSERT INTO training_runs VALUES (?,?,?)', ('history', self.word.id, json.dumps(manifest)))
+        self.service.delete_batch(self.word.id, batch.id)
+        self.assertEqual(self.service.list(self.word.id).total, 0)
+        self.assertEqual(self.service.selection(self.word.id), [])
+        self.assertEqual(self.runtime.training.counts(self.word.id)['artificial'], 0)
+        self.assertEqual(self.runtime.jobs.get(job.id).status, 'complete')
+        self.assertEqual(self.runtime.blobs.read(retained.normalized_hash), wav())
+        self.assertFalse((self.service.store.root / 'jobs' / job.id / 'generation').exists())
+        with self.service.store.transaction() as db:
+            self.assertEqual(db.execute('SELECT manifest FROM training_runs WHERE id=?', ('history',)).fetchone()[0], json.dumps(manifest))
+            self.assertEqual(db.execute('SELECT count(*) FROM audio_records').fetchone()[0], 1)
+            self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(), [])
+
+    def test_delete_batch_checks_workspace_and_active_jobs(self):
+        job, batch = self.generate()
+        app = FastAPI(); app.include_router(create_router(self.runtime))
+        with TestClient(app) as client:
+            path = f'/api/studio/wakewords/{self.word.id}/generation/batches/{batch.id}'
+            self.assertEqual(client.delete(path.replace(self.word.id, self.other.id)).status_code, 404)
+            pending = self.runtime.jobs.enqueue('train', self.word.id, {})
+            self.assertEqual(client.delete(path).status_code, 409)
+            self.runtime.jobs.cancel(pending.id)
+            self.assertEqual(client.delete(path).status_code, 204)
+            self.assertEqual(client.delete(path).status_code, 404)
+
+    def test_delete_batch_cleanup_recovers_after_crash_and_preserves_shared_blobs(self):
+        imported = self.runtime.samples.import_audio(self.other.id, 'positive', io.BytesIO(wav()))
+        job, batch = self.generate()
+        with patch('studio.batch_deletion._finish_cleanup', side_effect=OSError('fixture crash')):
+            with self.assertRaises(OSError):
+                self.service.delete_batch(self.word.id, batch.id)
+        self.runtime.shutdown()
+        self.assertEqual(self.runtime.generation.list(self.word.id).total, 0)
+        self.assertEqual(self.runtime.blobs.read(imported.normalized_hash), wav())
+        self.assertFalse((self.runtime.generation.store.root / 'jobs' / job.id / 'generation').exists())
+
+    def test_generation_reports_incremental_progress(self):
+        job, batch = self.generate()
+        log = self.runtime.jobs.log_tail(job.id)
+        self.assertIn('2 samples', log)
+        self.assertIn('Validating', log)
+        self.assertIn('2/2', log)
+        self.assertIn('complete', log)
+
     def test_defaults_and_visible_missing_piper(self):
         app = FastAPI()
         app.include_router(create_router(self.runtime))
@@ -270,7 +333,7 @@ class GenerationTests(unittest.TestCase):
             store = Store.open(root)
             try:
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 14)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 15)
                     self.assertEqual(db.execute("SELECT phrase FROM wakewords WHERE id='old'").fetchone()[0], 'Old robot')
                     self.assertEqual(db.execute("SELECT family_id FROM audio_records WHERE id='audio'").fetchone()[0], 'family')
             finally:

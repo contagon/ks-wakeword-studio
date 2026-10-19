@@ -33,6 +33,33 @@ async function completedCollection(ui: VueWrapper, result: object) {
 }
 
 describe("keyboard-first classification", () => {
+  it('refreshes satellite labels learned during collection without a page reload', async () => {
+    const ui = await open();
+    server.db.devices = [{ id: 'kiosk-1', name: 'Kitchen satellite', url: 'http://kiosk', role: 'standalone', active: true, leader_id: null, credentials_status: 'ready', profile_id: null, model_eligible: true }];
+    await completedCollection(ui, { run_id: 'name-refresh', status: 'complete', new: 0, failed: 0 });
+    expect(ui.get('[data-classify-current]').text()).toContain('Kitchen satellite');
+  });
+  it('tracks manual collection without adding a local queue button and refreshes on completion', async () => {
+    const ui = await open();
+    server.db.samples.push(sample('collected', 'a'));
+    await completedCollection(ui, { run_id: 'new-run', status: 'complete', new: 1, new_mapped: 1, failed: 0 });
+    expect(ui.findAll('button').some(button => /^View collection .* in queue$/.test(button.text()))).toBe(false);
+    expect(ui.get('[data-collection-outcome]').text()).toContain('1 imported');
+    expect(ui.get('[data-progress]').text()).toContain('4 pending');
+    expect(ui.find('[data-action="open-job-queue"]').exists()).toBe(true);
+  });
+
+  it('does not enqueue a second manual collection while the tracked job is active', async () => {
+    const ui = await open();
+    const job = { id: 'collect-active', kind: 'scrape', word_id: 'a', resource: 'collection', payload: {}, created_at: '', started_at: null, finished_at: null, result: {}, status: 'queued' };
+    server.hold(r => r.url.pathname.endsWith('/a/collection/jobs'), () => json(job)).release();
+    server.hold(r => r.url.pathname.endsWith('/jobs/collect-active'), () => json(job)).release();
+    await ui.get('[data-action="collect-now"]').trigger('click'); await settle();
+    expect(ui.get('[data-action="collect-now"]').attributes('disabled')).toBeDefined();
+    await ui.get('[data-action="collect-now"]').trigger('click'); await settle();
+    expect(server.requests.filter(r => r.method === 'POST' && r.url.pathname.endsWith('/collection/jobs'))).toHaveLength(1);
+    expect(ui.findAll('button').some(button => /^View collection .* in queue$/.test(button.text()))).toBe(false);
+  });
   it('suppresses classification shortcuts while a job log summary has modal focus', async () => {
     server.db.jobs.push({ id: 'modal-job', kind: 'train', word_id: 'a', resource: 'gpu', payload: {}, status: 'running', created_at: '', started_at: null, finished_at: null, result: {} });
     const ui = await open();

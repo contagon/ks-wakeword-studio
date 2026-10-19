@@ -33,7 +33,7 @@ export type Job = TrainJob | GenerationJob | ScrapeJob | DownloadJob
 /** The generic queue endpoint is used only for collection; other kinds have dedicated, validated endpoints. */
 export interface EnqueueScrapeJob { kind: "scrape"; payload?: ScrapePayload; dedupe_key?: string }
 export interface WorkerHealth { workers_started: boolean; degraded: boolean; loops: { component: string; status: string; failure_count: number; consecutive_failures: number; last_error_code: string | null; last_failure_at: string | null; last_success_at: string | null }[] }
-export interface Device { id: string; url: string; role: string; active: boolean; leader_id: string | null; credentials_status: string; profile_id: string | null; model_eligible: boolean }
+export interface Device { id: string; name?: string | null; url: string; role: string; active: boolean; leader_id: string | null; credentials_status: string; profile_id: string | null; model_eligible: boolean }
 export interface SourceMapping { device_id: string; engine: string; source_phrase: string; word_id: string }
 /** Server projects recording provenance onto these bounded numeric diagnostics only. */
 export interface RecordingMetadata { duration?: number; duration_s?: number; duration_ms?: number; sample_rate?: number; channels?: number; frames?: number }

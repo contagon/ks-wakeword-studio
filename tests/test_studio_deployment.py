@@ -437,7 +437,7 @@ class DeploymentTests(unittest.TestCase):
             store = Store.open(root)
             try:
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 14)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 15)
                     self.assertEqual(db.execute('SELECT phrase FROM wakewords').fetchone()[0], 'Retained')
                     self.assertEqual(db.execute('SELECT count(*) FROM publications').fetchone()[0], 0)
             finally:
@@ -658,6 +658,7 @@ class DeploymentTests(unittest.TestCase):
             db.execute('DROP INDEX one_studio_leader')
             db.execute('ALTER TABLE devices DROP COLUMN url_override')
             db.execute('ALTER TABLE devices DROP COLUMN removed')
+            db.execute('ALTER TABLE devices DROP COLUMN name')
             db.execute("CREATE UNIQUE INDEX one_studio_leader ON devices(role) WHERE role='leader'")
             db.execute('PRAGMA user_version=9')
         self.runtime.startup()
@@ -666,7 +667,7 @@ class DeploymentTests(unittest.TestCase):
         with self.runtime.devices.store.transaction() as db:
             names = db.execute("SELECT filenames FROM deployment_staging WHERE device_id='leader' AND word_id=?", (self.word.id,)).fetchone()
             self.assertEqual(set(json.loads(names[0])), {'hello_robot.json', 'hello_robot.tflite'})
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 14)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 15)
         other = self.other_version()
         self.service.publish(other.id)
         self.assertEqual(self.client.files['leader']['microwakeword/hello_robot.tflite'],

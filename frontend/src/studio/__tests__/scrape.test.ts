@@ -36,7 +36,7 @@ describe("Classify collection", () => {
     expect(ui.find('[data-cron-editor]').exists()).toBe(false);
     expect(ui.text()).toContain("ok"); expect(ui.text()).toContain("offline");
     await ui.get('[data-action="collect-now"]').trigger("click"); await flushPromises();
-    expect(ui.text()).toContain("manual");
+    expect(ui.get('[data-collection-outcome]').text()).toContain('Collection finished');
     await ui.get('#classify-tab-unmapped').trigger('click');
     await ui.get('select[name="mapping-word"]').setValue("a");
     await ui.get('[data-action="save-mapping"]').trigger("click"); await flushPromises();

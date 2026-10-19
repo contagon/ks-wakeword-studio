@@ -11,6 +11,7 @@ beforeEach(() => {
   localStorage.clear();
   history.replaceState(null, "", "/#/samples?word=a");
   server = fakeStudio();
+  server.db.devices = [0, 1].map(i => ({ id: `kiosk-${i}`, name: i === 0 ? 'Kitchen satellite' : 'Hall satellite', url: `http://kiosk-${i}`, role: 'standalone', active: true, leader_id: null, credentials_status: 'ready', profile_id: null, model_eligible: true }));
   media = fakeMedia();
   server.db.audio = () => new Response(wav(1).buffer as ArrayBuffer, { headers: { "Content-Type": "audio/wav" } });
   for (let i = 0; i < 30; i++) server.db.samples.push(sample(`s${i}`, "a", i % 2 ? "negative" : "positive", { revision: i % 3, recording: recording(`r${i}`, { word_id: "a", device_id: `kiosk-${i % 2}`, near_miss: i === 1, phrase: `phrase ${i}` }) }));
@@ -40,7 +41,7 @@ describe("provenance-aware sample library", () => {
     expect(lists().at(-1)?.url.searchParams.get("offset")).toBe("0");
     expect(ui.findAll("[data-row-id]")).toHaveLength(25);
     const first = row(ui, "s0").text();
-    for (const text of ["positive", "diagnostic", "kiosk-0", "phrase 0", "mww", "rev 0"]) expect(first).toContain(text);
+    for (const text of ["positive", "diagnostic", "Kitchen satellite", "phrase 0", "mww", "rev 0"]) expect(first).toContain(text);
     expect(row(ui, "s1").text()).toContain("close miss");
     expect(ui.text()).toContain("1–25 of 31");
     await ui.get("[data-action=next-page]").trigger("click"); await settle();

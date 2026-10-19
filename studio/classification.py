@@ -15,6 +15,7 @@ class ClassificationService:
         self.store, self.jobs, self.samples, self.automation = store, jobs, samples, automation
 
     def handle(self, job, context):
+        context.log('Checking classification policy and pending recordings')
         status = self.automation.get(job.word_id)
         policy = status.settings.classification
         if not policy.enabled or self.automation.scheduled_disabled(job):
@@ -34,6 +35,7 @@ class ClassificationService:
                     "WHERE v.sample_id=s.id AND v.audio_id=s.audio_id AND v.fingerprint=?) LIMIT 50", (job.word_id, fingerprint)).fetchall()
             if not candidates:
                 break
+            context.log(f'Classifying batch {batch + 1}: {len(candidates)} recordings')
             eligible = [r for r in candidates if not json.loads(r['metadata']).get('blocked_by_vad')]
             manifest = {'engine': policy.engine, 'phrase': word['phrase'], 'language': word['language'],
                         'cache_dir': str(self.store.root.parent / 'auto_train_models'),
@@ -86,4 +88,5 @@ class ClassificationService:
                         (snapshot['id'], snapshot['audio_id'], fingerprint, outcome, policy.engine,
                          result.get('model', '')[:200], self.samples._now()))
             batch += 1
+            context.log(f'Classification progress: {counts["reviewed"]} reviewed, {counts["conflicts"]} conflicts')
         return counts

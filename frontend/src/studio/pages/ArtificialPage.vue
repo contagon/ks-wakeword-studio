@@ -11,6 +11,7 @@ const queue = useJobQueue();
 const capabilities = ref<GenerationCapability[]>([]); const batches = ref<Batch[]>([]); const total = ref(0); const offset = ref(0); const recipe = ref<GenerationRecipe>({ language: "en", english_accent: "mixed", tts_mode: "hybrid", samples: 1, batch_size: 1 });
 const selected = ref<Set<string>>(new Set()); const loading = ref(false); const saving = ref(false); const error = ref(""); const job = ref<Job | null>(null);
 const previews = ref<Record<string, Job>>({}); const previewBusy = ref<Record<string, boolean>>({}); const previewErrors = ref<Record<string, string>>({});
+const deleting = ref<Batch | null>(null);
 const previewRequests = new Map<string, AbortController>();
 const engineNames: Record<string, string> = { omnivoice: 'OmniVoice', qwen3: 'Qwen3-TTS', moss: 'MOSS-TTS', piper: 'Piper' };
 let loadRequest: AbortController | undefined; let mutationRequest: AbortController | undefined; let loadGeneration = 0; let mutationGeneration = 0;
@@ -22,7 +23,7 @@ const accentEnabled = computed(() => Boolean(capability.value?.accent_applies) &
 function loadCurrent(id: string, token: number, controller: AbortController): boolean { return activeId.value === id && loadGeneration === token && !controller.signal.aborted; }
 function mutationCurrent(id: string, token: number, controller: AbortController): boolean { return activeId.value === id && mutationGeneration === token && !controller.signal.aborted; }
 function normalizeRecipe(): void { const cap = capability.value; if (!cap) return; const chosen = recipe.value.engines ?? cap.engines[recipe.value.tts_mode]; recipe.value.engines = chosen.filter(engine => engines.value.includes(engine)); if (!accentEnabled.value) recipe.value.english_accent = "mixed"; }
-function abortWorkspaceMutations(): void { mutationRequest?.abort(); mutationRequest = undefined; mutationGeneration += 1; saving.value = false; job.value = null; for (const request of previewRequests.values()) request.abort(); previewRequests.clear(); previews.value = {}; previewBusy.value = {}; previewErrors.value = {}; }
+function abortWorkspaceMutations(): void { mutationRequest?.abort(); mutationRequest = undefined; mutationGeneration += 1; saving.value = false; job.value = null; deleting.value = null; for (const request of previewRequests.values()) request.abort(); previewRequests.clear(); previews.value = {}; previewBusy.value = {}; previewErrors.value = {}; }
 async function load(): Promise<void> {
   loadRequest?.abort(); const controller = new AbortController(); loadRequest = controller; const token = ++loadGeneration; const id = activeId.value;
   batches.value = []; total.value = 0; error.value = ""; if (!id) return; loading.value = true;
@@ -73,6 +74,23 @@ watch(queue.jobs, jobs => {
   for (const [engine, previous] of Object.entries(previews.value)) { const next = jobs[previous.id]; if (next && next.word_id === activeId.value) updatePreview(engine, next); }
 }, { deep: true });
 function toggle(batch: Batch, checked: boolean): void { if (batch.status !== "complete") return; const next = new Set(selected.value); checked ? next.add(batch.id) : next.delete(batch.id); selected.value = next; }
+async function deleteBatch(): Promise<void> {
+  const id = activeId.value, batch = deleting.value;
+  if (!id || !batch || saving.value) return;
+  mutationRequest?.abort(); const controller = new AbortController(); mutationRequest = controller;
+  const token = ++mutationGeneration; saving.value = true; error.value = '';
+  try {
+    await studioApi.deleteBatch(id, batch.id, controller.signal);
+    if (!mutationCurrent(id, token, controller)) return;
+    const next = new Set(selected.value); next.delete(batch.id); selected.value = next; deleting.value = null;
+    if (batches.value.length === 1 && offset.value > 0) offset.value = Math.max(0, offset.value - 50);
+    else await load();
+  } catch (cause) {
+    if (mutationCurrent(id, token, controller)) error.value = cause instanceof StudioApiError && cause.status === 409
+      ? 'Cancel queued or active workspace jobs before deleting this dataset.'
+      : cause instanceof Error ? cause.message : 'Dataset was not deleted.';
+  } finally { if (mutationCurrent(id, token, controller)) saving.value = false; }
+}
 async function saveBatches(): Promise<void> { const id = activeId.value; if (!id || !selectionLoaded || loading.value) return; mutationRequest?.abort(); const controller = new AbortController(); mutationRequest = controller; const token = ++mutationGeneration; const batchIds = [...selected.value]; saving.value = true;
   try { await studioApi.selectBatches(id, batchIds, controller.signal); if (mutationCurrent(id, token, controller)) await load(); } catch (cause) { if (mutationCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Batch selection was not saved."; } finally { if (mutationCurrent(id, token, controller)) saving.value = false; }
 }
@@ -120,6 +138,12 @@ onBeforeUnmount(() => { loadRequest?.abort(); abortWorkspaceMutations(); });
       <p v-if="loading" class="studio-muted mt-3">Loading datasets…</p>
       <article v-for="batch in batches" :key="batch.id" class="studio-history mt-3">
         <label class="studio-checkbox-label"><input :data-batch-id="batch.id" type="checkbox" :checked="selected.has(batch.id)" :disabled="batch.status !== 'complete'" @change="toggle(batch, ($event.target as HTMLInputElement).checked)"><span><strong>{{ batch.phrase }}</strong><span class="studio-muted block text-xs">{{ batch.audio.length }} samples · {{ batch.recipe.engines?.map(engine => engineNames[engine] ?? engine).join(', ') || 'Saved generation models' }} · {{ batch.created_at ? new Date(batch.created_at).toLocaleString() : '' }}</span><span v-if="batch.status !== 'complete'" class="studio-muted block text-xs">{{ batch.status }} — only completed datasets can be selected.</span></span><span class="studio-status ml-auto">{{ batch.status }}</span></label>
+        <button type="button" :data-delete-batch="batch.id" :disabled="saving || ['queued', 'running', 'cancelling'].includes(batch.status)" @click="deleting = batch">Delete dataset</button>
+        <section v-if="deleting?.id === batch.id" role="alertdialog" aria-label="Delete generated dataset?" class="studio-note mt-3" @keydown.esc="!saving && (deleting = null)">
+          <h3>Delete {{ batch.phrase }} dataset permanently?</h3>
+          <p>This removes the generated dataset and its training selection. Historical training inputs and shared audio are kept.</p>
+          <div class="flex gap-2 mt-3"><button type="button" data-action="cancel-batch-delete" :disabled="saving" @click="deleting = null">Cancel</button><button type="button" data-action="confirm-batch-delete" :disabled="saving" @click="deleteBatch">{{ saving ? 'Deleting…' : 'Delete permanently' }}</button></div>
+        </section>
       </article>
       <p v-if="!loading && !batches.length" class="studio-muted mt-3">No generated datasets yet. Choose models above to create one.</p>
       <PaginatedTable :total="total" :offset="offset" :limit="50" :loading="loading" @page="offset = $event" />

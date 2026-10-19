@@ -18,13 +18,16 @@ let manyBatches = false;
 let delayPage = false;
 let resolvePage: ((response: Response) => void) | undefined;
 let newWorkspace = false;
+let deleted = false;
 function host() { return { components: { ArtificialPage }, setup() { workspace = createWorkspace(useStudioRoutes()); provide(workspaceKey, workspace); queue = createJobQueue(); provide(jobQueueKey, queue); onMounted(() => { void workspace.load(); }); }, template: "<ArtificialPage />" }; }
 
 beforeEach(() => {
-  delayRecipeSave = false; resolveRecipeSave = undefined; manyBatches = false; delayPage = false; resolvePage = undefined; newWorkspace = false;
+  delayRecipeSave = false; resolveRecipeSave = undefined; manyBatches = false; delayPage = false; resolvePage = undefined; newWorkspace = false; deleted = false;
   history.replaceState(null, "", "#/artificial?word=a");
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://localhost"); const path = url.pathname;
+    if (init?.method === 'DELETE' && path.endsWith('/generation/batches/ready')) { deleted = true; return new Response(null, { status: 204 }); }
+    if (deleted && path.endsWith('/generation/batches')) return json({ items: [], total: 0, offset: 0, limit: 50 });
     if (path === '/api/studio/jobs') return json({ items: [], total: 0, offset: 0, limit: 100 });
     if (path === "/api/studio/wakewords") return json({ items: words, total: 2, offset: 0, limit: 100 });
     if (path === '/api/studio/generation/defaults') return json({ samples: 50000, batch_size: 100 });
@@ -50,6 +53,35 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ArtificialPage", () => {
+  it('confirms deletion, removes the dataset, and drops its training selection', async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    await ui.get('[data-delete-batch="ready"]').trigger('click');
+    expect(ui.get('[role="alertdialog"]').text()).toContain('permanently');
+    await ui.get('[data-action="cancel-batch-delete"]').trigger('click');
+    expect(ui.find('[role="alertdialog"]').exists()).toBe(false);
+    expect(ui.find('[data-batch-id="ready"]').exists()).toBe(true);
+    await ui.get('[data-delete-batch="ready"]').trigger('click');
+    await ui.get('[data-action="confirm-batch-delete"]').trigger('click'); await flushPromises();
+    expect(ui.find('[data-batch-id="ready"]').exists()).toBe(false);
+    await ui.get('[data-action="save-batches"]').trigger('click'); await flushPromises();
+    const save = vi.mocked(fetch).mock.calls.find(([input, init]) => String(input).endsWith('/generation/batches') && init?.method === 'PUT');
+    expect(JSON.parse(String(save?.[1]?.body)).batch_ids).toEqual([]);
+    ui.unmount();
+  });
+
+  it('ignores an old delete response after switching workspace', async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    await ui.get('[data-delete-batch="ready"]').trigger('click');
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }));
+    await ui.get('[data-action="confirm-batch-delete"]').trigger('click');
+    workspace.selectedId.value = 'b'; await flushPromises(); await flushPromises();
+    finish(new Response(null, { status: 204 })); await flushPromises();
+    expect(ui.find('[role="alertdialog"]').exists()).toBe(false);
+    expect(ui.text()).not.toContain('Hey Cedar');
+    expect(ui.text()).not.toContain('Deleting');
+    ui.unmount();
+  });
   it('refreshes batches on completion while closed, but never refreshes the replacement workspace from an old job', async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     await ui.get('form').trigger('submit'); await flushPromises(); queue.open.value = false;

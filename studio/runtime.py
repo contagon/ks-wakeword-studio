@@ -56,6 +56,8 @@ class StudioRuntime:
                 blobs.recover()
                 from studio.workspace_deletion import recover_workspace_deletions
                 recover_workspace_deletions(store, blobs)
+                from studio.batch_deletion import recover_batch_deletions
+                recover_batch_deletions(store, blobs)
                 self._blobs = blobs
                 self._workspaces = WorkspaceService(store, blobs=blobs)
                 self._samples = SampleService(store, blobs)
@@ -122,7 +124,10 @@ class StudioRuntime:
                 schedule = db.execute('SELECT enabled FROM studio_schedules WHERE scope=?', (row['schedule_scope'],)).fetchone()
                 if not schedule or not schedule['enabled']:
                     return {'skipped': True, 'reason': 'disabled'}
-        result = self._collection.run(job.payload.get('device_ids'), word_id=job.word_id, cancelled=context.cancelled)
+        context.log('Discovering and collecting kiosk recordings')
+        result = self._collection.run(job.payload.get('device_ids'), word_id=job.word_id, cancelled=context.cancelled,
+                                      progress=context.log)
+        context.log(f'Collection {result.status}: {result.new} imported, {result.unmapped} unmapped, {result.failed} failed')
         with self._jobs.store.transaction() as db:
             mapped = db.execute("SELECT count(*) FROM collection_attempts a JOIN recordings r "
                 "ON r.device_id=a.device_id AND r.clip_id=a.clip_id WHERE a.run_id=? AND a.state='complete' AND r.word_id=?",

@@ -101,6 +101,22 @@ def log(message: str) -> None:
     print(message, flush=True)
 
 
+def studio_progress(stage: str, *, engine=None, completed=None, total=None) -> None:
+    """Optional structured progress; legacy invocations need no Studio imports."""
+    descriptor = os.environ.get('STUDIO_PROGRESS_FD')
+    if descriptor is None:
+        return
+    event = {'stage': stage}
+    if engine is not None:
+        event['engine'] = engine
+    if completed is not None:
+        event.update(completed=completed, total=total)
+    try:
+        os.write(int(descriptor), (json.dumps(event) + '\n').encode())
+    except (OSError, ValueError):
+        pass  # Progress is advisory; a closed observer cannot invalidate audio.
+
+
 def run(command: list[str], *, env: dict[str, str] | None = None) -> None:
     log("→ " + " ".join(command))
     # Some upstream CLIs terminate their entire process group after a fatal
@@ -1162,6 +1178,38 @@ class Generator:
         return entries
 
     def generate_direct_engine(
+        self, engine: str, count: int, reference_paths: list[Path], prefix: str = "",
+    ) -> tuple[list[dict], list[Path]]:
+        import threading
+        studio_progress('loading', engine=engine)
+        stop = threading.Event()
+        destination = self.raw_dir / (engine if not prefix else f"{engine}_{prefix.rstrip('_')}")
+        requested = self._candidate_count(engine, count, reference_paths)
+
+        def monitor():
+            previous = 0
+            while not stop.wait(5):
+                done = min(requested, sum(1 for _ in destination.glob('*.wav')))
+                if done != previous:
+                    studio_progress('generating', engine=engine, completed=done, total=requested)
+                    previous = done
+
+        observer = threading.Thread(target=monitor, daemon=True)
+        observer.start()
+        try:
+            result = self._generate_direct_engine(engine, count, reference_paths, prefix)
+            studio_progress('generating', engine=engine, completed=min(len(result[1]), requested), total=requested)
+            return result
+        finally:
+            stop.set()
+            observer.join()
+
+    @staticmethod
+    def _candidate_count(engine, count, reference_paths):
+        requested = max(count, math.ceil(count * DIRECT_CANDIDATE_FACTORS[engine]))
+        return min(requested, len(reference_paths)) if engine == ENGINE_MOSS else requested
+
+    def _generate_direct_engine(
         self,
         engine: str,
         count: int,
@@ -1173,7 +1221,7 @@ class Generator:
         destination_name = engine if not prefix else f"{engine}_{prefix.rstrip('_')}"
         destination = self.raw_dir / destination_name
         destination.mkdir(parents=True, exist_ok=True)
-        requested = max(count, math.ceil(count * DIRECT_CANDIDATE_FACTORS[engine]))
+        requested = self._candidate_count(engine, count, reference_paths)
         if engine == ENGINE_MOSS:
             requested = min(requested, len(reference_paths))
             if requested < count:
@@ -1183,6 +1231,7 @@ class Generator:
                 )
 
         if engine == ENGINE_PIPER:
+            studio_progress('generating', engine=engine, completed=0, total=requested)
             command = [
                 str(self.data_dir / ".venv" / "bin" / "python"),
                 str(self.tools_dir / "piper-sample-generator" / "generate_samples.py"),
@@ -1212,6 +1261,7 @@ class Generator:
         input_path = self.build_dir / f"{engine}_{prefix or 'main'}.direct.jsonl"
         write_jsonl(input_path, entries)
         python = self.ensure_environment(engine)
+        studio_progress('generating', engine=engine, completed=0, total=requested)
         if engine == ENGINE_OMNIVOICE:
             command = [
                 str(self.tts_envs / engine / "bin" / "omnivoice-infer-batch"),
@@ -1286,6 +1336,7 @@ class Generator:
             )
         if not candidates:
             return []
+        studio_progress('qualifying', engine=engine, completed=0, total=len(candidates))
         label = prefix or "main"
         qa_input = self.build_dir / f"{engine}_{label}.direct-qa.jsonl"
         qa_output = self.build_dir / f"{engine}_{label}.direct-qa.results.jsonl"
@@ -1316,6 +1367,7 @@ class Generator:
             if line.strip()
         ]
         accepted_ids = {result["id"] for result in results if result.get("accepted")}
+        studio_progress('qualified', engine=engine, completed=len(accepted_ids), total=len(candidates))
         rejected = Counter(result.get("reason", "unknown") for result in results if not result.get("accepted"))
         if rejected:
             log(
@@ -1328,6 +1380,7 @@ class Generator:
         accepted = []
         self.final_dir.mkdir(parents=True, exist_ok=True)
         candidate_count = len(paths)
+        studio_progress('normalizing', completed=0, total=limit)
         log(f"→ Normalizing up to {limit} accepted clip(s) from {candidate_count} candidate(s)")
         for processed, path in enumerate(paths, start=1):
             if len(accepted) >= limit:
@@ -1388,9 +1441,11 @@ class Generator:
                     f"Normalization progress: {len(accepted)}/{limit} accepted "
                     f"({processed}/{candidate_count} candidate(s) checked)"
                 )
+                studio_progress('normalizing', completed=len(accepted), total=limit)
         return accepted
 
     def generate(self) -> None:
+        studio_progress('preparing')
         if self.cache_hit():
             log("✅ Reusing the matching direct-generated TTS corpus.")
             return

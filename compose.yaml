@@ -15,12 +15,13 @@ services:
     environment:
       REC_PORT: "8789"
       PIP_NO_CACHE_DIR: "1"
+    env_file: .env
     volumes:
-      - data:/data
+      - $DATA:/data
     labels:
       com.centurylinklabs.watchtower.enable: "false"
 
-volumes:
-  data:
-    name: ks-wakeword-studio-data
-    external: true
+# volumes:
+#   data:
+#     name: ks-wakeword-studio-data
+#     external: true

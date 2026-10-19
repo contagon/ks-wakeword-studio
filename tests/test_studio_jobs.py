@@ -26,6 +26,60 @@ class FakeGroups:
 
 
 class JobTests(unittest.TestCase):
+    def test_worker_logs_terminal_status_for_each_kind(self):
+        for kind, resource in (('train', 'gpu'), ('generation', 'gpu'), ('preview', 'gpu'),
+                               ('classify', 'gpu'), ('scrape', 'collection'),
+                               ('deploy', 'collection'), ('download', 'download')):
+            with self.subTest(kind=kind):
+                job = self.enqueue(kind)
+                pool = WorkerPool(self.jobs, clock=lambda: self.now)
+                pool.register(kind, resource, lambda job, context: {})
+                pool.run_once(resource)
+                log = self.jobs.log_tail(job.id)
+                self.assertIn(kind, log)
+                self.assertIn('complete', log)
+
+    def test_child_progress_is_bounded_and_credential_safe(self):
+        import sys
+        import threading
+        job = self.enqueue('generation')
+        self.jobs.claim('gpu', self.now)
+        context = JobContext(self.jobs, job, threading.Event(), None)
+        # Actual subprocess: neither arbitrary output nor untrusted event fields
+        # may enter the log. Valid events must be visible before the child exits.
+        script = '''import os,json,time
+fd = int(os.environ.get('STUDIO_PROGRESS_FD', '-1'))
+print('secret-stdout', flush=True)
+if fd >= 0:
+ os.write(fd, b'x' * 9000 + b'\\n')
+ for event in [{'stage':'secret-token'}, {'stage':'generating','engine':'secret-token'},
+               {'stage':'generating','engine':'qwen3','completed':1,'total':4},
+               {'stage':'generating','engine':'qwen3','completed':2,'total':4,'secret':'private'}]:
+  os.write(fd, (json.dumps(event)+'\\n').encode())
+time.sleep(.5)
+'''
+        with patch.object(self.jobs, 'groups', ChildGroups()):
+            thread = threading.Thread(target=lambda: ProcessRunner().run(context, [sys.executable, '-c', script]))
+            thread.start()
+            try:
+                import time
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and thread.is_alive():
+                    if '1/4' in self.jobs.log_tail(job.id):
+                        break
+                    time.sleep(.01)
+                self.assertTrue(thread.is_alive(), 'progress must arrive while child is running')
+                log = self.jobs.log_tail(job.id)
+                self.assertIn('qwen3', log)
+                self.assertIn('1/4', log)
+                self.assertNotIn('secret', log)
+                self.assertNotIn('private', log)
+                self.assertNotIn('2/4', log)
+            finally:
+                thread.join(5)
+                self.assertFalse(thread.is_alive())
+        self.jobs.finish(job.id, {})
+
     def test_global_active_listing_is_complete_and_history_newest_first(self):
         older = self.enqueue()
         with self.store.transaction() as db:
@@ -292,7 +346,7 @@ class JobTests(unittest.TestCase):
                 self.assertEqual(WorkspaceService(store).get('word').model_id, 'hello')
                 self.assertEqual(JobQueue(store).list().total, 0)
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 14)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 15)
                     self.assertEqual(db.execute("SELECT role FROM devices WHERE id='device'").fetchone()[0], 'standalone')
             finally:
                 store.close()

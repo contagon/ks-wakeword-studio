@@ -10,6 +10,7 @@ afterEach(() => { ui?.unmount(); ui = undefined; vi.unstubAllGlobals(); vi.useRe
 
 it('shows global compact job groups and loads logs only on expansion', async () => {
   const s = fakeStudio(); s.db.jobs = [job('run', 'running'), job('follower', 'cancelling', { kind: 'scrape', resource: 'collection', word_id: 'b', payload: { device_ids: ['kitchen', 'office'] } }), job('shared', 'queued', { kind: 'download', resource: 'download', word_id: null }), job('old', 'failed', { word_id: 'deleted-word' })];
+  s.db.devices = ['kitchen', 'office'].map(id => ({ id, name: id === 'kitchen' ? 'Kitchen satellite' : 'Office satellite', url: `http://${id}`, role: 'standalone', active: true, leader_id: null, credentials_status: 'ready', profile_id: null, model_eligible: true }));
   history.replaceState(null, '', '/#/wakewords?word=a');
   ui = mount(TrainerApp, { attachTo: document.body }); await flushPromises();
   expect(ui.get('[data-action="open-job-queue"]').text()).toContain('3');
@@ -17,7 +18,7 @@ it('shows global compact job groups and loads logs only on expansion', async () 
   await ui.get('[data-action="open-job-queue"]').trigger('click'); await flushPromises();
   const drawer = ui.get('[role="dialog"][aria-label="Global job queue"]');
   expect(drawer.text()).toContain('Hey Cedar'); expect(drawer.text()).toContain('Okay Maple');
-  expect(drawer.text()).toContain('Shared dataset'); expect(drawer.text()).toContain('kitchen, office');
+  expect(drawer.text()).toContain('Shared dataset'); expect(drawer.text()).toContain('Kitchen satellite, Office satellite');
   expect(drawer.text()).toContain('deleted-word'); expect(drawer.text()).toContain('cancelling');
   expect(drawer.findAll('[data-job-id]')).toHaveLength(4);
   const details = drawer.get('[data-job-id="run"] details');

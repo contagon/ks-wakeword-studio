@@ -28,6 +28,24 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("shared fleet registry", () => {
+  it('shows satellite names, updates reactive labels, and falls back without opaque IDs', async () => {
+    devices = [{ ...leader, name: 'Main kiosk' }, { ...follower, name: 'Kitchen satellite' }];
+    await useDeviceRegistry().load(true);
+    const ui = mount(DeviceRegistry, { props: { surface: 'kiosks' } }); await flushPromises();
+    const row = () => ui.get('[data-device-id="follower"]');
+    expect(row().get('strong').text()).toBe('Kitchen satellite');
+    expect(row().text()).toContain('Parent Main kiosk');
+    await row().get('[data-action="delete-device"]').trigger('click'); await flushPromises();
+    expect(ui.get('[role="alertdialog"]').text()).toContain('Kitchen satellite');
+    await ui.get('[data-action="cancel-device-delete"]').trigger('click');
+    devices = [{ ...leader, name: 'Main kiosk' }, { ...follower, name: 'Main kiosk' }];
+    await useDeviceRegistry().load(true); await flushPromises();
+    expect(row().get('strong').text()).toBe('Main kiosk');
+    devices = [leader, follower]; await useDeviceRegistry().load(true); await flushPromises();
+    expect(row().get('strong').text()).toBe('http://follower');
+    expect(useDeviceRegistry().deviceLabel('deleted-id')).toBe('Unknown kiosk');
+    ui.unmount();
+  });
   it('isolates removal confirmation and retains focus while busy, then restores a surviving control', async () => {
     devices = [leader, follower]; await useDeviceRegistry().load(true);
     const ui = mount(DeviceRegistry, { attachTo: document.body, props: { surface: 'kiosks' } }); await flushPromises();
@@ -114,7 +132,7 @@ describe("shared fleet registry", () => {
     const second = mount(DeviceRegistry, { props: { surface: other } });
     await flushPromises();
     expect(second.text()).toContain("Follower");
-    expect(second.text()).toContain("Parent leader");
+    expect(second.text()).toContain("Parent http://leader");
     expect(second.find('[data-action="upload-follower"]').exists()).toBe(false);
     expect(second.text()).not.toContain("super-secret-password");
     first.unmount();
