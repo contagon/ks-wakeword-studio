@@ -11,6 +11,7 @@ import DeployPage from "../pages/DeployPage.vue";
 import NegativeDatasetsPage from "../pages/NegativeDatasetsPage.vue";
 import ArtificialPage from "../pages/ArtificialPage.vue";
 import TrainPage from "../pages/TrainPage.vue";
+import ThemeToggle from './ThemeToggle.vue';
 
 const routes = useStudioRoutes();
 const workspace = createWorkspace(routes);
@@ -67,12 +68,12 @@ onBeforeUnmount(() => {
     <div class="studio-main">
       <header class="studio-header flex flex-wrap items-center justify-between gap-3">
         <div class="studio-muted text-xs">{{ current.group }} / {{ current.name }}</div>
-        <label class="flex items-center gap-3 text-xs" for="studio-word">WAKEWORD
+        <div class="flex flex-wrap items-center gap-3"><label class="flex items-center gap-3 text-xs" for="studio-word">WAKEWORD
           <select id="studio-word" :value="selectedId" :disabled="!wakewords.length" @change="workspace.select(($event.target as HTMLSelectElement).value)">
             <option v-if="!wakewords.length" value="">No wakewords</option>
             <option v-for="word in wakewords" :key="word.id" :value="word.id">{{ word.phrase }}</option>
           </select>
-        </label>
+        </label><ThemeToggle /></div>
       </header>
       <main id="studio-content" ref="content" class="studio-content" tabindex="-1">
         <p v-if="notice" role="status" class="studio-note">{{ notice }}</p>

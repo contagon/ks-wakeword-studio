@@ -14,6 +14,25 @@ test.beforeEach(async ({ page }) => {
 });
 test.afterEach(async ({ page }) => { expect(browserErrors.get(page)).toEqual([]); });
 
+test('dark mode follows the system and remembers an explicit light choice', async ({ page, request }) => {
+  const a = await word(request, 'browser_theme');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto(`/#/automate?word=${a.id}`);
+  await expect(page.locator('html')).toHaveAttribute('data-studio-theme', 'dark');
+  const toggle = page.getByRole('button', { name: 'Dark mode', exact: true });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.studio-app')).toHaveCSS('background-color', 'rgb(16, 25, 35)');
+  await expect(page.getByRole('heading', { name: 'Automatic collection', exact: true })).toBeVisible();
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+    await page.screenshot({ path: `/tmp/opencode/studio-dark-${width}.png`, fullPage: true });
+  }
+  await toggle.click(); await page.reload();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.studio-app')).toHaveCSS('background-color', 'rgb(245, 247, 250)');
+});
+
 test('real kiosk collection, keyboard labels, focus suppression and workspace isolation', async ({ page, request }) => {
   const a = await word(request, 'browser_a');
   const b = await word(request, 'browser_b');
