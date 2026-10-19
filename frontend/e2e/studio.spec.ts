@@ -190,7 +190,7 @@ test('all pages have compact controls and no narrow-screen overflow', async ({ p
   const reviewed = words.find((item: { phrase: string }) => item.phrase === 'browser_a');
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    for (const route of ['wakewords', 'negative-datasets', 'artificial', 'scrape', 'classify', 'samples', 'train', 'deploy']) {
+    for (const route of ['wakewords', 'kiosks', 'negative-datasets', 'artificial', 'scrape', 'classify', 'samples', 'train', 'deploy', 'automate']) {
       const selected = ['samples', 'classify'].includes(route) ? reviewed : trained;
       await page.goto(`/#/${route}?word=${selected.id}`);
       await expect(page.locator('h1')).toBeVisible();
@@ -235,7 +235,8 @@ test('workspace creation hides identity and permanent deletion blocks active job
   const a = await (await created).json();
   expect(a.model_id).toMatch(/^[a-z0-9][a-z0-9_-]{0,63}$/);
   await expect(page.locator('#studio-word')).toHaveValue(a.id);
-  await expect(page.locator('[data-form="edit"] [name="phrase"]')).toHaveValue('Temporary browser workspace');
+  await expect(page.locator('[data-form="edit"]')).toHaveCount(0);
+  await page.getByText('Actions', { exact: true }).click();
   const queued = await request.post(`/api/studio/wakewords/${a.id}/generation/previews`, { data: { language: 'en', english_accent: 'mixed', tts_mode: 'hybrid', engines: ['qwen3'], samples: 1, batch_size: 1 } });
   expect(queued.ok()).toBeTruthy();
   const job = await queued.json();
@@ -250,4 +251,48 @@ test('workspace creation hides identity and permanent deletion blocks active job
   await expect(page.locator('#studio-word')).not.toHaveValue(a.id);
   expect((await request.get(`/api/studio/wakewords/${a.id}`)).status()).toBe(404);
   expect((await request.get(`/api/studio/jobs/${job.id}`)).status()).toBe(404);
+});
+
+test('workspace Automate controls scoped collection and explicitly opted-in publication', async ({ page, request }) => {
+  const a = await word(request, 'automate_a');
+  const b = await word(request, 'automate_b');
+  const fixtures = await (await request.get('/__test/fixtures')).json();
+  const enrolled = await request.post('/api/studio/devices', { data: { url: fixtures.leader, password: fixtures.password, role: 'leader' } });
+  expect(enrolled.ok()).toBeTruthy();
+  const leader = await enrolled.json();
+  const followers = await (await request.post(`/api/studio/devices/${leader.id}/refresh`)).json();
+  await request.post(`/api/studio/devices/${followers[0].id}/credentials`, { data: { password: fixtures.password } });
+  for (const device of [leader, followers[0]]) await request.put(`/api/studio/devices/${device.id}/source-mappings`, { data: { engine: 'mww', source_phrase: 'Hello robot', word_id: a.id } });
+  expect((await request.post('/__test/new-clips')).ok()).toBeTruthy();
+  await page.goto(`/#/automate?word=${a.id}`);
+  await page.locator('[name="classification-enabled"]').check();
+  await page.getByRole('button', { name: 'Save automation settings', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Automation settings saved');
+  await page.locator('[data-page="classify"]').click();
+  await page.locator('[data-action="collect-now"]').click();
+  expect((await (await request.post('/__test/drain-collection')).json()).ran).toBe(true);
+  expect((await (await request.post('/__test/drain-gpu')).json()).ran).toBe(true);
+  const samples = await (await request.get(`/api/studio/wakewords/${a.id}/samples`)).json();
+  expect(samples.items.every((sample: { label: string }) => sample.label === 'negative')).toBe(true);
+  expect(samples.total).toBe(2);
+  expect((await (await request.get(`/api/studio/wakewords/${b.id}/samples`)).json()).total).toBe(0);
+  const generated = await (await request.post(`/api/studio/wakewords/${a.id}/generation/jobs`, { data: { language: 'en', english_accent: 'mixed', tts_mode: 'hybrid', engines: ['qwen3'], samples: 2, batch_size: 1 } })).json();
+  await request.post('/__test/drain-gpu');
+  await request.put(`/api/studio/wakewords/${a.id}/generation/batches`, { data: { batch_ids: [generated.id] } });
+  const train = async () => {
+    const job = await (await request.post(`/api/studio/wakewords/${a.id}/training/jobs`)).json();
+    await request.post('/__test/drain-gpu');
+    expect((await (await request.get(`/api/studio/jobs/${job.id}`)).json()).status).toBe('complete');
+  };
+  await train();
+  expect(await (await request.get(`/api/studio/wakewords/${a.id}/deployment/status`)).json()).toEqual([]);
+  await page.goto(`/#/automate?word=${a.id}`);
+  await page.locator('[name="after-training"]').check();
+  await page.getByRole('button', { name: 'Save automation settings', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Automation settings saved');
+  await train();
+  const delivery = await (await request.get(`/api/studio/wakewords/${a.id}/deployment/status`)).json();
+  expect(delivery.some((item: { state: string }) => item.state === 'published')).toBe(true);
+  await page.locator('#studio-word').selectOption(b.id);
+  await expect(page.locator('[name="after-training"]')).not.toBeChecked();
 });

@@ -50,6 +50,7 @@ class FixtureKiosk:
         self.staged: dict[str, bytes] = {}
         self.slots = ["fixture-selected-a", "fixture-selected-b"]
         self.audio = wav_bytes(1)
+        self.clip_id = 'clip-1'
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -80,7 +81,7 @@ class FixtureKiosk:
                         "following": None, "profiles": [{"id": "voice", "categories": ["Voice Satellite"]}],
                         "followers": followers}}
                 elif command == "getWakeWordActivations":
-                    payload = {"ok": True, "data": {"enabled": True, "activations": [{"id": "clip-1",
+                    payload = {"ok": True, "data": {"enabled": True, "activations": [{"id": owner.clip_id,
                         "at": "2026-10-18T00:00:00+00:00", "wakeWord": "Hello robot", "engine": "mww"}], "nearMisses": []}}
                 elif command == "getWakeWordActivationAudio":
                     payload = {"ok": True, "data": {"mimeType": "audio/wav", "base64": base64.b64encode(owner.audio).decode()}}

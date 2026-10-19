@@ -42,7 +42,7 @@ class VueTrainerUiTests(unittest.TestCase):
         api = (REPO_ROOT / 'frontend/src/studio/api.ts').read_text()
         self.assertIn('StudioShell', app)
         self.assertNotIn('LegacyTrainer', app + shell)
-        for page in ('Wakewords', 'NegativeDatasets', 'Artificial', 'Scrape', 'Classify', 'Samples', 'Train', 'Deploy'):
+        for page in ('Wakewords', 'Kiosks', 'NegativeDatasets', 'Artificial', 'Classify', 'Samples', 'Train', 'Deploy', 'Automate'):
             self.assertIn(f'<{page}Page', shell)
         for contract in ('/queue', '/label', '/generation/jobs', '/training/jobs', '/datasets', '/deployment/rollback'):
             self.assertIn(contract, api)

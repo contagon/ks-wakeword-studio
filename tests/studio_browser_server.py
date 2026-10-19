@@ -19,6 +19,7 @@ from studio.datasets import DatasetService
 from studio.runtime import StudioRuntime
 from studio_harness import FixtureOnlyClient, StubGpuRunner, augmentation_fixture
 from test_studio_workflow import FixtureKiosk, PASSWORD
+from test_studio_workflow import wav_bytes
 
 
 class BrowserRuntime(StudioRuntime):
@@ -58,6 +59,17 @@ def main():
         @trainer_server.app.post('/__test/drain-gpu')
         def drain_gpu():
             return {'ran': runtime.workers.run_once('gpu')}
+
+        @trainer_server.app.post('/__test/drain-collection')
+        def drain_collection():
+            return {'ran': runtime.workers.run_once('collection')}
+
+        @trainer_server.app.post('/__test/new-clips')
+        def new_clips():
+            for device in (leader, follower):
+                device.clip_id += '-new'
+                device.audio = wav_bytes(50)
+            return {'ok': True}
 
         try:
             uvicorn.run(trainer_server.app, host='127.0.0.1', port=args.port, log_level='warning')

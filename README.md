@@ -129,7 +129,7 @@ browser request inspection can see a submitted password.
 
 1. Create a workspace in **Wakewords** with a unique stable model ID. Editing its
    phrase does not rename device files or change historical versions.
-2. In **Scrape** or **Deploy**, add one leader URL and its admin password, or
+2. In **Kiosks**, add one leader URL and its admin password, or
    add independent standalone kiosks. Multiple fleets/leaders are not supported.
    Refresh the leader roster to discover followers. Each follower initially shows
    **Credentials required**: enter that kiosk's own admin password. Discovery never
@@ -141,9 +141,12 @@ browser request inspection can see a submitted password.
    Existing saved tokens continue to work without re-entering passwords. Treat
    these tokens like passwords: changing the kiosk's admin password does **not**
    revoke tokens already issued. Failed logins require entering the password again.
-3. Configure exact device/engine/source-phrase mappings to workspaces. Scraping is
-   global, independent of the word selected in the browser. Unknown phrases stay
-   unmapped until explicitly assigned. Collect twice safely: source tombstones
+3. In **Classify → Unmapped**, configure exact device/engine/source-phrase mappings
+   to workspaces. **Collect** at the top right immediately queues collection for
+   the selected workspace, even when automatic collection is disabled. Recordings
+   mapped to other workspaces are skipped before download; unknown sources may
+   enter the shared Unmapped inbox but are never implicitly assigned. The Collect
+   tab shows fleet-wide collection history. Collect twice safely: source tombstones
    deduplicate recordings, including discarded/deleted clips. Collection never
    clears kiosk diagnostics. Kiosk history is rolling and finite; scrape often
    enough for the device's configured retention. Missed/evicted audio cannot be
@@ -152,7 +155,48 @@ browser request inspection can see a submitted password.
    (skip this session), Z (undo), and D (confirm discard). Shortcuts pause while
    editing fields/buttons. Acknowledged labels, not mere playback, control training.
 5. Select installed negative datasets and completed artificial batches per word;
-   save training settings and run manually or configure its training cron.
+   save training settings and run manually or configure schedules in **Automate**,
+   immediately below Deploy. New unsaved artificial recipes use 50,000 total
+   samples / batch size 100; saved recipes are preserved. Preview always uses one
+   sample. Higher batches require more memory and engines may impose lower limits.
+   Piper stays visible with availability guidance when local voice files are missing;
+   viewing the catalog never downloads models.
+
+### Workspace automation and theme
+
+**Automate** edits only the workspace selected in the header. Collection,
+classification, training, and deployment have independent enable controls and
+five-field cron/timezone schedules. Switching workspaces does not enable or start
+anything. Automatic classification can run after collection or on a schedule,
+using Faster Whisper (recommended, managed `small.en`/`small`) or Parakeet ONNX
+(managed INT8 `nemo-parakeet-tdt-0.6b-v3`). STT uses the same queue-owned GPU
+resource as training/generation, with CUDA/CPU fallback and lazy model caching in
+`/data/auto_train_models`. Model downloads happen only when inference is requested;
+fixture tests do not download or run these models.
+
+Clear non-wake activations may become negatives; empty/ambiguous speech stays
+pending. Close misses never become automatic negatives, and confirmed positive
+promotion is separately opt-in. Manual labels/trims win revision conflicts; no
+automatic rule deletes audio. Disabling collection preserves existing recordings
+but cannot preserve future clips evicted from a kiosk's finite rolling buffer.
+
+Training creates archives without publishing by default. **Deploy after successful
+training** is a separate opt-in and applies to new successful manual or scheduled
+runs, not failed/skipped runs or imported legacy archives. Scheduled deployment is
+independent of training and publishes only a new eligible archive. Manual rollback
+is not silently undone by retries or a later tick without a newly trained archive.
+Existing publication staging/quarantine requirements below still apply.
+
+**Upgrade with the old Studio runtime stopped.** The additive schema upgrade
+preserves existing training schedules, archives, recordings, desired publications
+and authorized retries. It disables the old global scrape schedule and cancels its
+unclaimed scheduled jobs (history retained); each workspace inherits its timing
+disabled until explicitly enabled. New automation and deploy-after-training default
+off, and historical training archives are not replayed automatically. The legacy
+explicit fleet scrape API remains for compatibility but is not used by the new UI.
+
+The header theme toggle defaults to your system light/dark preference and remembers
+an explicit override in browser storage. It works without storage permission too.
 
 ### Prepare immutable augmentation inputs before Studio training
 
