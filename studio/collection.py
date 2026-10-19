@@ -127,7 +127,10 @@ class CollectionService:
                     AND r.clip_id=collection_attempts.clip_id AND r.quarantined=0)""", (run_id, device_id))
         self._finish(run_id)
 
-    def run(self, device_ids: list[str] | None = None) -> CollectionRun:
+    def run(self, device_ids: list[str] | None = None, *, word_id: str | None = None,
+            cancelled=lambda: False) -> CollectionRun:
+        if word_id is not None:
+            self.workspaces.get(word_id)
         if device_ids is not None and (not isinstance(device_ids, list) or
                 any(not isinstance(i, str) or not i for i in device_ids)):
             raise ValidationError("Invalid device selection")
@@ -157,7 +160,7 @@ class CollectionService:
             for device in selected:
                 with self._lock("device:" + device.id):
                     self._recover_device(device.id)
-                    self._collect(run_id, device.id, refresh_failed)
+                    self._collect(run_id, device.id, refresh_failed, word_id=word_id, cancelled=cancelled)
             self._finish(run_id)
         return self.get_run(run_id)
 
@@ -185,7 +188,7 @@ class CollectionService:
             return db.execute("SELECT 1 FROM recordings WHERE device_id=? AND clip_id=?",
                               (device_id, clip_id)).fetchone() is not None
 
-    def _collect(self, run_id: str, device_id: str, refresh_failed: set[str]) -> None:
+    def _collect(self, run_id: str, device_id: str, refresh_failed: set[str], *, word_id=None, cancelled=lambda: False) -> None:
         result = DeviceCollectionResult(device_id=device_id)
         self._save(run_id, result)
         try:
@@ -206,6 +209,12 @@ class CollectionService:
             self._save(run_id, result)
             visited = set()
             for clip in listing.clips:
+                if cancelled():
+                    result.status = 'interrupted'
+                    return
+                mapped = self.workspaces.resolve_source(device_id, clip.engine, clip.phrase)
+                if word_id is not None and mapped is not None and mapped != word_id:
+                    continue
                 # Remote duplicates within one list are not separate source identities.
                 if clip.id in visited:
                     continue
@@ -240,8 +249,13 @@ class CollectionService:
                             staged.flush()
                             os.fsync(staged.fileno())
                             staged.seek(0)
-                            word_id = self.workspaces.resolve_source(device_id, clip.engine, clip.phrase)
-                            recording = self.samples.ingest(device_id, clip, staged, word_id)
+                            mapped = self.workspaces.resolve_source(device_id, clip.engine, clip.phrase)
+                            recording = self.samples.ingest(device_id, clip, staged, mapped, scoped_word_id=word_id)
+                    if recording is None:
+                        with self.store.transaction() as db:
+                            db.execute('DELETE FROM collection_attempts WHERE device_id=? AND clip_id=? AND run_id=?',
+                                       (device_id, clip.id, run_id))
+                        continue
                     if recording.quarantined:
                         raise ValidationError("Quarantined source identity")
                     self._attempt(run_id, device_id, clip.id, "complete")

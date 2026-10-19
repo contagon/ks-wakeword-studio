@@ -338,6 +338,11 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     def scrape(body: ScrapeBody = ScrapeBody()) -> CollectionRun:
         return runtime.collection.run(body.device_ids)
 
+    @router.post('/wakewords/{word_id}/collection/jobs', response_model=Job, status_code=201)
+    def collect_workspace(word_id: str, body: ScrapeBody = ScrapeBody()) -> Job:
+        runtime.workspaces.get(word_id)
+        return runtime.jobs.enqueue('scrape', word_id, {'device_ids': body.device_ids})
+
     @router.get("/scrape/runs", response_model=Page[CollectionRun])
     def scrape_runs(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)) -> Page[CollectionRun]:
         return runtime.collection.list_runs(offset, limit)

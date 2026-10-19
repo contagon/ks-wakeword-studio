@@ -129,7 +129,8 @@ class SampleService:
                     start, end, self._now()))
         return audio_id
 
-    def ingest(self, device_id: str, clip: DiagnosticClip, audio: BinaryIO, word_id: str | None) -> Recording:
+    def ingest(self, device_id: str, clip: DiagnosticClip, audio: BinaryIO, word_id: str | None,
+               *, scoped_word_id: str | None = None) -> Recording | None:
         from studio.workspace_deletion import source_deleted
         device_id = WorkspaceService._text(device_id, 200)
         clip_id = WorkspaceService._text(clip.id, 200)
@@ -155,6 +156,12 @@ class SampleService:
         with self.store.transaction() as db:
             if source_deleted(self.store, device_id, clip_id, db):
                 raise Conflict('Source recording was permanently deleted')
+            if scoped_word_id is not None:
+                mapping = db.execute('SELECT word_id FROM source_mappings WHERE device_id=? AND engine=? AND source_phrase=?',
+                                     (device_id, clip.engine, clip.phrase)).fetchone()
+                word_id = mapping[0] if mapping else None
+                if word_id is not None and word_id != scoped_word_id:
+                    return None
             # Serialize durable blob publication plus reference admission with GC.
             original, normalized = self._prepare(audio)
             existing = db.execute(RECORDING_SELECT + " WHERE r.device_id=? AND r.clip_id=?", (device_id, clip_id)).fetchone()

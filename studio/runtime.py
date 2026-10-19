@@ -95,8 +95,14 @@ class StudioRuntime:
         if context.cancelled():
             return {}
         assert self._collection is not None
-        result = self._collection.run(job.payload.get('device_ids'))
-        return {'run_id': result.id, 'status': result.status}
+        with self._jobs.store.transaction() as db:
+            row = db.execute('SELECT schedule_scope FROM studio_jobs WHERE id=?', (job.id,)).fetchone()
+            if row['schedule_scope']:
+                schedule = db.execute('SELECT enabled FROM studio_schedules WHERE scope=?', (row['schedule_scope'],)).fetchone()
+                if not schedule or not schedule['enabled']:
+                    return {'skipped': True, 'reason': 'disabled'}
+        result = self._collection.run(job.payload.get('device_ids'), word_id=job.word_id, cancelled=context.cancelled)
+        return {'run_id': result.id, 'status': result.status, 'new': result.new}
 
     @property
     def deployment(self) -> DeploymentService:
