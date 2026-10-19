@@ -43,7 +43,8 @@ describe("TrainPage", () => {
     expect(ui.text()).toContain("3 reviewed positives"); expect(ui.text()).toContain("4 reviewed negatives"); expect(ui.text()).toContain("5 selected artificial"); expect(ui.text()).not.toContain("unreviewed");
     expect(ui.get('[data-effective-counts]').classes()).toContain("sm:grid-cols-3");
     expect(ui.get('[data-effective-counts]').findAll("p").map(item => item.text())).toEqual(["3 reviewed positives", "4 reviewed negatives", "5 selected artificial"]);
-    expect(ui.get('[data-cron-editor]').classes()).toContain("mt-4");
+    expect(ui.find('[data-cron-editor]').exists()).toBe(false);
+    expect(ui.get('a[href*="automate"]').text()).toContain('Automate');
     expect(ui.find('input[name="train-openwakeword"]').exists()).toBe(false);
     expect(ui.text()).not.toContain("openWakeWord");
     await ui.get('input[name="training-steps"]').setValue("0"); await ui.get('[data-action="save-training-settings"]').trigger("click"); expect(ui.get('[role="alert"]').text()).toContain("between");
@@ -56,11 +57,11 @@ describe("TrainPage", () => {
     ui.unmount();
   });
 
-  it("uses a word-scoped cron editor and drops old counts/runs on workspace changes", async () => {
+  it("links to word-scoped Automate and drops old counts/runs on workspace changes", async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
-    expect(ui.get('[data-cron-editor]').attributes("data-scope")).toBe("train:a");
+    expect(ui.get('a[href*="automate"]').attributes('href')).toContain('word=a');
     workspace.selectedId.value = "b"; await flushPromises(); await flushPromises();
-    expect(ui.get('[data-cron-editor]').attributes("data-scope")).toBe("train:b"); expect(ui.text()).toContain("1 reviewed positives"); expect(ui.text()).not.toContain("5 selected artificial");
+    expect(ui.get('a[href*="automate"]').attributes('href')).toContain('word=b'); expect(ui.text()).toContain("1 reviewed positives"); expect(ui.text()).not.toContain("5 selected artificial");
     ui.unmount();
   });
 });

@@ -2,15 +2,17 @@ import { onScopeDispose, ref, watch } from "vue";
 
 export const pages = [
   { id: "wakewords", name: "Wakewords", group: "Workspace" },
+  { id: "kiosks", name: "Kiosks", group: "Fleet" },
   { id: "negative-datasets", name: "Negative Datasets", group: "Data" },
   { id: "artificial", name: "Artificial", group: "Data" },
-  { id: "scrape", name: "Scrape", group: "Data" },
   { id: "classify", name: "Classify", group: "Data" },
   { id: "samples", name: "Samples", group: "Data" },
   { id: "train", name: "Train", group: "Models" },
   { id: "deploy", name: "Deploy", group: "Models" },
+  { id: "automate", name: "Automate", group: "Models" },
 ] as const;
 export type PageId = typeof pages[number]["id"];
+export type ClassifyTab = 'review' | 'collect' | 'unmapped';
 const selectionKey = "studio.selectedWordId";
 function storedSelection(): string {
   try { return localStorage.getItem(selectionKey) ?? ""; } catch { return ""; }
@@ -18,13 +20,21 @@ function storedSelection(): string {
 export function useStudioRoutes() {
   const page = ref<PageId>("wakewords");
   const selectedId = ref("");
+  const classifyTab = ref<ClassifyTab>('review');
   function read() {
     const [path, search = ""] = location.hash.replace(/^#\/?/, "").split("?");
-    page.value = pages.find(p => p.id === path)?.id ?? "wakewords";
+    page.value = path === 'scrape' ? 'classify' : pages.find(p => p.id === path)?.id ?? "wakewords";
     selectedId.value = new URLSearchParams(search).get("word") ?? storedSelection();
+    const tab = path === 'scrape' ? 'collect' : new URLSearchParams(search).get('tab');
+    classifyTab.value = tab === 'collect' || tab === 'unmapped' ? tab : 'review';
   }
   read();
-  function href(id: PageId) { return `#/${id}${selectedId.value ? `?${new URLSearchParams({ word: selectedId.value })}` : ""}`; }
+  function href(id: PageId) {
+    const params = new URLSearchParams();
+    if (selectedId.value) params.set('word', selectedId.value);
+    if (id === 'classify' && classifyTab.value !== 'review') params.set('tab', classifyTab.value);
+    return `#/${id}${params.size ? '?' + params : ''}`;
+  }
   function persist() {
     try {
       if (selectedId.value) localStorage.setItem(selectionKey, selectedId.value);
@@ -37,9 +47,13 @@ export function useStudioRoutes() {
     page.value = id;
     if (location.hash !== href(id)) history.pushState(null, "", href(id));
   }
+  function selectClassifyTab(tab: ClassifyTab) {
+    classifyTab.value = tab;
+    navigate('classify');
+  }
   window.addEventListener("hashchange", read);
   window.addEventListener("popstate", read);
   onScopeDispose(() => { stop(); window.removeEventListener("hashchange", read); window.removeEventListener("popstate", read); });
-  return { page, selectedId, href, navigate };
+  return { page, selectedId, classifyTab, selectClassifyTab, href, navigate };
 }
 export type StudioRoutes = ReturnType<typeof useStudioRoutes>;

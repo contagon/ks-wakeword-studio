@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { readModelMetrics, studioApi } from "../api";
-import DeviceRegistry from "../components/DeviceRegistry.vue";
 import { useDeviceRegistry } from "../devices";
 import { useWorkspace } from "../workspace";
 import type { DeploymentCapabilities, ModelVersion, Publication } from "../types";
@@ -55,6 +54,7 @@ async function load(): Promise<void> {
       studioApi.models(word, { limit: 50 }, controller.signal),
       studioApi.deploymentStatus(word, controller.signal),
       studioApi.deploymentCapabilities(controller.signal),
+      registry.load(),
     ]);
     if (controller.signal.aborted || current !== generation || workspace.selectedId.value !== word) return;
     versions.value = archive.items;
@@ -130,7 +130,7 @@ onBeforeUnmount(() => {
 <template>
   <section><div class="mb-4"><h1>Deploy</h1><p class="studio-muted">Archives are immutable dated training outputs. Publication makes files available; it never changes engines, enabled slots, thresholds, or wakeword selections.</p></div><p v-if="notice" class="studio-note" role="status">{{ notice }}</p><p v-if="error" class="studio-note" role="alert">{{ error }}</p>
     <section v-if="capabilities" class="studio-card studio-safety mb-4" data-staging-notice><h2>Before publishing</h2><p><strong>Clean, exclusive staging required.</strong> No concurrent manual uploads; staging cannot be checked automatically.</p><p class="studio-note" data-quarantine-notice role="alert"><strong>Quarantine warning:</strong> {{ capabilities.quarantine_notice }}</p><details><summary>Publication safety details</summary><p>{{ capabilities.notice }}</p><p class="studio-muted">Leader-authoritative mirroring and its existing selection propagation apply to eligible followers. Followers are indirect recipients only; the trainer never uploads to them.</p><p class="studio-muted">{{ capabilities.operator_action }}</p></details></section>
-    <DeviceRegistry surface="deploy" class="mb-4" @changed="void load()" />
+    <p class="mb-4"><a :href="workspace.routes.href('kiosks')" @click.prevent="workspace.routes.navigate('kiosks')">Manage kiosks →</a> · <a :href="workspace.routes.href('automate')" @click.prevent="workspace.routes.navigate('automate')">Deployment automation →</a></p>
     <section class="studio-card mb-4">
       <h2>Archived model versions</h2>
       <p v-if="loading" class="studio-muted">Loading archives…</p>

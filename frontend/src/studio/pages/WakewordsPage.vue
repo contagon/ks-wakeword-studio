@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onScopeDispose, reactive, ref, watch } from "vue";
+import { nextTick, onScopeDispose, reactive, ref, watch } from "vue";
 import { StudioApiError, studioApi } from "../api";
 import { useWorkspace } from "../workspace";
 
@@ -11,9 +11,13 @@ const saving = ref(false);
 const formError = ref("");
 const saved = ref("");
 const confirmingDelete = ref(false);
+const editing = ref(false), editInput = ref<HTMLInputElement>();
+const editTrigger = ref<HTMLButtonElement>();
+async function openEdit() { editing.value = true; await nextTick(); editInput.value?.focus(); }
+function closeEdit() { editing.value = false; editTrigger.value?.focus(); }
 let mutation: AbortController | undefined;
 watch(selected, word => { edit.phrase = word?.phrase ?? ""; edit.language = word?.language ?? ""; }, { immediate: true });
-watch(selectedId, () => { mutation?.abort(); saving.value = false; confirmingDelete.value = false; formError.value = ""; saved.value = ""; });
+watch(selectedId, () => { mutation?.abort(); saving.value = false; editing.value = false; confirmingDelete.value = false; formError.value = ""; saved.value = ""; });
 onScopeDispose(() => { mutation?.abort(); });
 async function deleteWorkspace() {
   if (!confirmingDelete.value || saving.value || !selectedId.value) return;
@@ -51,7 +55,7 @@ async function save(mode: "create" | "edit") {
     if (mode === "create") create.phrase = "";
     workspace.select(word.id);
     await workspace.refreshSelected();
-    if (!controller.signal.aborted) saved.value = "Workspace saved.";
+    if (!controller.signal.aborted) { saved.value = "Workspace saved."; if (mode === 'edit') closeEdit(); }
   } catch (cause) {
     if (!controller.signal.aborted) formError.value = cause instanceof Error ? cause.message : "Unable to save workspace.";
   } finally { if (mutation === controller) saving.value = false; }
@@ -66,16 +70,12 @@ async function save(mode: "create" | "edit") {
     </div>
     <p v-if="!loading && !error && !wakewords.length" class="studio-card">No wakewords yet. Create your first workspace below.</p>
     <div class="grid gap-3 sm:grid-cols-2 mb-4">
-      <article v-for="word in wakewords" :key="word.id" class="studio-card" :class="{ 'studio-selected': word.id === selectedId }">
-        <h2>{{ word.phrase }}</h2>
-        <p class="studio-muted text-xs mb-3">{{ word.language }}</p>
-        <button :aria-pressed="word.id === selectedId" @click="workspace.select(word.id)">{{ word.id === selectedId ? 'Selected workspace' : 'Open workspace' }}</button>
-      </article>
+      <button v-for="word in wakewords" :key="word.id" class="studio-card studio-word-card" :class="{ 'studio-selected': word.id === selectedId }" :aria-pressed="word.id === selectedId" @click="workspace.select(word.id)"><span class="flex justify-between items-center gap-3"><strong>{{ word.phrase }}</strong><span class="studio-muted text-xs ml-auto">{{ word.language }}</span></span></button>
     </div>
     <p v-if="selectedLoading" role="status">Loading selected workspace…</p>
     <div v-if="selectedError" role="alert" class="studio-note">{{ selectedError }} <button @click="workspace.refreshSelected()">Retry workspace</button></div>
     <div v-if="summary && selected" class="studio-card mb-4">
-      <h2>{{ selected.phrase }} · Overview</h2>
+      <div class="flex items-start justify-between gap-3"><h2>{{ selected.phrase }} · Overview</h2><details><summary>Actions</summary><button ref="editTrigger" data-action="edit-workspace" type="button" :disabled="saving" @click="openEdit">Rename / change language</button><button data-action="delete-workspace" type="button" :disabled="saving" @click="confirmingDelete = true">Delete workspace</button></details></div>
       <dl class="grid gap-3 sm:grid-cols-3 text-sm">
         <div><dt class="studio-muted">Pending classification</dt><dd>{{ summary.pending }} pending</dd></div>
         <div><dt class="studio-muted">Archived models</dt><dd>{{ summary.modelCount }} versions</dd><dd class="text-xs">{{ summary.latestModel ? `Latest: ${summary.latestModel.trained_at}` : 'No trained models yet' }}</dd></div>
@@ -84,20 +84,23 @@ async function save(mode: "create" | "edit") {
     </div>
     <p v-if="formError" role="alert" class="studio-note">{{ formError }}</p>
     <p v-if="saved" role="status" class="studio-note">{{ saved }}</p>
-    <div class="grid gap-4 lg:grid-cols-2">
+    <div class="grid gap-4">
       <form data-form="create" class="studio-card grid gap-3" @submit.prevent="save('create')">
         <h2>New wakeword</h2>
         <label>Display phrase<input v-model="create.phrase" name="phrase" required maxlength="200" autocomplete="off"></label>
         <label>Language<input v-model="create.language" name="language" required autocomplete="off"></label>
         <button class="studio-primary justify-self-start" :disabled="saving" type="submit">Create wakeword</button>
       </form>
-      <form v-if="selected" data-form="edit" class="studio-card grid gap-3" @submit.prevent="save('edit')">
+    </div>
+    <div v-if="selected && editing" class="studio-modal-backdrop" @keydown.esc="!saving && closeEdit()">
+      <form data-form="edit" class="studio-card grid gap-3" role="dialog" aria-modal="true" aria-label="Edit wakeword" @submit.prevent="save('edit')">
         <h2>Edit {{ selected.phrase }}</h2>
-        <label>Display phrase<input v-model="edit.phrase" name="phrase" required maxlength="200" autocomplete="off"></label>
+        <label>Display phrase<input ref="editInput" v-model="edit.phrase" name="phrase" required maxlength="200" autocomplete="off"></label>
         <label>Language<input v-model="edit.language" name="language" required autocomplete="off"></label>
         <p class="studio-muted text-xs">Changing the display phrase never renames deployed models or changes a kiosk’s enabled wakewords.</p>
         <button class="studio-primary justify-self-start" :disabled="saving" type="submit">Save changes</button>
-        <button data-action="delete-workspace" type="button" :disabled="saving" @click="confirmingDelete = true">Delete workspace</button>
+        <button type="button" :disabled="saving" @click="closeEdit">Cancel</button>
+        <p v-if="formError" role="alert" class="studio-note">{{ formError }}</p>
       </form>
     </div>
     <section v-if="confirmingDelete && selected" role="alertdialog" aria-labelledby="delete-heading" aria-describedby="delete-description" class="studio-card mt-4" @keydown.esc="!saving && (confirmingDelete = false)">

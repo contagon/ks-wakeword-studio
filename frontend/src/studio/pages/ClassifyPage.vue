@@ -8,9 +8,34 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { studioApi } from "../api";
 import AudioPlayer from "../components/AudioPlayer.vue";
 import { useWorkspace } from "../workspace";
-import type { Recording } from "../types";
+import type { Recording, Job } from "../types";
+import CollectionHistory from '../components/CollectionHistory.vue';
+import SourceInbox from '../components/SourceInbox.vue';
+import JobConsole from '../components/JobConsole.vue';
 
 const workspace = useWorkspace();
+const { classifyTab: tab } = workspace.routes;
+const collectionJob = ref<Job | null>(null), collecting = ref(false), collectionError = ref('');
+let collectionRequest: AbortController | undefined;
+async function collectNow() {
+  if (!workspace.selectedId.value || collecting.value || (collectionJob.value && ['queued', 'running', 'cancelling'].includes(collectionJob.value.status))) return;
+  const word = workspace.selectedId.value, controller = new AbortController(); collectionRequest = controller;
+  collecting.value = true; collectionError.value = '';
+  try { const job = await studioApi.collect(word, undefined, controller.signal); if (!controller.signal.aborted && workspace.selectedId.value === word) collectionJob.value = job; }
+  catch (cause) { if (!controller.signal.aborted) collectionError.value = cause instanceof Error ? cause.message : 'Collection was not started.'; }
+  finally { if (collectionRequest === controller) collecting.value = false; }
+}
+async function updateCollection(job: Job) {
+  const previous = collectionJob.value;
+  if (!previous || job.id !== previous.id || job.word_id !== workspace.selectedId.value) return;
+  collectionJob.value = job;
+  if (job.status !== 'complete' || previous.status === 'complete') return;
+  const word = workspace.selectedId.value, beforeReview = reviewedCount.value;
+  const controller = new AbortController(); collectionRequest?.abort(); collectionRequest = controller;
+  try { const page = await studioApi.queue(word, queueParams(), controller.signal); if (controller.signal.aborted || word !== workspace.selectedId.value || saving.value || reviewedCount.value !== beforeReview) return;
+    const known = new Set(queue.value.map(item => item.id)); queue.value.push(...page.items.filter(item => !known.has(item.id))); total.value = page.total;
+  } catch (cause) { if (!controller.signal.aborted) collectionError.value = cause instanceof Error ? cause.message : 'Collection completed; refresh the queue to see new recordings.'; }
+}
 const sessionSkips = new Map<string, Set<string>>();
 const queue = ref<Sample[]>([]);
 const unmapped = ref<Recording[]>([]);
@@ -128,6 +153,7 @@ async function assign(recording: Recording): Promise<void> {
 }
 function editing(event: KeyboardEvent): boolean { const target = event.target instanceof HTMLElement ? event.target : document.activeElement; return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName)); }
 function shortcut(event: KeyboardEvent): void {
+  if (tab.value !== 'review') return;
   if (event.repeat || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || editing(event)) return;
   const key = event.key.toLowerCase();
   if (discardOpen.value) { if (event.key === "Escape") { event.preventDefault(); discardOpen.value = false; } return; }
@@ -136,16 +162,21 @@ function shortcut(event: KeyboardEvent): void {
   event.preventDefault(); hasGesture.value = true;
   if (key === "p") void label("positive"); else if (key === "n") void label("negative"); else if (key === " ") player.value?.toggle(); else if (key === "r") player.value?.replay(); else if (key === "s") skip(); else void undo();
 }
-watch(workspace.selectedId, () => { void load(); }, { immediate: true });
+watch(workspace.selectedId, () => { collectionRequest?.abort(); collectionJob.value = null; collecting.value = false; collectionError.value = ''; void load(); }, { immediate: true });
 watch(kind, () => { void load(); });
 watch(() => active.value?.id, () => { readySampleId.value = null; }, { flush: "sync" });
 onMounted(() => document.addEventListener("keydown", shortcut));
-onBeforeUnmount(() => { document.removeEventListener("keydown", shortcut); request?.abort(); mutation?.abort(); invalidateAssignment(); player.value?.stop(); });
+watch(tab, () => { player.value?.stop(); });
+onBeforeUnmount(() => { document.removeEventListener("keydown", shortcut); collectionRequest?.abort(); request?.abort(); mutation?.abort(); invalidateAssignment(); player.value?.stop(); });
 </script>
 
 <template>
   <section>
-    <div class="flex flex-wrap items-center justify-between gap-3 mb-4"><div><h1>Classify</h1><p class="studio-muted">Rapid review stays pending until the server acknowledges each label.</p></div><span data-progress class="studio-muted">{{ total }} pending · {{ reviewed }} reviewed · {{ skipped.size }} skipped</span></div>
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4"><div><h1>Classify</h1><p class="studio-muted">Collect recordings, resolve source mappings, and review labels.</p></div><div class="flex flex-wrap items-center gap-3"><span data-progress class="studio-muted">{{ total }} pending · {{ reviewed }} reviewed · {{ skipped.size }} skipped</span><button data-action="collect-now" class="studio-primary" :disabled="!workspace.selectedId.value || collecting || Boolean(collectionJob && ['queued','running','cancelling'].includes(collectionJob.status))" @click="collectNow">{{ collecting ? 'Starting…' : 'Collect' }}</button></div></div>
+    <div class="studio-tabs" role="tablist" aria-label="Classification sections"><button v-for="entry in (['review', 'collect', 'unmapped'] as const)" :id="`classify-tab-${entry}`" :key="entry" role="tab" :aria-selected="tab === entry" :aria-controls="`classify-panel-${entry}`" :class="{ active: tab === entry }" @click="workspace.routes.selectClassifyTab(entry)">{{ entry === 'review' ? 'Review' : entry === 'collect' ? 'Collect' : 'Unmapped' }}</button></div>
+    <p v-if="collectionError" class="studio-note" role="alert">{{ collectionError }}</p>
+    <JobConsole v-if="collectionJob" :job-id="collectionJob.id" @update="updateCollection" />
+    <div v-show="tab === 'review'" id="classify-panel-review" role="tabpanel" aria-labelledby="classify-tab-review">
     <div class="studio-card studio-toolbar mb-4"><label>Recording type<select name="kind" v-model="kind"><option value="">All pending</option><option value="true">Near misses</option><option value="false">Activations</option></select></label></div>
     <p v-if="notice" class="studio-note" role="status" aria-live="polite">{{ notice }}</p><p v-if="error" data-classify-error class="studio-note" role="alert" aria-live="assertive">{{ error }}</p>
     <div v-if="loading" class="studio-card" aria-busy="true">Loading review queue…</div>
@@ -156,7 +187,9 @@ onBeforeUnmount(() => { document.removeEventListener("keydown", shortcut); reque
       <div class="flex flex-wrap gap-2"><button type="button" class="studio-primary" :disabled="saving" @click="label('positive')">Positive (P)</button><button type="button" :disabled="saving" @click="label('negative')">Negative (N)</button><button type="button" :disabled="saving" @click="skip">Skip (S)</button><button type="button" :disabled="saving" data-action="discard" @click="discardOpen = true">Discard (D)</button><button type="button" :disabled="saving || !persistedUndo.length" @click="undo">Undo (Z)</button></div>
       <p data-shortcuts class="studio-muted text-xs">P positive · N negative · Space play/pause · R replay · S skip for this session · Z undo.</p><input name="search" type="search" aria-label="Queue search" placeholder="Shortcuts pause while editing">
     </div><div v-else class="studio-card"><span v-if="total === 0">No pending recordings for this workspace.</span><span v-else>Pending recordings are skipped for this session or the local window needs reloading.</span><button v-if="total > 0" type="button" @click="refill">Retry pending window</button></div>
-    <section v-if="unmapped.length" class="studio-card mt-4"><h2>Unmapped recordings</h2><p class="studio-muted">Assign each recording explicitly; nothing is guessed or dropped.</p><article v-for="recording in unmapped" :key="recording.id" :data-unmapped-id="recording.id" class="flex flex-wrap justify-between gap-3 py-2"><span>{{ recording.phrase }} · {{ recording.device_id }}</span><button type="button" data-action="assign" :disabled="saving" @click="assign(recording)">Assign to this wakeword</button></article></section>
+    </div>
+    <div v-if="tab === 'collect'" id="classify-panel-collect" role="tabpanel" aria-labelledby="classify-tab-collect"><div class="studio-card mb-4"><h2>Collect recordings</h2><p class="studio-muted">Use Collect above to fetch recordings for the selected workspace now, even when its schedule is off. Unknown sources are retained in the shared Unmapped inbox.</p><a :href="workspace.routes.href('automate')" @click.prevent="workspace.routes.navigate('automate')">Collection settings →</a></div><CollectionHistory :refresh-key="collectionJob?.status" /></div>
+    <div v-show="tab === 'unmapped'" id="classify-panel-unmapped" role="tabpanel" aria-labelledby="classify-tab-unmapped"><SourceInbox :recordings="unmapped" :busy="saving" @assign="assign" @changed="notice = 'Source mapping saved for future collections.'" /></div>
     <div v-if="discardOpen" class="studio-modal-backdrop"><section data-dialog="discard" class="studio-card" role="dialog" aria-modal="true" aria-label="Confirm discard"><h2>Discard this recording?</h2><p>Discarding preserves its source tombstone so future collection does not reintroduce it.</p><div class="flex gap-2"><button type="button" data-action="confirm-discard" class="studio-primary" :disabled="saving" @click="discardOpen = false; label('discarded')">Discard recording</button><button type="button" @click="discardOpen = false">Cancel</button></div></section></div>
   </section>
 </template>

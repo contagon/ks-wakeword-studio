@@ -5,7 +5,8 @@ import { createWorkspace, workspaceKey } from "../workspace";
 import WakewordsPage from "../pages/WakewordsPage.vue";
 import ClassifyPage from "../pages/ClassifyPage.vue";
 import SamplesPage from "../pages/SamplesPage.vue";
-import ScrapePage from "../pages/ScrapePage.vue";
+import KiosksPage from "../pages/KiosksPage.vue";
+import AutomatePage from "../pages/AutomatePage.vue";
 import DeployPage from "../pages/DeployPage.vue";
 import NegativeDatasetsPage from "../pages/NegativeDatasetsPage.vue";
 import ArtificialPage from "../pages/ArtificialPage.vue";
@@ -57,8 +58,7 @@ onBeforeUnmount(() => {
       </div>
       <nav id="studio-navigation" aria-label="Main navigation" :hidden="navigationHidden">
         <template v-for="(page, index) in pages" :key="page.id">
-          <div v-if="index === 1" class="studio-nav-label">Data</div>
-          <div v-if="index === 6" class="studio-nav-label">Models</div>
+          <div v-if="(page.group === 'Data' || page.group === 'Models') && pages[index - 1]?.group !== page.group" class="studio-nav-label">{{ page.group }}</div>
           <a :href="routes.href(page.id)" :data-page="page.id" :class="{ active: current.id === page.id, 'studio-sub': page.group === 'Data' }" :aria-current="current.id === page.id ? 'page' : undefined" @click.prevent="navigate(page.id)">{{ page.name }}</a>
         </template>
       </nav>
@@ -81,7 +81,8 @@ onBeforeUnmount(() => {
         <WakewordsPage v-if="current.id === 'wakewords'" />
         <ClassifyPage v-else-if="current.id === 'classify'" />
         <SamplesPage v-else-if="current.id === 'samples'" />
-        <ScrapePage v-else-if="current.id === 'scrape'" />
+        <KiosksPage v-else-if="current.id === 'kiosks'" />
+        <AutomatePage v-else-if="current.id === 'automate'" />
         <DeployPage v-else-if="current.id === 'deploy'" />
         <NegativeDatasetsPage v-else-if="current.id === 'negative-datasets'" />
         <ArtificialPage v-else-if="current.id === 'artificial'" />

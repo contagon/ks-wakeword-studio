@@ -64,9 +64,9 @@ function mediaQuery(initial: boolean) {
 async function open() { wrapper = mount(TrainerApp, { attachTo: document.body }); await flushPromises(); return wrapper; }
 
 describe("compact studio workspace", () => {
-  it("groups exactly eight real navigation pages and mounts the real training page", async () => {
+  it("groups the approved navigation pages with Automate immediately after Deploy", async () => {
     const ui = await open();
-    expect(ui.get('nav').findAll('a').map(a => a.text())).toEqual(["Wakewords", "Negative Datasets", "Artificial", "Scrape", "Classify", "Samples", "Train", "Deploy"]);
+    expect(ui.get('nav').findAll('a').map(a => a.text())).toEqual(["Wakewords", "Kiosks", "Negative Datasets", "Artificial", "Classify", "Samples", "Train", "Deploy", "Automate"]);
     expect(ui.get('nav').text()).toContain("Data");
     expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
     await ui.get('[data-page="train"]').trigger('click'); await flushPromises();
@@ -81,7 +81,7 @@ describe("compact studio workspace", () => {
       expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
       expect(ui.find('[data-studio-placeholder]').exists()).toBe(false);
     }
-    expect(ui.get('nav').findAll('a')).toHaveLength(8);
+    expect(ui.get('nav').findAll('a')).toHaveLength(9);
     expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
   });
   it("preserves selection across navigation, reload, and direct links", async () => {
@@ -135,6 +135,8 @@ describe("compact studio workspace", () => {
   it("edits phrase/language without sending or changing stable model identity", async () => {
     const ui = await open();
     expect(ui.find('input[name="model_id"]').exists()).toBe(false);
+    expect(ui.find('[data-form="edit"]').exists()).toBe(false);
+    await ui.get('[data-action="edit-workspace"]').trigger('click');
     await ui.get('[data-form="edit"] input[name="phrase"]').setValue('Hello Cedar');
     await ui.get('[data-form="edit"]').trigger('submit'); await flushPromises();
     const patch = requests.find(r => r.init?.method === 'PATCH');
@@ -155,6 +157,7 @@ describe("compact studio workspace", () => {
     const ui = await open();
     await ui.get('[data-page="samples"]').trigger('click'); await flushPromises();
     await ui.get('[data-page="wakewords"]').trigger('click'); await flushPromises();
+    await ui.get('[data-action="edit-workspace"]').trigger('click');
     expect((ui.get('[data-form="edit"] input[name="phrase"]').element as HTMLInputElement).value).toBe('Hey Cedar');
     expect((ui.get('[data-form="edit"] input[name="language"]').element as HTMLInputElement).value).toBe('en');
   });

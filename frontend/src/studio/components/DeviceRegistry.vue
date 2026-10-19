@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, ref, type ComponentPublicInstance } from "v
 import { useDeviceRegistry } from "../devices";
 import type { Device } from "../types";
 
-const props = defineProps<{ surface: "scrape" | "deploy" }>();
+const props = defineProps<{ surface: "scrape" | "deploy" | "kiosks" }>();
 const emit = defineEmits<{ changed: [Device[]] }>();
 const registry = useDeviceRegistry();
 const url = ref("");
