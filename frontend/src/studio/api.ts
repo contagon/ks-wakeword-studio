@@ -86,6 +86,7 @@ export const studioApi = {
   selectDatasets: (word: string, dataset_ids: string[], signal?: AbortSignal) => put<Page<Dataset>>(`${wordPath(word)}/datasets`, { dataset_ids }, signal),
   downloadDataset: (id: string, signal?: AbortSignal) => post<Job>(`/datasets/${segment(id)}/download`, undefined, signal),
   generationCatalog: (signal?: AbortSignal) => get<GenerationCapability[]>("/generation/catalog", undefined, signal),
+  generationDefaults: (signal?: AbortSignal) => get<{ samples: number; batch_size: number }>("/generation/defaults", undefined, signal),
   generationRecipe: (word: string, signal?: AbortSignal) => get<GenerationRecipe>(`${wordPath(word)}/generation/recipe`, undefined, signal),
   saveGenerationRecipe: (word: string, body: GenerationRecipe, signal?: AbortSignal) => put<GenerationRecipe>(`${wordPath(word)}/generation/recipe`, body, signal),
   generate: (word: string, body: GenerationRecipe, signal?: AbortSignal) => post<Job>(`${wordPath(word)}/generation/jobs`, body, signal),

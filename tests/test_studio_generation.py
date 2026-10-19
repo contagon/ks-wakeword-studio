@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from studio.generation import GenerationService
+from studio.api import create_router
 from studio.models import Conflict, GenerationRecipe, NotFound, ValidationError, WakewordUpdate
 from studio.runtime import StudioRuntime
 
@@ -55,6 +56,19 @@ class FixtureRunner:
 
 
 class GenerationTests(unittest.TestCase):
+    def test_defaults_and_visible_missing_piper(self):
+        app = FastAPI()
+        app.include_router(create_router(self.runtime))
+        with TestClient(app) as api:
+            defaults = api.get('/api/studio/generation/defaults')
+            self.assertEqual(defaults.status_code, 200)
+            self.assertEqual(defaults.json(), {'samples': 50000, 'batch_size': 100})
+        english = next(c for c in self.service.catalog() if c['language'] == 'en')
+        piper = next(m for m in english['model_availability'] if m['engine'] == 'piper')
+        self.assertTrue(piper['supported'])
+        self.assertFalse(piper['available'])
+        self.assertIn('Install', piper['reason'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

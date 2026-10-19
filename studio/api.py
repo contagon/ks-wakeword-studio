@@ -157,6 +157,11 @@ def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=1
 def create_router(runtime: StudioRuntime) -> APIRouter:
     router = APIRouter(prefix="/api/studio", route_class=StudioRoute)
 
+    @router.get('/generation/defaults')
+    def generation_defaults():
+        from tts_config import DEFAULT_GENERATION_SAMPLES, DEFAULT_GENERATION_BATCH_SIZE
+        return {'samples': DEFAULT_GENERATION_SAMPLES, 'batch_size': DEFAULT_GENERATION_BATCH_SIZE}
+
     @router.get('/capabilities', response_model=StudioCapabilities)
     def capabilities() -> StudioCapabilities:
         return runtime.capabilities()

@@ -16,6 +16,7 @@ let loadRequest: AbortController | undefined; let mutationRequest: AbortControll
 let selectionLoaded = false;
 const activeId = computed(() => workspace.selectedId.value); const word = computed(() => workspace.selected.value); const capability = computed(() => capabilities.value.find(item => item.language === recipe.value.language) ?? null);
 const engines = computed(() => capability.value?.engines.hybrid ?? []);
+const modelAvailability = computed(() => capability.value?.model_availability ?? engines.value.map(engine => ({ engine, supported: true, available: true, reason: null })));
 const accentEnabled = computed(() => Boolean(capability.value?.accent_applies) && recipe.value.engines?.some(engine => engine !== 'piper'));
 function loadCurrent(id: string, token: number, controller: AbortController): boolean { return activeId.value === id && loadGeneration === token && !controller.signal.aborted; }
 function mutationCurrent(id: string, token: number, controller: AbortController): boolean { return activeId.value === id && mutationGeneration === token && !controller.signal.aborted; }
@@ -25,17 +26,18 @@ async function load(): Promise<void> {
   loadRequest?.abort(); const controller = new AbortController(); loadRequest = controller; const token = ++loadGeneration; const id = activeId.value;
   batches.value = []; total.value = 0; error.value = ""; if (!id) return; loading.value = true;
   try {
-    const [catalog, saved, page, selection, currentWord] = await Promise.all([
+    const [catalog, saved, page, selection, currentWord, defaults] = await Promise.all([
       studioApi.generationCatalog(controller.signal),
       studioApi.generationRecipe(id, controller.signal).catch(cause => cause instanceof StudioApiError && cause.status === 404 ? null : Promise.reject(cause)),
       studioApi.batches(id, { offset: offset.value, limit: 50 }, controller.signal),
       selectionLoaded ? Promise.resolve(null) : studioApi.batchSelection(id, controller.signal),
       studioApi.wakeword(id, controller.signal),
+      studioApi.generationDefaults(controller.signal),
     ]);
     if (!loadCurrent(id, token, controller)) return;
     capabilities.value = catalog;
     if (!selectionLoaded) {
-      recipe.value = saved ?? { language: currentWord.language, english_accent: 'mixed', tts_mode: 'hybrid', samples: 1, batch_size: 1 };
+      recipe.value = saved ?? { language: currentWord.language, english_accent: 'mixed', tts_mode: 'hybrid', ...defaults };
       normalizeRecipe(); selected.value = new Set(selection ?? []); selectionLoaded = true;
     }
     batches.value = page.items; total.value = page.total;
@@ -89,18 +91,19 @@ onBeforeUnmount(() => { loadRequest?.abort(); abortWorkspaceMutations(); });
         </div>
         <fieldset><legend class="mb-2 font-semibold">Generation models</legend>
           <div class="grid gap-3 sm:grid-cols-2">
-            <article v-for="engine in engines" :key="engine" class="studio-history">
+            <article v-for="model in modelAvailability" :key="model.engine" class="studio-history">
               <div class="flex items-center justify-between gap-3">
-                <label class="studio-checkbox-label"><input type="checkbox" :data-engine="engine" :checked="recipe.engines?.includes(engine)" @change="toggleEngine(engine, ($event.target as HTMLInputElement).checked)"><strong>{{ engineNames[engine] ?? engine }}</strong></label>
-                <button type="button" :data-preview="engine" :disabled="previewBusy[engine] || ['queued', 'running', 'cancelling'].includes(previews[engine]?.status ?? '') || !activeId" @click="preview(engine)">{{ previewBusy[engine] ? 'Starting…' : 'Preview' }}</button>
+                <label class="studio-checkbox-label"><input type="checkbox" :data-engine="model.engine" :disabled="!model.available" :checked="recipe.engines?.includes(model.engine)" @change="toggleEngine(model.engine, ($event.target as HTMLInputElement).checked)"><strong>{{ engineNames[model.engine] ?? model.engine }}</strong></label>
+                <button type="button" :data-preview="model.engine" :disabled="!model.available || previewBusy[model.engine] || ['queued', 'running', 'cancelling'].includes(previews[model.engine]?.status ?? '') || !activeId" @click="preview(model.engine)">{{ previewBusy[model.engine] ? 'Starting…' : 'Preview' }}</button>
               </div>
-              <p v-if="previewErrors[engine]" role="alert" class="studio-note mt-3">{{ previewErrors[engine] }}</p>
-              <JobConsole v-if="previews[engine] && previews[engine].status !== 'complete'" :job-id="previews[engine].id" @update="updatePreview(engine, $event)" />
-              <audio v-if="previews[engine]?.status === 'complete'" :data-preview-audio="engine" class="mt-3 max-w-full" :src="studioApi.previewAudioUrl(activeId, previews[engine].id)" controls autoplay :aria-label="`${engineNames[engine] ?? engine} wakeword preview`" />
+              <p v-if="model.reason" class="studio-muted text-xs mt-2">{{ model.reason }}</p>
+              <p v-if="previewErrors[model.engine]" role="alert" class="studio-note mt-3">{{ previewErrors[model.engine] }}</p>
+              <JobConsole v-if="previews[model.engine] && previews[model.engine].status !== 'complete'" :job-id="previews[model.engine].id" @update="updatePreview(model.engine, $event)" />
+              <audio v-if="previews[model.engine]?.status === 'complete'" :data-preview-audio="model.engine" class="mt-3 max-w-full" :src="studioApi.previewAudioUrl(activeId, previews[model.engine].id)" controls autoplay :aria-label="`${engineNames[model.engine] ?? model.engine} wakeword preview`" />
             </article>
           </div>
         </fieldset>
-        <p class="studio-muted text-xs">Samples are shared across the selected models. Preview generates one sample without adding it to your training data. Accent support varies by model.</p>
+        <p class="studio-muted text-xs">Samples are shared across the selected models. Preview generates one sample without adding it to your training data. Higher batch sizes use more memory; effective limits and accent support vary by model.</p>
         <button type="submit" data-action="generate" class="studio-primary justify-self-start" :disabled="saving || loading || !activeId">{{ saving ? 'Starting…' : 'Generate dataset' }}</button>
       </form>
       <p v-if="error" class="studio-note mt-3" role="alert">{{ error }}</p>

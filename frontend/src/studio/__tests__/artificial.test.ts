@@ -24,6 +24,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://localhost"); const path = url.pathname;
     if (path === "/api/studio/wakewords") return json({ items: words, total: 2, offset: 0, limit: 100 });
+    if (path === '/api/studio/generation/defaults') return json({ samples: 50000, batch_size: 100 });
     if (path.match(/\/wakewords\/[ab]$/)) return json(words.find(word => path.endsWith(word.id)));
     if (path.endsWith("/queue")) return newWorkspace ? new Promise<Response>(() => {}) : json({ items: [], total: 0, offset: 0, limit: 1 }); if (path.endsWith("/models")) return json({ items: [], total: 0, offset: 0, limit: 1 }); if (path === "/api/studio/schedules") return json([]);
     if (path === "/api/studio/generation/catalog") return json([{ language: "en", name: "English", accent_applies: true, english_accents: [{ code: "us", label: "US" }], engines: { hybrid: ["omnivoice", "qwen3", "moss", "piper"], modern: ["omnivoice", "qwen3", "moss"], piper: ["piper"] } }, { language: "fr", name: "French", accent_applies: false, english_accents: [], engines: { hybrid: ["omnivoice", "qwen3", "moss"], modern: ["omnivoice", "qwen3", "moss"], piper: [] } }]);
@@ -46,6 +47,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ArtificialPage", () => {
+  it('uses upstream counts for an unsaved recipe without changing preview counts', async () => {
+    newWorkspace = true;
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    expect((ui.get('[name="samples"]').element as HTMLInputElement).value).toBe('50000');
+    expect((ui.get('[name="batch-size"]').element as HTMLInputElement).value).toBe('100');
+    ui.unmount();
+  });
   it('uses the workspace language before overview requests finish for a new workspace', async () => {
     newWorkspace = true; history.replaceState(null, '', '#/artificial?word=b');
     const ui = mount(host()); await flushPromises(); await flushPromises();

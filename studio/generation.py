@@ -41,9 +41,27 @@ class GenerationService:
         # Offline fallback is the shared provider catalog, never an invented list.
         return [{'language': code, 'name': name, 'accent_applies': code == 'en',
                  'english_accents': tts.english_accent_options() if code == 'en' else [],
+                 'model_availability': self._model_availability(code),
                  'engines': {mode: tts.engines_for_language(code, mode, piper_available=self._piper_available(code))
                              for mode in tts.TTS_MODES}}
                 for code, name in sorted(self._languages().items())]
+
+    def _model_availability(self, language):
+        available = self._piper_available(language)
+        supported = language == 'en' or available
+        catalog = self.store.root.parent / '.cache/piper_voices_catalog.json'
+        try:
+            if catalog.stat().st_size < 4 * 1024 * 1024:
+                entries = json.loads(catalog.read_text())
+                supported = supported or (isinstance(entries, dict) and any(key.startswith(language + '_') for key in entries))
+        except (OSError, ValueError, TypeError):
+            pass
+        models = [{'engine': name, 'supported': True, 'available': True, 'reason': None}
+                  for name in tts.modern_engines_for_language(language)]
+        models.append({'engine': 'piper', 'supported': supported, 'available': available,
+                       'reason': None if available else ('Install compatible Piper voice files to enable this model.' if supported
+                           else 'No compatible Piper voice is installed or listed in the offline voice catalog for this language.')})
+        return models
 
     def _languages(self):
         languages = dict(tts.COMMON_OMNIVOICE_LANGUAGES)
