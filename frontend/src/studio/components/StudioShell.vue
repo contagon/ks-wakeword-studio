@@ -12,10 +12,14 @@ import NegativeDatasetsPage from "../pages/NegativeDatasetsPage.vue";
 import ArtificialPage from "../pages/ArtificialPage.vue";
 import TrainPage from "../pages/TrainPage.vue";
 import ThemeToggle from './ThemeToggle.vue';
+import { createJobQueue, jobQueueKey } from '../jobs';
+import JobQueueDrawer from './JobQueueDrawer.vue';
 
 const routes = useStudioRoutes();
 const workspace = createWorkspace(routes);
 provide(workspaceKey, workspace);
+const queue = createJobQueue();
+provide(jobQueueKey, queue);
 const { wakewords, selectedId, selected, loading, error, notice } = workspace;
 const navigationOpen = ref(false);
 const narrow = ref(false);
@@ -41,9 +45,11 @@ else narrowQuery?.addListener(updateNarrow);
 onMounted(() => {
   document.addEventListener("keydown", onKeydown);
   void workspace.load();
+  queue.start();
 });
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", onKeydown);
+  queue.stop();
   if (narrowQuery?.removeEventListener) narrowQuery.removeEventListener("change", updateNarrow);
   else narrowQuery?.removeListener(updateNarrow);
 });
@@ -51,6 +57,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="studio-app" :class="{ 'is-narrow': narrow }">
+    <div class="studio-layout" data-studio-background :inert="queue.open.value ? '' : undefined">
     <a class="studio-skip" href="#studio-content" @click.prevent="content?.focus()">Skip to content</a>
     <aside class="studio-sidebar">
       <div class="flex items-center justify-between gap-3">
@@ -73,7 +80,7 @@ onBeforeUnmount(() => {
             <option v-if="!wakewords.length" value="">No wakewords</option>
             <option v-for="word in wakewords" :key="word.id" :value="word.id">{{ word.phrase }}</option>
           </select>
-        </label><ThemeToggle /></div>
+        </label><ThemeToggle /><button type="button" class="studio-queue-toggle" data-action="open-job-queue" aria-label="Open global job queue" aria-controls="studio-job-queue" :aria-expanded="queue.open.value" @click="queue.show()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h1M3 12h1M3 18h1" /></svg><span v-if="queue.activeCount.value" class="studio-queue-badge">{{ queue.activeCount.value }}</span><span v-if="queue.error.value" title="Job queue unavailable" aria-label="Job queue unavailable">!</span></button></div>
       </header>
       <main id="studio-content" ref="content" class="studio-content" tabindex="-1">
         <p v-if="notice" role="status" class="studio-note">{{ notice }}</p>
@@ -90,5 +97,7 @@ onBeforeUnmount(() => {
         <TrainPage v-else-if="current.id === 'train'" />
       </main>
     </div>
+    </div>
+    <JobQueueDrawer />
   </div>
 </template>

@@ -1,6 +1,28 @@
 @import "tailwindcss";
 @source "./**/*.vue";
 
+.studio-layout { display: contents; }
+.studio-app .studio-queue-toggle { display: inline-flex; align-items: center; gap: 7px; }
+.studio-queue-toggle svg { width: 20px; height: 20px; }
+.studio-queue-badge { display: inline-block; background: var(--studio-primary); color: white; font-size: 11px; border-radius: 16px; padding: 1px 6px; font-weight: 500; }
+.studio-queue-backdrop { position: fixed; z-index: 60; inset: 0; background: rgb(20 35 48 / .35); }
+.studio-job-drawer { position: fixed; z-index: 61; inset: 0 0 0 auto; width: min(470px, 100%); background: var(--studio-bg); box-shadow: -8px 0 40px rgb(20 35 48 / .15); display: flex; flex-direction: column; }
+.studio-queue-header { padding: 14px 18px; border-bottom: 1px solid var(--studio-border); background: var(--studio-surface); }
+.studio-queue-header h2 { margin: 0; }
+.studio-queue-header p { margin: 6px 0 0; }
+.studio-queue-content { padding: 0 14px 16px; overflow-y: auto; overscroll-behavior: contain; }
+.studio-app h3.studio-queue-group { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--studio-muted); margin: 14px 2px 5px; }
+.studio-app .studio-job-card { padding: 10px 12px; margin: 7px 0; }
+.studio-job-heading { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.studio-app .studio-job-heading h3 { font-size: 13px; margin: 0 auto 0 0; font-weight: 650; }
+.studio-job-card .studio-status { font-size: 10px; padding: 2px 6px; }
+.studio-app .studio-job-card button { font-size: 11px; padding: 2px 6px; min-height: 26px; }
+.studio-app .studio-job-meta { font-size: 11px; color: var(--studio-muted); margin: 3px 0; overflow-wrap: anywhere; }
+.studio-job-card summary { font-size: 11px; margin: 5px 0 0; }
+.studio-job-card .studio-log { margin: 6px 0; padding: 8px; font-size: 11px; }
+.studio-job-card .studio-note { font-size: 11px; padding: 7px; margin: 6px 0 0; }
+.studio-app .studio-queue-more { width: 100%; margin-top: 10px; }
+
 @theme {
   --color-studio-green: #246449;
   --color-studio-surface: #ffffff;
