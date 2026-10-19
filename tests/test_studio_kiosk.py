@@ -10,7 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from kiosk_fixture import KioskServer, TOKEN
+from kiosk_fixture import KioskServer, PASSWORD, TOKEN
 from studio.kiosk import KioskClient, normalize_url
 from studio.models import Device, IdentityMismatch, RemoteRejected, RemoteUnavailable, ValidationError
 
@@ -161,3 +161,5 @@ class KioskTests(unittest.TestCase):
             self.server.server.socket = context.wrap_socket(self.server.server.socket, server_side=True)
             with self.assertRaises(RemoteUnavailable):
                 self.client.identity(replace(self.device, url=self.server.url.replace("http:", "https:")))
+            with self.assertRaises(RemoteUnavailable):
+                self.client.login(replace(self.device, url=self.server.url.replace("http:", "https:")), PASSWORD)

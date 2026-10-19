@@ -23,6 +23,7 @@ from studio_harness import FixtureOnlyClient, StubGpuRunner
 from studio.models import Device, RemoteRejected
 
 TOKEN = "fixture-admin-token"
+PASSWORD = "fixture-admin-password"
 
 
 def wav_bytes(seed: int = 1) -> bytes:
@@ -58,10 +59,13 @@ class FixtureKiosk:
             def do_POST(self):
                 body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
                 owner.requests.append((self.path, body))
-                if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+                login = self.path == "/api/login" and json.loads(body) == {"password": PASSWORD, "ttl_days": 3650}
+                if not login and self.headers.get("Authorization") != f"Bearer {TOKEN}":
                     self.send_response(401); self.end_headers(); return
                 command = self.path.rsplit("/", 1)[-1]
-                if self.path.startswith("/api/voice/wake-models/upload?name="):
+                if login:
+                    payload = {"token": TOKEN}
+                elif self.path.startswith("/api/voice/wake-models/upload?name="):
                     owner.staged[self.path.split("=", 1)[1]] = body
                     payload = {"ok": True, "data": {}}
                 elif command == "fleetIdentity":
@@ -134,11 +138,11 @@ class StudioWorkflowTests(unittest.TestCase):
     def test_api_workflow_scrapes_labels_schedules_archives_publishes_and_rolls_back(self):
         word = self.client.post("/api/studio/wakewords", json={"phrase": "Hello robot", "language": "en", "model_id": "hello_robot"}).json()
         second = self.client.post("/api/studio/wakewords", json={"phrase": "Other robot", "language": "en", "model_id": "other_robot"}).json()
-        leader = self.client.post("/api/studio/devices", json={"url": self.leader.url, "token": TOKEN, "role": "leader"}).json()
+        leader = self.client.post("/api/studio/devices", json={"url": self.leader.url, "password": PASSWORD, "role": "leader"}).json()
         discovered = self.client.post(f"/api/studio/devices/{leader['id']}/refresh").json()
         self.assertEqual([device["role"] for device in discovered], ["follower"])
         self.assertEqual(discovered[0]['credentials_status'], 'credentials_required')
-        follower = self.client.post(f"/api/studio/devices/{self.follower.kiosk_id}/credentials", json={"token": TOKEN}).json()
+        follower = self.client.post(f"/api/studio/devices/{self.follower.kiosk_id}/credentials", json={"password": PASSWORD}).json()
         self.assertEqual(follower["credentials_status"], "ready")
         targets = [device.id for device in self.runtime.devices.publication_targets()]
         self.assertEqual(targets, [leader['id']])
@@ -199,7 +203,7 @@ class StudioWorkflowTests(unittest.TestCase):
         self.assertEqual((self.leader.slots, self.follower.slots), before_slots)
         self.assertEqual([device.id for device in self.runtime.devices.publication_targets()], targets)
         self.assertEqual({str(path.relative_to(archive_path)): path.read_bytes() for path in archive_path.rglob('*') if path.is_file()}, retained)
-        allowed = {'fleetIdentity', 'fleetStatus', 'getWakeWordActivations', 'getWakeWordActivationAudio',
+        allowed = {'login', 'fleetIdentity', 'fleetStatus', 'getWakeWordActivations', 'getWakeWordActivationAudio',
                    'commitCustomWakeModels', 'customWakeModelsManifest', 'clearWakeWordModels'}
         self.assertTrue(all('upload?name=' in path or path.rsplit('/', 1)[-1] in allowed
                             for path, _ in self.leader.requests + self.follower.requests))

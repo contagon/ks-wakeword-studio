@@ -29,7 +29,7 @@ describe("shared fleet registry", () => {
     await flushPromises();
     expect(ui.get('details[data-device-registration]').attributes('open')).toBeDefined();
     await ui.get('input[name="url"]').setValue('http://leader');
-    await ui.get('input[name="token"]').setValue('token');
+    await ui.get('input[name="password"]').setValue('admin-password');
     await ui.get('form[data-device-add]').trigger('submit');
     await flushPromises();
     expect(ui.get('details[data-device-registration]').attributes('open')).toBeUndefined();
@@ -41,23 +41,25 @@ describe("shared fleet registry", () => {
     const first = mount(DeviceRegistry, { props: { surface } });
     await flushPromises();
     await first.get('input[name="url"]').setValue("http://leader");
-    await first.get('input[name="token"]').setValue("super-secret-token");
+    await first.get('input[name="password"]').setValue("super-secret-password");
     await first.get('form[data-device-add]').trigger("submit");
     await flushPromises();
 
-    expect((first.get('input[name="token"]').element as HTMLInputElement).value).toBe("");
+    expect((first.get('input[name="password"]').element as HTMLInputElement).value).toBe("");
+    const sent = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(sent?.[1]?.body as string)).toEqual({ url: "http://leader", password: "super-secret-password", role: "standalone" });
     expect(first.text()).toContain("Follower");
     const second = mount(DeviceRegistry, { props: { surface: other } });
     await flushPromises();
     expect(second.text()).toContain("Follower");
     expect(second.text()).toContain("Parent leader");
     expect(second.find('[data-action="upload-follower"]').exists()).toBe(false);
-    expect(second.text()).not.toContain("super-secret-token");
+    expect(second.text()).not.toContain("super-secret-password");
     first.unmount();
     second.unmount();
   });
 
-  it("clears a submitted follower credential synchronously while its request is pending", async () => {
+  it.each([200, 403])("clears a follower password while pending and after status %s", async status => {
     devices = [leader, follower];
     const ui = mount(DeviceRegistry, { props: { surface: "scrape" } });
     await flushPromises();
@@ -67,8 +69,33 @@ describe("shared fleet registry", () => {
 
     expect(resolveCredentials).toBeTypeOf("function");
     expect((credential.element as HTMLInputElement).value).toBe("");
-    resolveCredentials?.(response(follower));
+    expect(credential.attributes("aria-label")).toBe("Follower admin password");
+    const sent = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith("/credentials"));
+    expect(JSON.parse(sent?.[1]?.body as string)).toEqual({ password: "pending-secret" });
+    resolveCredentials?.(response(status === 200 ? follower : { detail: "Kiosk admin credentials required" }, status));
     await flushPromises();
+    expect((credential.element as HTMLInputElement).value).toBe("");
+    expect(ui.text()).not.toContain("pending-secret");
     ui.unmount();
+  });
+
+  it.each([201, 403])("clears registration password before the login finishes with status %s", async status => {
+    const ui = mount(DeviceRegistry, { props: { surface: "scrape" } });
+    await flushPromises();
+    let finish: ((response: Response) => void) | undefined;
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }));
+    await ui.get('input[name="url"]').setValue("http://leader");
+    const password = ui.get('input[name="password"]');
+    await password.setValue("registration-secret");
+    await ui.get('form[data-device-add]').trigger("submit");
+    expect((password.element as HTMLInputElement).value).toBe("");
+    finish?.(response(status === 201 ? leader : { detail: "Kiosk admin credentials required" }, status));
+    await flushPromises();
+    expect((password.element as HTMLInputElement).value).toBe("");
+    expect(ui.text()).not.toContain("registration-secret");
+    const other = mount(DeviceRegistry, { props: { surface: "deploy" } });
+    await flushPromises();
+    expect(other.text()).not.toContain("registration-secret");
+    ui.unmount(); other.unmount();
   });
 });

@@ -38,8 +38,8 @@ export function useDeviceRegistry() {
     deviceItems.value = index < 0 ? [...deviceItems.value, device] : deviceItems.value.map(item => item.id === device.id ? device : item);
     initialized = true;
   }
-  async function add(url: string, token: string, role: "leader" | "standalone"): Promise<Device> {
-    const device = await studioApi.addDevice(url, token, role);
+  async function add(url: string, password: string, role: "leader" | "standalone"): Promise<Device> {
+    const device = await studioApi.addDevice(url, password, role);
     replace(device);
     // Adding a leader causes server-side discovery; reload the sole shared cache.
     await load(true);
@@ -49,8 +49,8 @@ export function useDeviceRegistry() {
     await studioApi.refreshDevices(id);
     await load(true);
   }
-  async function credentials(id: string, token: string): Promise<Device> {
-    const device = await studioApi.setCredentials(id, token);
+  async function credentials(id: string, password: string): Promise<Device> {
+    const device = await studioApi.setCredentials(id, password);
     replace(device);
     return device;
   }

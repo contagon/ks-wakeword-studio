@@ -3251,11 +3251,11 @@ var X = (e) => `/wakewords/${Zo(e)}`, rs = (e, t) => `${X(e)}/samples/${Zo(t)}`,
 	devices: (e) => Z("/devices", void 0, e),
 	addDevice: (e, t, n, r) => Q("/devices", {
 		url: e,
-		token: t,
+		password: t,
 		role: n
 	}, r),
 	refreshDevices: (e, t) => Q(`/devices/${Zo(e)}/refresh`, void 0, t),
-	setCredentials: (e, t, n) => Q(`/devices/${Zo(e)}/credentials`, { token: t }, n),
+	setCredentials: (e, t, n) => Q(`/devices/${Zo(e)}/credentials`, { password: t }, n),
 	sourceMappings: (e, t) => Z(`/devices/${Zo(e)}/source-mappings`, void 0, t),
 	setSourceMapping: (e, t, n) => is(`/devices/${Zo(e)}/source-mappings`, t, n),
 	scrape: (e, t) => Q("/scrape", { device_ids: e }, t),
@@ -4986,7 +4986,7 @@ var El = {
 			let t = c.get(e.id), n = t?.value ?? "";
 			t && (t.value = ""), l.value = `credentials:${e.id}`, d.value = "";
 			try {
-				await i.credentials(e.id, n), u.value = "Credentials saved server-side.", m();
+				await i.credentials(e.id, n), u.value = "Kiosk authenticated; token saved server-side.", m();
 			} catch (e) {
 				d.value = e instanceof Error ? e.message : "Credentials were not saved.";
 			} finally {
@@ -5012,43 +5012,47 @@ var El = {
 				"data-device-registration": "",
 				class: "mt-3",
 				open: !L(i).devices.value.length
-			}, [t[10] ||= W("summary", null, "Add device", -1), W("form", {
-				"data-device-add": "",
-				class: "studio-registration-row",
-				onSubmit: Lo(h, ["prevent"])
 			}, [
-				W("label", null, [t[6] ||= K("Address", -1), R(W("input", {
-					"onUpdate:modelValue": t[1] ||= (e) => a.value = e,
-					required: "",
-					name: "url",
-					autocomplete: "url",
-					placeholder: "http://kiosk.local:8789"
-				}, null, 512), [[Y, a.value]])]),
-				W("label", null, [t[8] ||= K("Role", -1), R(W("select", {
-					"onUpdate:modelValue": t[2] ||= (e) => o.value = e,
-					name: "role"
-				}, [...t[7] ||= [W("option", { value: "standalone" }, "Standalone", -1), W("option", { value: "leader" }, "Fleet leader", -1)]], 512), [[Ao, o.value]])]),
-				W("label", null, [t[9] ||= K("Admin token", -1), W("input", {
-					ref_key: "tokenInput",
-					ref: s,
-					required: "",
-					name: "token",
-					type: "password",
-					autocomplete: "new-password"
-				}, null, 512)]),
-				W("button", {
-					type: "submit",
-					class: "studio-primary",
-					disabled: l.value === "add"
-				}, "Add device", 8, Pl)
-			], 32)], 8, Nl),
+				t[10] ||= W("summary", null, "Add device", -1),
+				W("form", {
+					"data-device-add": "",
+					class: "studio-registration-row",
+					onSubmit: Lo(h, ["prevent"])
+				}, [
+					W("label", null, [t[6] ||= K("Address", -1), R(W("input", {
+						"onUpdate:modelValue": t[1] ||= (e) => a.value = e,
+						required: "",
+						name: "url",
+						autocomplete: "url",
+						placeholder: "http://kiosk.local:2324"
+					}, null, 512), [[Y, a.value]])]),
+					W("label", null, [t[8] ||= K("Role", -1), R(W("select", {
+						"onUpdate:modelValue": t[2] ||= (e) => o.value = e,
+						name: "role"
+					}, [...t[7] ||= [W("option", { value: "standalone" }, "Standalone", -1), W("option", { value: "leader" }, "Fleet leader", -1)]], 512), [[Ao, o.value]])]),
+					W("label", null, [t[9] ||= K("Admin password", -1), W("input", {
+						ref_key: "passwordInput",
+						ref: s,
+						required: "",
+						name: "password",
+						type: "password",
+						autocomplete: "off"
+					}, null, 512)]),
+					W("button", {
+						type: "submit",
+						class: "studio-primary",
+						disabled: l.value === "add"
+					}, "Add device", 8, Pl)
+				], 32),
+				t[11] ||= W("p", { class: "studio-muted text-xs mt-2" }, "Use the kiosk's Remote Administration password. Studio saves only the resulting 10-year token, not your password. Submit only over a trusted connection.", -1)
+			], 8, Nl),
 			L(i).loading.value ? (H(), U("p", Fl, "Loading registered devices…")) : (H(), U("div", Il, [(H(!0), U(V, null, B(L(i).devices.value, (e) => (H(), U("article", {
 				key: e.id,
 				class: "studio-device-row",
 				"data-device-id": e.id
 			}, [W("div", null, [
 				W("strong", null, M(e.id), 1),
-				t[11] ||= K(),
+				t[12] ||= K(),
 				W("span", { class: j(["studio-status", e.role === "follower" ? "studio-status-muted" : "studio-status-neutral"]) }, M(e.role === "follower" ? "Follower" : e.role), 3),
 				W("p", Rl, M(p(e)) + " · " + M(e.active ? e.url : "Inactive member"), 1)
 			]), W("div", zl, [
@@ -5068,13 +5072,14 @@ var El = {
 					ref_for: !0,
 					ref: (t) => f(e.id, t),
 					name: `credentials-${e.id}`,
+					required: "",
 					type: "password",
-					autocomplete: "new-password",
-					"aria-label": "Follower admin token"
+					autocomplete: "off",
+					"aria-label": "Follower admin password"
 				}, null, 8, Hl), W("button", {
 					type: "submit",
 					disabled: l.value === `credentials:${e.id}`
-				}, "Save credentials", 8, Ul)], 40, Vl)) : q("", !0)
+				}, "Authenticate", 8, Ul)], 40, Vl)) : q("", !0)
 			])], 8, Ll))), 128)), L(i).devices.value.length ? q("", !0) : (H(), U("p", Wl, "No kiosks registered yet."))]))
 		]));
 	}

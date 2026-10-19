@@ -7,6 +7,7 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures/kiosk"
 TOKEN = "private-admin-token-never-reflect"
+PASSWORD = "private admin password — never persist"
 
 
 def fixture(name):
@@ -28,13 +29,19 @@ class KioskServer:
             def do_POST(self):
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
                 owner.requests.append((self.path, self.headers.get("Authorization"), body))
-                if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+                login = self.path == "/kiosk/api/login"
+                if not login and self.headers.get("Authorization") != f"Bearer {TOKEN}":
                     self.send_response(401)
                     self.end_headers()
                     return
                 data = owner.responses.get(self.path)
                 if callable(data):
                     data = data()
+                if login and data is None:
+                    if json.loads(body).get("password") == PASSWORD:
+                        data = {"token": TOKEN}
+                    else:
+                        data = (401, {}, json.dumps({"error": "invalid password"}).encode())
                 if data is None:
                     command = self.path.rsplit("/", 1)[-1]
                     data = {"fleetIdentity": owner.identity, "fleetStatus": owner.fleet,

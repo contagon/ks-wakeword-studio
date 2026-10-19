@@ -88,6 +88,19 @@ class DeviceService:
         with self.store.transaction() as db:
             return [self._device(row) for row in db.execute("SELECT * FROM devices ORDER BY rowid")]
 
+    def add_with_password(self, url: str, password: str, role: Literal["standalone", "leader"]) -> Device:
+        url = normalize_url(url)
+        if role not in ("leader", "standalone"):
+            raise ValidationError("Invalid configured device role")
+        token = self.client.login(Device("", url, role), password)
+        return self.add(url, token, role)
+
+    def set_password(self, device_id: str, password: str) -> Device:
+        # Explicit authentication may probe an inactive member, but never reactivate it.
+        device = replace(self.get(device_id), active=True)
+        token = self.client.login(device, password)
+        return self.set_credentials(device_id, token)
+
     def add(self, url: str, token: str, role: Literal["standalone", "leader"]) -> Device:
         url = normalize_url(url)
         validate_token(token)

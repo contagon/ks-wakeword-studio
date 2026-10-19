@@ -18,12 +18,12 @@ test('real kiosk collection, keyboard labels, focus suppression and workspace is
   const a = await word(request, 'browser_a');
   const b = await word(request, 'browser_b');
   const fixtures = await (await request.get('/__test/fixtures')).json();
-  const enrolled = await request.post('/api/studio/devices', { data: { url: fixtures.leader, token: fixtures.token, role: 'leader' } });
+  const enrolled = await request.post('/api/studio/devices', { data: { url: fixtures.leader, password: fixtures.password, role: 'leader' } });
   expect(enrolled.ok()).toBeTruthy();
   const leader = await enrolled.json();
   const discovered = await (await request.post(`/api/studio/devices/${leader.id}/refresh`)).json();
   expect(discovered[0].credentials_status).toBe('credentials_required');
-  expect((await request.post(`/api/studio/devices/${discovered[0].id}/credentials`, { data: { token: fixtures.token } })).ok()).toBeTruthy();
+  expect((await request.post(`/api/studio/devices/${discovered[0].id}/credentials`, { data: { password: fixtures.password } })).ok()).toBeTruthy();
   for (const device of [leader, discovered[0]]) {
     expect((await request.put(`/api/studio/devices/${device.id}/source-mappings`, { data: { engine: 'mww', source_phrase: 'Hello robot', word_id: a.id } })).ok()).toBeTruthy();
   }

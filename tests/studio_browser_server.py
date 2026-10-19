@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from studio.datasets import DatasetService
 from studio.runtime import StudioRuntime
 from studio_harness import FixtureOnlyClient, StubGpuRunner, augmentation_fixture
-from test_studio_workflow import FixtureKiosk, TOKEN
+from test_studio_workflow import FixtureKiosk, PASSWORD
 
 
 class BrowserRuntime(StudioRuntime):
@@ -53,7 +53,7 @@ def main():
 
         @trainer_server.app.get('/__test/fixtures')
         def fixtures():
-            return {'leader': leader.url, 'follower': follower.url, 'token': TOKEN}
+            return {'leader': leader.url, 'follower': follower.url, 'password': PASSWORD}
 
         @trainer_server.app.post('/__test/drain-gpu')
         def drain_gpu():

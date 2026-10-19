@@ -77,10 +77,10 @@ class KioskClient:
         self.max_body = max_body
         self.max_upload = max_upload
 
-    def _request(self, device: Device, path: str, body: bytes) -> dict:
+    def _request(self, device: Device, path: str, body: bytes, *, login: bool = False) -> dict:
         if not device.active:
             raise RemoteRejected("Kiosk is inactive")
-        token = validate_token(self.credentials(device))
+        token = None if login else validate_token(self.credentials(device))
         parsed = urlsplit(normalize_url(device.url))
         connection = None
         response = None
@@ -91,10 +91,11 @@ class KioskClient:
             else:
                 connection = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=self.timeout)
             deadline = time.monotonic() + self.timeout
-            connection.request("POST", parsed.path + "/api/" + path, body=body,
-                               headers={"Authorization": f"Bearer {token}",
-                                        "Content-Type": "application/octet-stream" if "upload?" in path else "application/json",
-                                        "Accept": "application/json"})
+            headers = {"Content-Type": "application/octet-stream" if "upload?" in path else "application/json",
+                       "Accept": "application/json"}
+            if token is not None:
+                headers["Authorization"] = f"Bearer {token}"
+            connection.request("POST", parsed.path + "/api/" + path, body=body, headers=headers)
             response = connection.getresponse()
             # Never consume redirect/error bodies or follow their locations.
             if response.status in (401, 403):
@@ -118,6 +119,13 @@ class KioskClient:
                 if len(payload) > self.max_body:
                     raise RemoteRejected("Invalid kiosk response size")
             data = json.loads(payload)
+            if login:
+                if not isinstance(data, dict):
+                    raise RemoteRejected("Invalid kiosk login response")
+                try:
+                    return {"token": validate_token(data.get("token"))}
+                except ValidationError:
+                    raise RemoteRejected("Invalid kiosk login response") from None
             if not isinstance(data, dict) or data.get("ok") is not True:
                 raise RemoteRejected("Kiosk command failed")
             result = data.get("data")
@@ -137,6 +145,13 @@ class KioskClient:
                 response.close()
             if connection is not None:
                 connection.close()
+
+    def login(self, device: Device, password: str) -> str:
+        """Exchange a transient password; never sanitize/return other login data."""
+        if not isinstance(password, str) or not 1 <= len(password) <= 8192:
+            raise ValidationError("Invalid admin password")
+        body = json.dumps({"password": password, "ttl_days": 3650}).encode()
+        return self._request(device, "login", body, login=True)["token"]
 
     def command(self, device: Device, name: str, params: dict) -> dict:
         if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{0,100}", name):

@@ -8,7 +8,7 @@ const emit = defineEmits<{ changed: [Device[]] }>();
 const registry = useDeviceRegistry();
 const url = ref("");
 const role = ref<"leader" | "standalone">("standalone");
-const tokenInput = ref<HTMLInputElement>();
+const passwordInput = ref<HTMLInputElement>();
 const credentialInputs = new Map<string, HTMLInputElement>();
 const busy = ref("");
 const notice = ref("");
@@ -21,12 +21,12 @@ function recordInput(id: string, element: Element | ComponentPublicInstance | nu
 function parent(device: Device): string { return device.leader_id ? `Parent ${device.leader_id}` : "Direct registry target"; }
 function sync(): void { emit("changed", [...registry.devices.value]); }
 async function add(): Promise<void> {
-  const token = tokenInput.value?.value ?? "";
+  const password = passwordInput.value?.value ?? "";
   // Clear the DOM field before awaiting so a slow network request never retains a submitted secret.
-  if (tokenInput.value) tokenInput.value.value = "";
+  if (passwordInput.value) passwordInput.value.value = "";
   busy.value = "add"; error.value = ""; notice.value = "";
   try {
-    await registry.add(url.value, token, role.value);
+    await registry.add(url.value, password, role.value);
     url.value = "";
     notice.value = role.value === "leader" ? "Leader added; follower membership was refreshed." : "Standalone kiosk added.";
     sync();
@@ -41,11 +41,11 @@ async function refresh(device: Device): Promise<void> {
 }
 async function setCredentials(device: Device): Promise<void> {
   const input = credentialInputs.get(device.id);
-  const token = input?.value ?? "";
+  const password = input?.value ?? "";
   // Clear the DOM field before awaiting so a slow network request never retains a submitted secret.
   if (input) input.value = "";
   busy.value = `credentials:${device.id}`; error.value = "";
-  try { await registry.credentials(device.id, token); notice.value = "Credentials saved server-side."; sync(); }
+  try { await registry.credentials(device.id, password); notice.value = "Kiosk authenticated; token saved server-side."; sync(); }
   catch (cause) { error.value = cause instanceof Error ? cause.message : "Credentials were not saved."; }
   finally { busy.value = ""; }
 }
@@ -60,17 +60,18 @@ onBeforeUnmount(() => registry.abort());
     <p v-if="notice" class="studio-note" role="status">{{ notice }}</p><p v-if="error || registry.error.value" class="studio-note" role="alert">{{ error || registry.error.value }}</p>
     <details data-device-registration class="mt-3" :open="!registry.devices.value.length"><summary>Add device</summary>
     <form data-device-add class="studio-registration-row" @submit.prevent="add">
-      <label>Address<input v-model="url" required name="url" autocomplete="url" placeholder="http://kiosk.local:8789"></label>
+      <label>Address<input v-model="url" required name="url" autocomplete="url" placeholder="http://kiosk.local:2324"></label>
       <label>Role<select v-model="role" name="role"><option value="standalone">Standalone</option><option value="leader">Fleet leader</option></select></label>
-      <label>Admin token<input ref="tokenInput" required name="token" type="password" autocomplete="new-password"></label>
+      <label>Admin password<input ref="passwordInput" required name="password" type="password" autocomplete="off"></label>
       <button type="submit" class="studio-primary" :disabled="busy === 'add'">Add device</button>
     </form>
+    <p class="studio-muted text-xs mt-2">Use the kiosk's Remote Administration password. Studio saves only the resulting 10-year token, not your password. Submit only over a trusted connection.</p>
     </details>
     <p v-if="registry.loading.value" class="studio-muted mt-3">Loading registered devices…</p>
     <div v-else class="mt-4 grid gap-2">
       <article v-for="device in registry.devices.value" :key="device.id" class="studio-device-row" :data-device-id="device.id">
         <div><strong>{{ device.id }}</strong> <span class="studio-status" :class="device.role === 'follower' ? 'studio-status-muted' : 'studio-status-neutral'">{{ device.role === 'follower' ? 'Follower' : device.role }}</span><p class="studio-muted text-xs">{{ parent(device) }} · {{ device.active ? device.url : 'Inactive member' }}</p></div>
-        <div class="flex flex-wrap gap-2 items-center"><span class="studio-status" :class="device.credentials_status === 'ready' ? 'studio-status-neutral' : 'studio-status-warning'">{{ device.credentials_status === 'ready' ? 'Credentials ready' : 'Credentials required' }}</span><span class="studio-status" :class="device.model_eligible ? 'studio-status-neutral' : 'studio-status-warning'">{{ device.model_eligible ? 'Profile covered' : 'Not covered' }}</span><button v-if="device.role === 'leader'" type="button" :disabled="busy === `refresh:${device.id}`" @click="refresh(device)">Refresh followers</button><form v-if="device.role === 'follower' && device.credentials_status !== 'ready'" class="flex gap-2" @submit.prevent="setCredentials(device)"><input :ref="element => recordInput(device.id, element)" :name="`credentials-${device.id}`" type="password" autocomplete="new-password" aria-label="Follower admin token"><button type="submit" :disabled="busy === `credentials:${device.id}`">Save credentials</button></form></div>
+        <div class="flex flex-wrap gap-2 items-center"><span class="studio-status" :class="device.credentials_status === 'ready' ? 'studio-status-neutral' : 'studio-status-warning'">{{ device.credentials_status === 'ready' ? 'Credentials ready' : 'Credentials required' }}</span><span class="studio-status" :class="device.model_eligible ? 'studio-status-neutral' : 'studio-status-warning'">{{ device.model_eligible ? 'Profile covered' : 'Not covered' }}</span><button v-if="device.role === 'leader'" type="button" :disabled="busy === `refresh:${device.id}`" @click="refresh(device)">Refresh followers</button><form v-if="device.role === 'follower' && device.credentials_status !== 'ready'" class="flex gap-2" @submit.prevent="setCredentials(device)"><input :ref="element => recordInput(device.id, element)" :name="`credentials-${device.id}`" required type="password" autocomplete="off" aria-label="Follower admin password"><button type="submit" :disabled="busy === `credentials:${device.id}`">Authenticate</button></form></div>
       </article>
       <p v-if="!registry.devices.value.length" class="studio-muted">No kiosks registered yet.</p>
     </div>

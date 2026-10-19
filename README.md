@@ -124,15 +124,23 @@ Keep it on a trusted admin LAN or loopback, firewall the port, and use an
 authenticated HTTPS reverse proxy/VPN for other access. Never expose it directly
 to the Internet. Kiosk admin tokens authenticate the trainer *to each kiosk*, not
 users to this UI. Submit credentials only over a trusted transport (HTTPS outside
-loopback); browser request inspection can see a submitted token.
+loopback), both from your browser to Studio and from Studio to the kiosk;
+browser request inspection can see a submitted password.
 
 1. Create a workspace in **Wakewords** with a unique stable model ID. Editing its
    phrase does not rename device files or change historical versions.
-2. In **Scrape** or **Deploy**, add one leader URL and its admin Bearer token, or
+2. In **Scrape** or **Deploy**, add one leader URL and its admin password, or
    add independent standalone kiosks. Multiple fleets/leaders are not supported.
    Refresh the leader roster to discover followers. Each follower initially shows
-   **Credentials required**: enter that kiosk's own admin token. Discovery never
+   **Credentials required**: enter that kiosk's own admin password. Discovery never
    harvests/copies fleet tokens and does not make followers direct upload targets.
+   The password is set in kiosk-satellite under **Settings → Device → Remote
+   Administration**; its default admin port is **2324**. Studio exchanges the
+   password server-side at `/api/login` for a **3650-day (10-year) token**, clears
+   the password field immediately, and saves only the token—not the password.
+   Existing saved tokens continue to work without re-entering passwords. Treat
+   these tokens like passwords: changing the kiosk's admin password does **not**
+   revoke tokens already issued. Failed logins require entering the password again.
 3. Configure exact device/engine/source-phrase mappings to workspaces. Scraping is
    global, independent of the word selected in the browser. Unknown phrases stay
    unmapped until explicitly assigned. Collect twice safely: source tombstones

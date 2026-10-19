@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, Up
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 from studio.models import (CollectionRun, Conflict, CredentialsRequired, Device, IdentityMismatch, SourceMapping,
                            RemoteRejected, RemoteUnavailable, NotFound, Page, Recording, Sample, SampleQuery,
@@ -52,7 +52,7 @@ class CreateWakeword(BaseModel):
 
 class DeviceCredentials(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    token: str
+    password: SecretStr
 
 
 class AddDevice(DeviceCredentials):
@@ -357,7 +357,7 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
 
     @router.post("/devices", response_model=Device, status_code=201)
     def add_device(body: AddDevice) -> Device:
-        return runtime.devices.add(body.url, body.token, body.role)
+        return runtime.devices.add_with_password(body.url, body.password.get_secret_value(), body.role)
 
     @router.post("/devices/{device_id}/refresh", response_model=list[Device])
     def refresh_devices(device_id: str) -> list[Device]:
@@ -365,7 +365,7 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
 
     @router.post("/devices/{device_id}/credentials", response_model=Device)
     def device_credentials(device_id: str, body: DeviceCredentials) -> Device:
-        return runtime.devices.set_credentials(device_id, body.token)
+        return runtime.devices.set_password(device_id, body.password.get_secret_value())
 
     @router.post("/wakewords", response_model=Wakeword, status_code=201)
     def create_word(body: CreateWakeword) -> Wakeword:

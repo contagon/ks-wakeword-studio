@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from kiosk_fixture import KioskServer, TOKEN
+from kiosk_fixture import KioskServer, PASSWORD, TOKEN
 from studio.api import create_router
 from studio.db import Store
 from studio.devices import DeviceService
@@ -172,15 +172,15 @@ class DeviceTests(unittest.TestCase):
         with TestClient(app) as client:
             path = f"/api/studio/devices/{device.id}/credentials"
             self.server.identity["data"]["id"] = "different-kiosk"
-            response = client.post(path, json={"token": TOKEN})
+            response = client.post(path, json={"password": PASSWORD})
             self.assertEqual(response.status_code, 409)
             self.assertEqual(self.service.get(device.id).credentials_status, "credentials_required")
             self.server.identity["data"]["id"] = device.id
-            response = client.post(path, json={"token": "invalid-private-admin-token"})
+            response = client.post(path, json={"password": "invalid-private-admin-token"})
             self.assertEqual(response.status_code, 403)
             self.assertNotIn("invalid-private-admin-token", response.text)
             self.assertEqual(self.service.get(device.id).credentials_status, "credentials_required")
-            response = client.post(path, json={"token": TOKEN})
+            response = client.post(path, json={"password": PASSWORD})
             self.assertEqual(response.status_code, 200)
             self.assertFalse(response.json()["active"])
             self.assertEqual(response.json()["role"], "follower")
@@ -257,7 +257,7 @@ class DeviceTests(unittest.TestCase):
         app = FastAPI()
         app.include_router(create_router(runtime))
         with TestClient(app) as client:
-            response = client.post("/api/studio/devices", json={"url": self.server.url, "token": TOKEN, "role": "leader"})
+            response = client.post("/api/studio/devices", json={"url": self.server.url, "password": PASSWORD, "role": "leader"})
             self.assertEqual(response.status_code, 201)
             device_id = response.json()["id"]
             self.assertEqual(client.post(f"/api/studio/devices/{device_id}/refresh").status_code, 200)
@@ -265,12 +265,12 @@ class DeviceTests(unittest.TestCase):
             self.assertEqual(len(listing.json()), 3)
             self.assertNotIn("token", listing.text)
             self.assertNotIn(TOKEN, response.text + listing.text)
-            updated = client.post(f"/api/studio/devices/{device_id}/credentials", json={"token": TOKEN})
+            updated = client.post(f"/api/studio/devices/{device_id}/credentials", json={"password": PASSWORD})
             self.assertEqual(updated.status_code, 200)
-            bad = client.post("/api/studio/devices", json={"url": self.server.url, "token": {"secret": TOKEN}, "role": "leader"})
+            bad = client.post("/api/studio/devices", json={"url": self.server.url, "password": {"secret": TOKEN}, "role": "leader"})
             self.assertEqual(bad.status_code, 422)
             self.assertNotIn(TOKEN, bad.text)
             self.server.responses["/kiosk/api/commands/fleetIdentity"] = {"ok": False, "error": TOKEN}
-            failed = client.post(f"/api/studio/devices/{device_id}/credentials", json={"token": TOKEN})
+            failed = client.post(f"/api/studio/devices/{device_id}/credentials", json={"password": PASSWORD})
             self.assertEqual(failed.status_code, 502)
             self.assertNotIn(TOKEN, failed.text)

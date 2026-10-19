@@ -40,10 +40,10 @@ class FixtureOnlyClient(KioskClient):
         super().__init__(credentials)
         self.urls = frozenset(urls)
 
-    def _request(self, device, path, body):
+    def _request(self, device, path, body, **kwargs):
         if device.url not in self.urls:
             raise RemoteRejected('Test harness only permits its loopback fixtures')
-        return super()._request(device, path, body)
+        return super()._request(device, path, body, **kwargs)
 
 
 class StubGpuRunner:
