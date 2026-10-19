@@ -68,25 +68,39 @@ class DeviceService:
 
     def _token(self, device: Device) -> str:
         with self.store.transaction() as db:
-            row = db.execute("SELECT credential_ref, active FROM devices WHERE id = ?", (device.id,)).fetchone()
+            row = db.execute("SELECT credential_ref, active, removed FROM devices WHERE id = ?", (device.id,)).fetchone()
         if row is None:
             raise CredentialsRequired("Kiosk admin credentials required")
         # A caller may still hold a pre-refresh Device snapshot. Consult current
         # registry activity before using retained credentials for any request.
-        if not row["active"]:
+        if not row["active"] or row["removed"]:
             raise RemoteRejected("Kiosk is inactive")
         return self.credentials.get(row[0])
 
     def get(self, device_id: str) -> Device:
         with self.store.transaction() as db:
-            row = db.execute("SELECT * FROM devices WHERE id = ?", (device_id,)).fetchone()
+            row = db.execute("SELECT * FROM devices WHERE id = ? AND removed=0", (device_id,)).fetchone()
         if row is None:
             raise NotFound("Device not found")
         return self._device(row)
 
     def list(self) -> list[Device]:
         with self.store.transaction() as db:
-            return [self._device(row) for row in db.execute("SELECT * FROM devices ORDER BY rowid")]
+            return [self._device(row) for row in db.execute("SELECT * FROM devices WHERE removed=0 ORDER BY rowid")]
+
+    def update_address(self, device_id: str, url: str) -> Device:
+        url = normalize_url(url)
+        self.get(device_id)
+        with self.store.transaction() as db:
+            db.execute("UPDATE devices SET url=?, url_override=? WHERE id=? AND removed=0", (url, url, device_id))
+        return self.get(device_id)
+
+    def remove(self, device_id: str) -> None:
+        device = self.get(device_id)
+        with self.store.transaction() as db:
+            db.execute("UPDATE devices SET removed=1, active=0 WHERE id=?", (device_id,))
+            if device.role == 'leader':
+                db.execute("UPDATE devices SET removed=1, active=0 WHERE leader_id=? AND role='follower'", (device_id,))
 
     def add_with_password(self, url: str, password: str, role: Literal["standalone", "leader"]) -> Device:
         url = normalize_url(url)
@@ -123,8 +137,9 @@ class DeviceService:
                     db.execute("INSERT INTO devices (id,url,role,credential_ref,model_eligible) VALUES (?,?,?,?,?)",
                                (identity.id, url, role, ref, role != "follower"))
                 else:
-                    db.execute("UPDATE devices SET url=?, role=?, credential_ref=?, model_eligible=? WHERE id=?",
-                               (url, role, ref, bool(existing["model_eligible"]) if role == "follower" else True, identity.id))
+                    db.execute("UPDATE devices SET url=?, url_override=?, role=?, credential_ref=?, model_eligible=?, removed=0, active=? WHERE id=?",
+                               (url, url, role, ref, bool(existing["model_eligible"]) if role == "follower" else True,
+                                True if existing['removed'] else existing['active'], identity.id))
         except sqlite3.IntegrityError:
             raise Conflict("Only one configured fleet leader is supported") from None
         return self.get(identity.id)
@@ -194,7 +209,7 @@ class DeviceService:
             for device_id, url, profile_id, eligible, active in rows:
                 db.execute("""INSERT INTO devices (id,url,role,leader_id,profile_id,model_eligible,active)
                               VALUES (?,?,'follower',?,?,?,?) ON CONFLICT(id) DO UPDATE SET
-                              url=excluded.url, role='follower', active=excluded.active, leader_id=excluded.leader_id,
+                               url=COALESCE(devices.url_override,excluded.url), removed=0, role='follower', active=excluded.active, leader_id=excluded.leader_id,
                               profile_id=excluded.profile_id, model_eligible=excluded.model_eligible""",
                            (device_id, url, leader_id, profile_id, eligible, active))
         return [self.get(row[0]) for row in rows]

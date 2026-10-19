@@ -13,11 +13,73 @@ from kiosk_fixture import KioskServer, PASSWORD, TOKEN
 from studio.api import create_router
 from studio.db import Store
 from studio.devices import DeviceService
-from studio.models import Conflict, CredentialsRequired, IdentityMismatch, RemoteRejected
+from studio.models import Conflict, CredentialsRequired, IdentityMismatch, RemoteRejected, NotFound, ValidationError
 from studio.runtime import StudioRuntime
 
 
 class DeviceTests(unittest.TestCase):
+    def test_address_edit_is_local_preserves_roles_and_survives_refresh(self):
+        leader = self.service.add(self.server.url, TOKEN, 'leader')
+        self.service.refresh_fleet(leader.id)
+        self.server.identity['data'].update(id='standalone', leader=False)
+        standalone = self.service.add(self.server.url, TOKEN, 'standalone')
+        before = len(self.server.requests)
+        for identity in (leader.id, standalone.id, 'kiosk-follower'):
+            original = self.service.get(identity)
+            changed = self.service.update_address(identity, 'http://10.8.0.42:2324/')
+            self.assertEqual(changed.url, 'http://10.8.0.42:2324')
+            self.assertEqual((changed.role, changed.credentials_status, changed.active),
+                             (original.role, original.credentials_status, original.active))
+        self.assertEqual(len(self.server.requests), before)
+        self.service.update_address(leader.id, self.server.url)
+        self.server.identity['data'].update(id=leader.id, leader=True)
+        self.service.refresh_fleet(leader.id)
+        self.service.refresh_fleet(leader.id)
+        self.assertEqual(self.service.get('kiosk-follower').url, 'http://10.8.0.42:2324')
+        with self.assertRaises(ValidationError):
+            self.service.update_address(leader.id, 'file:///etc/passwd')
+        with self.assertRaises(NotFound):
+            self.service.update_address('missing', self.server.url)
+
+    def test_removal_keeps_history_rejects_stale_credentials_and_allows_rediscovery(self):
+        leader = self.service.add(self.server.url, TOKEN, 'leader')
+        followers = self.service.refresh_fleet(leader.id)
+        with self.store.transaction() as db:
+            db.execute("INSERT INTO collection_runs VALUES ('run','now',NULL,'running')")
+            db.execute("INSERT INTO collection_devices VALUES ('run',?,'complete','{}')", (followers[0].id,))
+        self.service.remove(followers[0].id)
+        with self.assertRaises(NotFound):
+            self.service.get(followers[0].id)
+        self.service.refresh_fleet(leader.id)
+        self.assertTrue(self.service.get(followers[0].id).active)
+        before = len(self.server.requests)
+        self.service.remove(leader.id)
+        self.assertEqual(self.service.list(), [])
+        self.assertEqual(self.service.publication_targets(), [])
+        with self.assertRaises(RemoteRejected):
+            self.service.client.diagnostics(leader)
+        self.assertEqual(len(self.server.requests), before)
+        with self.store.transaction() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM collection_devices').fetchone()[0], 1)
+            self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(), [])
+        # A new leader can be registered without deleting the removed leader's history.
+        self.server.identity['data']['id'] = 'new-leader'
+        self.server.fleet['data']['self']['id'] = 'new-leader'
+        self.assertEqual(self.service.add(self.server.url, TOKEN, 'leader').id, 'new-leader')
+
+    def test_address_and_removal_routes_are_strict_and_sanitized(self):
+        device = self.service.add(self.server.url, TOKEN, 'leader')
+        runtime = StudioRuntime(self.root)
+        self.addCleanup(runtime.shutdown)
+        app = FastAPI()
+        app.include_router(create_router(runtime))
+        with TestClient(app) as client:
+            path = f'/api/studio/devices/{device.id}'
+            self.assertEqual(client.patch(path, json={'url': 'http://10.8.0.9:2324'}).status_code, 200)
+            self.assertEqual(client.patch(path, json={'url': 'http://host', 'role': 'standalone'}).status_code, 422)
+            self.assertEqual(client.delete(path).status_code, 204)
+            self.assertEqual(client.patch(path, json={'url': self.server.url}).status_code, 404)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

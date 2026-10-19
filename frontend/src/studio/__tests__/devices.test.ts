@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import DeviceRegistry from "../components/DeviceRegistry.vue";
 import type { Device } from "../types";
+import { useDeviceRegistry } from '../devices';
 
 const leader: Device = { id: "leader", url: "http://leader", role: "leader", active: true, leader_id: null, credentials_status: "ready", profile_id: null, model_eligible: true };
 const follower: Device = { id: "follower", url: "http://follower", role: "follower", active: true, leader_id: "leader", credentials_status: "credentials_required", profile_id: "voice", model_eligible: true };
@@ -9,7 +10,7 @@ let devices: Device[];
 let resolveCredentials: ((response: Response) => void) | undefined;
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 
-beforeEach(() => {
+beforeEach(async () => {
   devices = [];
   resolveCredentials = undefined;
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -18,12 +19,56 @@ beforeEach(() => {
     if (path === "/api/studio/devices" && init?.method === "POST") { devices = [leader, follower]; return response(leader, 201); }
     if (path.endsWith("/refresh")) return response([follower]);
     if (path.endsWith("/credentials")) return new Promise<Response>(resolve => { resolveCredentials = resolve; });
+    if (init?.method === 'PATCH') { const id = path.split('/').at(-1); devices = devices.map(d => d.id === id ? { ...d, ...JSON.parse(String(init.body)) } : d); return response(devices.find(d => d.id === id)); }
+    if (init?.method === 'DELETE') { const id = path.split('/').at(-1); devices = devices.filter(d => d.id !== id && d.leader_id !== id); return new Response(null, { status: 204 }); }
     return response({});
   }));
+  await useDeviceRegistry().load(true);
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("shared fleet registry", () => {
+  it('edits follower addresses, cancels edits, and confirms local removal', async () => {
+    devices = [leader, follower];
+    const ui = mount(DeviceRegistry, { props: { surface: 'kiosks' } });
+    await flushPromises();
+    await ui.get('button[data-action="refresh-registry"]').trigger('click'); await flushPromises();
+    const row = () => ui.get('[data-device-id="follower"]');
+    await row().get('[data-action="edit-device"]').trigger('click');
+    expect(row().text()).toContain('retained when followers refresh');
+    await row().get('input[name="device-url"]').setValue('http://10.8.0.9:2324');
+    await row().get('form[data-device-edit]').trigger('submit'); await flushPromises();
+    expect(row().text()).toContain('http://10.8.0.9:2324');
+    await row().get('[data-action="edit-device"]').trigger('click');
+    await row().get('input[name="device-url"]').setValue('http://discard');
+    await row().get('[data-action="cancel-device-edit"]').trigger('click');
+    expect(row().text()).not.toContain('http://discard');
+    await row().get('[data-action="delete-device"]').trigger('click');
+    expect(ui.get('[role="alertdialog"]').text()).toContain('rediscovered');
+    await ui.get('[data-action="cancel-device-delete"]').trigger('click');
+    expect(ui.find('[data-device-id="follower"]').exists()).toBe(true);
+    await row().get('[data-action="delete-device"]').trigger('click');
+    await ui.get('[data-action="confirm-device-delete"]').trigger('click'); await flushPromises();
+    expect(ui.find('[data-device-id="follower"]').exists()).toBe(false);
+    expect(ui.find('[data-device-id="leader"]').exists()).toBe(true);
+    ui.unmount();
+  });
+
+  it('retains an edit and reports rejected saves without showing upstream secrets', async () => {
+    devices = [leader];
+    const ui = mount(DeviceRegistry, { props: { surface: 'kiosks' } }); await flushPromises();
+    await ui.get('[data-action="refresh-registry"]').trigger('click'); await flushPromises();
+    await ui.get('[data-action="edit-device"]').trigger('click');
+    await ui.get('input[name="device-url"]').setValue('http://new-address');
+    vi.mocked(fetch).mockResolvedValueOnce(response({ detail: 'upstream-secret' }, 422));
+    await ui.get('form[data-device-edit]').trigger('submit'); await flushPromises();
+    expect(ui.find('form[data-device-edit]').exists()).toBe(true);
+    expect(ui.get('[role="alert"]').text()).toContain('Invalid studio request');
+    expect(ui.text()).not.toContain('upstream-secret');
+    await ui.get('[data-action="delete-device"]').trigger('click');
+    expect(ui.get('[role="alertdialog"]').text()).toContain('discovered followers');
+    ui.unmount();
+  });
   it("opens registration for an empty fleet and collapses it once configured", async () => {
     const ui = mount(DeviceRegistry, { props: { surface: "scrape" } });
     await flushPromises();
@@ -61,6 +106,7 @@ describe("shared fleet registry", () => {
 
   it.each([200, 403])("clears a follower password while pending and after status %s", async status => {
     devices = [leader, follower];
+    await useDeviceRegistry().load(true);
     const ui = mount(DeviceRegistry, { props: { surface: "scrape" } });
     await flushPromises();
     const credential = ui.get('input[name="credentials-follower"]');

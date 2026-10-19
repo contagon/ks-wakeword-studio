@@ -63,6 +63,11 @@ class AddDevice(DeviceCredentials):
     role: str
 
 
+class UpdateDevice(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    url: str
+
+
 class UpdateWakeword(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     phrase: str | None = None
@@ -404,6 +409,15 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.post("/devices", response_model=Device, status_code=201)
     def add_device(body: AddDevice) -> Device:
         return runtime.devices.add_with_password(body.url, body.password.get_secret_value(), body.role)
+
+    @router.patch('/devices/{device_id}', response_model=Device)
+    def update_device(device_id: str, body: UpdateDevice) -> Device:
+        return runtime.devices.update_address(device_id, body.url)
+
+    @router.delete('/devices/{device_id}', status_code=204)
+    def remove_device(device_id: str) -> Response:
+        runtime.devices.remove(device_id)
+        return Response(status_code=204)
 
     @router.post("/devices/{device_id}/refresh", response_model=list[Device])
     def refresh_devices(device_id: str) -> list[Device]:

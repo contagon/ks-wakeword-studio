@@ -54,6 +54,14 @@ export function useDeviceRegistry() {
     replace(device);
     return device;
   }
+  async function update(id: string, url: string): Promise<void> {
+    replace(await studioApi.updateDevice(id, url));
+    await load(true);
+  }
+  async function remove(id: string): Promise<void> {
+    await studioApi.deleteDevice(id);
+    await load(true);
+  }
   function abort(): void { request?.abort(); }
-  return { devices: readonly(deviceItems), loading: readonly(loading), error: readonly(error), load, add, refresh, credentials, abort };
+  return { devices: readonly(deviceItems), loading: readonly(loading), error: readonly(error), load, add, refresh, credentials, update, remove, abort };
 }

@@ -69,6 +69,8 @@ export const studioApi = {
   audioUrl: (word: string, id: string, original = false) => `${base}${samplePath(word, id)}/audio${query({ original })}`,
   devices: (signal?: AbortSignal) => get<Device[]>("/devices", undefined, signal),
   addDevice: (url: string, password: string, role: "standalone" | "leader", signal?: AbortSignal) => post<Device>("/devices", { url, password, role }, signal),
+  updateDevice: (id: string, url: string, signal?: AbortSignal) => request<Device>(`/devices/${segment(id)}`, 'PATCH', { url }, signal),
+  deleteDevice: (id: string, signal?: AbortSignal) => request<void>(`/devices/${segment(id)}`, 'DELETE', undefined, signal),
   refreshDevices: (id: string, signal?: AbortSignal) => post<Device[]>(`/devices/${segment(id)}/refresh`, undefined, signal),
   setCredentials: (id: string, password: string, signal?: AbortSignal) => post<Device>(`/devices/${segment(id)}/credentials`, { password }, signal),
   sourceMappings: (id: string, signal?: AbortSignal) => get<SourceMapping[]>(`/devices/${segment(id)}/source-mappings`, undefined, signal),

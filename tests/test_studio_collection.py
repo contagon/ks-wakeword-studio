@@ -384,10 +384,14 @@ class CollectionTests(unittest.TestCase):
                           'studio_schedule_occurrences', 'studio_schedules', 'studio_jobs',
                           'collection_attempts', 'collection_devices', 'collection_runs', 'source_mappings'):
                 db.execute('DROP TABLE ' + table)
+            db.execute('DROP INDEX one_studio_leader')
+            db.execute('ALTER TABLE devices DROP COLUMN url_override')
+            db.execute('ALTER TABLE devices DROP COLUMN removed')
+            db.execute("CREATE UNIQUE INDEX one_studio_leader ON devices(role) WHERE role='leader'")
             db.execute('PRAGMA user_version=3')
         self.store = Store.open(self.root)
         self.assertEqual(WorkspaceService(self.store).get(self.word.id).phrase, 'Hello')
         self.assertEqual(DeviceService(self.store).get('a').id, 'a')
         with self.store.transaction() as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 13)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 14)
             self.assertEqual(db.execute('SELECT id FROM recordings').fetchone()[0], recording.id)
