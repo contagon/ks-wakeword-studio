@@ -130,8 +130,11 @@ class SampleService:
         return audio_id
 
     def ingest(self, device_id: str, clip: DiagnosticClip, audio: BinaryIO, word_id: str | None) -> Recording:
+        from studio.workspace_deletion import source_deleted
         device_id = WorkspaceService._text(device_id, 200)
         clip_id = WorkspaceService._text(clip.id, 200)
+        if source_deleted(self.store, device_id, clip_id):
+            raise Conflict('Source recording was permanently deleted')
         if not isinstance(clip.phrase, str) or len(clip.phrase) > 200 or not isinstance(clip.engine, str) or len(clip.engine) > 100:
             raise ValidationError("Invalid diagnostic metadata")
         if type(clip.near_miss) is not bool or not isinstance(clip.scores, dict) or not isinstance(clip.metadata, dict):
@@ -149,8 +152,11 @@ class SampleService:
         timestamp = self._date(clip.timestamp)
         if word_id is not None:
             WorkspaceService(self.store).get(word_id)
-        original, normalized = self._prepare(audio)
         with self.store.transaction() as db:
+            if source_deleted(self.store, device_id, clip_id, db):
+                raise Conflict('Source recording was permanently deleted')
+            # Serialize durable blob publication plus reference admission with GC.
+            original, normalized = self._prepare(audio)
             existing = db.execute(RECORDING_SELECT + " WHERE r.device_id=? AND r.clip_id=?", (device_id, clip_id)).fetchone()
             if existing:
                 if existing["original_hash"] != original:
@@ -194,9 +200,9 @@ class SampleService:
     def import_audio(self, word_id: str, label: str, audio: BinaryIO) -> Sample:
         self._label(label)
         WorkspaceService(self.store).get(word_id)
-        original, normalized = self._prepare(audio)
         with self.store.transaction() as db:
             self._word(db, word_id)
+            original, normalized = self._prepare(audio)
             return self._new_sample(db, word_id, None, self._audio(db, original, normalized), label, "import")
 
     @staticmethod

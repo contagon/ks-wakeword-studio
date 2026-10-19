@@ -27,7 +27,7 @@ beforeEach(() => {
     const u = new URL(path, "http://localhost");
     if (u.pathname === "/api/studio/wakewords") {
       if (init?.method === "POST") {
-        const word = { ...words[0], ...JSON.parse(String(init.body)), id: "c" };
+        const word = { ...words[0], ...JSON.parse(String(init.body)), id: "c", model_id: "server_generated" };
         records.push(word);
         return json(word, 201);
       }
@@ -35,7 +35,7 @@ beforeEach(() => {
     }
     if (u.pathname === "/api/studio/schedules") return json([{ scope: "train:a", cron: "0 2 * * *", timezone: "UTC", enabled: true, next_run_at: "2026-01-02T02:00:00Z" }]);
     if (u.pathname.endsWith("/training/counts")) return json({ positive: 0, negative: 0, artificial: 0 });
-    if (u.pathname.endsWith("/training/settings")) return json({ training_steps: 40000, train_openwakeword: false });
+    if (u.pathname.endsWith("/training/settings")) return json({ training_steps: 40000 });
     if (u.pathname.endsWith("/training/runs")) return json(page([]));
     if (u.pathname === "/api/studio/generation/catalog") return json([]);
     if (u.pathname.endsWith("/generation/recipe")) return json({ language: "en", english_accent: "mixed", tts_mode: "hybrid", samples: 1, batch_size: 1 });
@@ -45,6 +45,7 @@ beforeEach(() => {
     if (u.pathname.endsWith("/queue")) return json(page([], id === "a" ? 7 : 2));
     if (u.pathname.endsWith("/models")) return json(page([]));
     const word = records.find(w => w.id === id);
+    if (init?.method === "DELETE" && word) { records = records.filter(w => w.id !== id); return new Response(null, { status: 204 }); }
     if (init?.method === "PATCH" && word) Object.assign(word, JSON.parse(String(init.body)));
     return word ? json(word) : json({ detail: "Studio record not found" }, 404);
   }));
@@ -133,22 +134,62 @@ describe("compact studio workspace", () => {
   });
   it("edits phrase/language without sending or changing stable model identity", async () => {
     const ui = await open();
-    expect(ui.get('[data-form="edit"] input[name="model_id"]').attributes('readonly')).toBeDefined();
+    expect(ui.find('input[name="model_id"]').exists()).toBe(false);
     await ui.get('[data-form="edit"] input[name="phrase"]').setValue('Hello Cedar');
     await ui.get('[data-form="edit"]').trigger('submit'); await flushPromises();
     const patch = requests.find(r => r.init?.method === 'PATCH');
     expect(JSON.parse(String(patch?.init?.body))).toEqual({ phrase: 'Hello Cedar', language: 'en' });
     expect(ui.text()).toContain('Hello Cedar');
-    expect((ui.get('[data-form="edit"] input[name="model_id"]').element as HTMLInputElement).value).toBe('cedar');
+    expect(records[0].model_id).toBe('cedar');
   });
   it("creates a real workspace and selects the server's immutable identity", async () => {
     const ui = await open();
     await ui.get('[data-form="create"] input[name="phrase"]').setValue('Hi Birch');
-    await ui.get('[data-form="create"] input[name="model_id"]').setValue('birch');
     await ui.get('[data-form="create"]').trigger('submit'); await flushPromises();
-    expect(records[2].model_id).toBe('birch');
+    expect(records[2].model_id).toBe('server_generated');
+    expect(JSON.parse(String(requests.find(r => r.init?.method === 'POST')?.init?.body))).toEqual({ phrase: 'Hi Birch', language: 'en' });
     expect((ui.get('#studio-word').element as HTMLSelectElement).value).toBe('c');
     expect(location.hash).toBe('#/wakewords?word=c');
+  });
+  it("initializes edit fields when returning to an already selected workspace", async () => {
+    const ui = await open();
+    await ui.get('[data-page="samples"]').trigger('click'); await flushPromises();
+    await ui.get('[data-page="wakewords"]').trigger('click'); await flushPromises();
+    expect((ui.get('[data-form="edit"] input[name="phrase"]').element as HTMLInputElement).value).toBe('Hey Cedar');
+    expect((ui.get('[data-form="edit"] input[name="language"]').element as HTMLInputElement).value).toBe('en');
+  });
+  it("requires confirmation before permanent deletion and selects a surviving workspace", async () => {
+    const ui = await open();
+    await ui.get('[data-action="delete-workspace"]').trigger('click'); await flushPromises();
+    expect(ui.get('[role="alertdialog"]').text()).toContain('permanently');
+    expect(ui.text()).toContain('Deployed kiosk files and shared datasets are not deleted');
+    expect(requests.some(r => r.init?.method === 'DELETE')).toBe(false);
+    await ui.get('[data-action="cancel-delete"]').trigger('click');
+    expect(ui.find('[role="alertdialog"]').exists()).toBe(false);
+    await ui.get('[data-action="delete-workspace"]').trigger('click');
+    await ui.get('[data-action="confirm-delete"]').trigger('click'); await flushPromises();
+    expect(requests.find(r => r.init?.method === 'DELETE')?.path).toBe('/api/studio/wakewords/a');
+    expect((ui.get('#studio-word').element as HTMLSelectElement).value).toBe('b');
+    expect(ui.text()).not.toContain('Hey Cedar');
+  });
+  it("keeps the workspace and shows actionable errors when active jobs block deletion", async () => {
+    intercept = (path, init) => init?.method === 'DELETE' ? Promise.resolve(json({ detail: 'Studio record conflict' }, 409)) : undefined;
+    const ui = await open();
+    await ui.get('[data-action="delete-workspace"]').trigger('click');
+    await ui.get('[data-action="confirm-delete"]').trigger('click'); await flushPromises();
+    expect(ui.text()).toContain('Cancel queued or active jobs');
+    expect(records).toHaveLength(2);
+    expect((ui.get('#studio-word').element as HTMLSelectElement).value).toBe('a');
+  });
+  it("clears selection and overview after deleting the last workspace", async () => {
+    records = [records[0]];
+    const ui = await open();
+    await ui.get('[data-action="delete-workspace"]').trigger('click');
+    await ui.get('[data-action="confirm-delete"]').trigger('click'); await flushPromises();
+    expect(ui.text()).toContain('No wakewords yet');
+    expect(ui.text()).not.toContain('7 pending');
+    expect(ui.find('[data-form="edit"]').exists()).toBe(false);
+    expect(location.hash).toBe('#/wakewords');
   });
   it("keeps wide-screen navigation always visible without a menu toggle", async () => {
     mediaQuery(false);

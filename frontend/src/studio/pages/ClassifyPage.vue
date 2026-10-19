@@ -24,6 +24,7 @@ const error = ref("");
 const notice = ref("");
 const hasGesture = ref(false);
 const autoplayNext = ref(false);
+const readySampleId = ref<string | null>(null);
 const discardOpen = ref(false);
 const kind = ref("");
 const player = ref<InstanceType<typeof AudioPlayer>>();
@@ -137,6 +138,7 @@ function shortcut(event: KeyboardEvent): void {
 }
 watch(workspace.selectedId, () => { void load(); }, { immediate: true });
 watch(kind, () => { void load(); });
+watch(() => active.value?.id, () => { readySampleId.value = null; }, { flush: "sync" });
 onMounted(() => document.addEventListener("keydown", shortcut));
 onBeforeUnmount(() => { document.removeEventListener("keydown", shortcut); request?.abort(); mutation?.abort(); invalidateAssignment(); player.value?.stop(); });
 </script>
@@ -144,12 +146,13 @@ onBeforeUnmount(() => { document.removeEventListener("keydown", shortcut); reque
 <template>
   <section>
     <div class="flex flex-wrap items-center justify-between gap-3 mb-4"><div><h1>Classify</h1><p class="studio-muted">Rapid review stays pending until the server acknowledges each label.</p></div><span data-progress class="studio-muted">{{ total }} pending · {{ reviewed }} reviewed · {{ skipped.size }} skipped</span></div>
-    <div class="studio-card flex flex-wrap gap-3 mb-4"><label>Recording type<select name="kind" v-model="kind"><option value="">All pending</option><option value="true">Near misses</option><option value="false">Activations</option></select></label><span class="studio-muted text-xs">Press Space once to enable playback; then acknowledged labels play the next clip.</span></div>
+    <div class="studio-card studio-toolbar mb-4"><label>Recording type<select name="kind" v-model="kind"><option value="">All pending</option><option value="true">Near misses</option><option value="false">Activations</option></select></label></div>
     <p v-if="notice" class="studio-note" role="status" aria-live="polite">{{ notice }}</p><p v-if="error" data-classify-error class="studio-note" role="alert" aria-live="assertive">{{ error }}</p>
     <div v-if="loading" class="studio-card" aria-busy="true">Loading review queue…</div>
     <div v-else-if="active" data-classify-current :data-sample-id="active.id" class="studio-card grid gap-4">
       <div class="flex flex-wrap justify-between gap-3"><div><h2>Recording {{ active.recording?.clip_id ?? active.id }}</h2><p class="studio-muted text-sm">{{ active.recording?.device_id ?? active.source }} · {{ active.recording?.near_miss ? "Near miss" : "Activation" }} · {{ active.recording?.timestamp ?? active.created_at }}</p></div><span class="studio-muted">Revision {{ active.revision }}</span></div>
-      <AudioPlayer ref="player" :sample-id="active.id" :src="source" :autoplay-requested="autoplayNext" @ready="autoplayNext = false" @playback-error="error = $event" />
+      <AudioPlayer ref="player" :sample-id="active.id" :src="source" :autoplay-requested="autoplayNext" @ready="autoplayNext = false; readySampleId = active.id" @playback-error="error = $event" />
+      <p v-if="readySampleId === active.id" class="studio-muted text-xs">Press Space once to enable playback; then acknowledged labels play the next clip.</p>
       <div class="flex flex-wrap gap-2"><button type="button" class="studio-primary" :disabled="saving" @click="label('positive')">Positive (P)</button><button type="button" :disabled="saving" @click="label('negative')">Negative (N)</button><button type="button" :disabled="saving" @click="skip">Skip (S)</button><button type="button" :disabled="saving" data-action="discard" @click="discardOpen = true">Discard (D)</button><button type="button" :disabled="saving || !persistedUndo.length" @click="undo">Undo (Z)</button></div>
       <p data-shortcuts class="studio-muted text-xs">P positive · N negative · Space play/pause · R replay · S skip for this session · Z undo.</p><input name="search" type="search" aria-label="Queue search" placeholder="Shortcuts pause while editing">
     </div><div v-else class="studio-card"><span v-if="total === 0">No pending recordings for this workspace.</span><span v-else>Pending recordings are skipped for this session or the local window needs reloading.</span><button v-if="total > 0" type="button" @click="refill">Retry pending window</button></div>

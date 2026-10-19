@@ -88,7 +88,7 @@ test('200-entry real catalog pagination, search, selection and server error', as
   // Exercise a genuine FastAPI validation response, not a mocked UI endpoint.
   await page.locator('[data-page="wakewords"]').click();
   await page.locator('[data-form="create"] input[name="phrase"]').fill('Duplicate');
-  await page.locator('[data-form="create"] input[name="model_id"]').fill('catalog_a');
+  await page.locator('[data-form="create"] input[name="language"]').fill('x'.repeat(36));
   await page.locator('[data-form="create"] button').click();
   await expect(page.locator('[role="alert"]')).toBeVisible();
 });
@@ -119,16 +119,16 @@ test('browser generates and selects a batch, queues real training and downloads 
   await page.goto(`/#/artificial?word=${a.id}`);
   await page.locator('[name="samples"]').fill('3');
   await page.locator('[name="batch-size"]').fill('1');
-  await page.locator('[name="tts-mode"]').selectOption('modern');
+  await expect(page.locator('[data-engine="qwen3"]')).toBeChecked();
   const generated = page.waitForResponse(response => response.url().endsWith('/generation/jobs') && response.request().method() === 'POST');
-  await page.getByRole('button', { name: 'Generate batch' }).click();
+  await page.getByRole('button', { name: 'Generate dataset' }).click();
   expect((await generated).ok()).toBeTruthy();
   expect((await (await request.post('/__test/drain-gpu')).json()).ran).toBe(true);
   await page.reload();
   await expect(page.locator('[data-batch-id]')).toBeEnabled();
   await page.locator('[data-batch-id]').check();
   const selected = page.waitForResponse(response => response.url().endsWith('/generation/batches') && response.request().method() === 'PUT');
-  await page.getByRole('button', { name: 'Save batch selection' }).click();
+  await page.locator('[data-action="save-batches"]').click();
   expect((await selected).ok()).toBeTruthy();
   await page.locator('[data-page="train"]').click();
   await expect(page.getByText('3 selected artificial', { exact: true })).toBeVisible();
@@ -146,4 +146,89 @@ test('browser generates and selects a batch, queues real training and downloads 
   expect(archive.ok()).toBeTruthy();
   expect(archive.headers()['content-type']).toBe('application/zip');
   expect((await archive.body()).subarray(0, 2).toString()).toBe('PK');
+});
+
+test('single-model preview plays isolated audio without creating a dataset', async ({ page, request }) => {
+  const a = await word(request, 'browser_preview');
+  await page.goto(`/#/artificial?word=${a.id}`);
+  await expect(page.locator('[data-preview="qwen3"]')).toBeEnabled();
+  const queued = page.waitForResponse(response => response.url().endsWith('/generation/previews') && response.request().method() === 'POST');
+  await page.locator('[data-preview="qwen3"]').click();
+  const preview = await (await queued).json();
+  expect(preview.payload.recipe.engines).toEqual(['qwen3']);
+  expect((await (await request.post('/__test/drain-gpu')).json()).ran).toBe(true);
+  const audio = page.locator('[data-preview-audio="qwen3"]');
+  await expect(audio).toBeVisible();
+  await expect.poll(async () => audio.evaluate((element: HTMLAudioElement) => element.readyState)).toBeGreaterThanOrEqual(2);
+  await expect.poll(async () => audio.evaluate((element: HTMLAudioElement) => element.currentTime)).toBeGreaterThan(0);
+  expect((await (await request.get(`/api/studio/wakewords/${a.id}/generation/batches`)).json()).total).toBe(0);
+  expect((await request.get(`/api/studio/wakewords/${a.id}/generation/recipe`)).status()).toBe(404);
+});
+
+test('all pages have compact controls and no narrow-screen overflow', async ({ page, request }) => {
+  const words = (await (await request.get('/api/studio/wakewords')).json()).items;
+  const trained = words.find((item: { phrase: string }) => item.phrase === 'browser_training');
+  const reviewed = words.find((item: { phrase: string }) => item.phrase === 'browser_a');
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const route of ['wakewords', 'negative-datasets', 'artificial', 'scrape', 'classify', 'samples', 'train', 'deploy']) {
+      const selected = ['samples', 'classify'].includes(route) ? reviewed : trained;
+      await page.goto(`/#/${route}?word=${selected.id}`);
+      await expect(page.locator('h1')).toBeVisible();
+      await expect(page.locator('#studio-word')).toHaveValue(selected.id);
+      await page.waitForLoadState('networkidle');
+      await page.mouse.move(0, 0);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth ? [] : Array.from(document.querySelectorAll('#studio-content *')).filter(element => element.getBoundingClientRect().right > innerWidth).map(element => ({ tag: element.tagName, class: element.className, right: element.getBoundingClientRect().right })));
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${route} at ${width}px: ${JSON.stringify(overflow)}`).toBeTruthy();
+      for (const checkbox of await page.locator('input[type="checkbox"]').all()) {
+        if (!await checkbox.isVisible()) continue;
+        const box = await checkbox.boundingBox();
+        expect(box?.width, `${route} checkbox width`).toBeLessThanOrEqual(22);
+        expect(box?.height, `${route} checkbox height`).toBeLessThanOrEqual(22);
+      }
+      for (const button of await page.locator('button.studio-primary').all()) {
+        if (await button.isVisible()) await expect(button).toHaveCSS('background-color', 'rgb(36, 100, 73)');
+      }
+      if (route === 'negative-datasets' && width === 1280) {
+        const row = page.locator('.studio-dataset-row').first();
+        const checkbox = await row.locator('input').boundingBox();
+        const button = await row.getByRole('button', { name: 'Download' }).boundingBox();
+        const bounds = await row.boundingBox();
+        expect(checkbox!.x - bounds!.x).toBeLessThan(5);
+        expect(bounds!.x + bounds!.width - button!.x - button!.width).toBeLessThan(5);
+      }
+      if (route === 'samples' && width === 390) {
+        expect((await page.locator('table').boundingBox())!.width).toBeGreaterThanOrEqual(680);
+        await expect(page.locator('[data-action="relabel"]').first().locator('option:checked')).toHaveText('Set label…');
+      }
+      await page.screenshot({ path: `/tmp/opencode/polish-screenshots/${route}-${width}.png`, fullPage: true });
+    }
+  }
+});
+
+test('workspace creation hides identity and permanent deletion blocks active jobs', async ({ page, request }) => {
+  await page.goto('/#/wakewords');
+  await expect(page.locator('[name="model_id"]')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Legacy import' })).toHaveCount(0);
+  await page.locator('[data-form="create"] [name="phrase"]').fill('Temporary browser workspace');
+  const created = page.waitForResponse(response => response.url().endsWith('/api/studio/wakewords') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Create wakeword', exact: true }).click();
+  const a = await (await created).json();
+  expect(a.model_id).toMatch(/^[a-z0-9][a-z0-9_-]{0,63}$/);
+  await expect(page.locator('#studio-word')).toHaveValue(a.id);
+  await expect(page.locator('[data-form="edit"] [name="phrase"]')).toHaveValue('Temporary browser workspace');
+  const queued = await request.post(`/api/studio/wakewords/${a.id}/generation/previews`, { data: { language: 'en', english_accent: 'mixed', tts_mode: 'hybrid', engines: ['qwen3'], samples: 1, batch_size: 1 } });
+  expect(queued.ok()).toBeTruthy();
+  const job = await queued.json();
+  await page.locator('[data-action="delete-workspace"]').click();
+  await expect(page.getByRole('alertdialog')).toBeVisible();
+  await page.locator('[data-action="confirm-delete"]').click();
+  await expect(page.getByRole('alert')).toContainText('Cancel queued or active jobs');
+  expect((await request.post(`/api/studio/jobs/${job.id}/cancel`)).ok()).toBeTruthy();
+  const removed = page.waitForResponse(response => response.url().endsWith(`/wakewords/${a.id}`) && response.request().method() === 'DELETE');
+  await page.locator('[data-action="confirm-delete"]').click();
+  expect((await removed).status()).toBe(204);
+  await expect(page.locator('#studio-word')).not.toHaveValue(a.id);
+  expect((await request.get(`/api/studio/wakewords/${a.id}`)).status()).toBe(404);
+  expect((await request.get(`/api/studio/jobs/${job.id}`)).status()).toBe(404);
 });

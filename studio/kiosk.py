@@ -198,7 +198,8 @@ class KioskClient:
 
     def stage_model(self, device: Device, name: str, content: BinaryIO) -> None:
         if (not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,199}", name)
-                or '.' not in name or name.rsplit('.', 1)[1].lower() not in ('json', 'tflite', 'onnx')):
+                or '.' not in name or name.rsplit('.', 1)[1].lower() not in ('json', 'tflite')
+                or name.lower().endswith(('.oww.json', '.wake-bundle.json'))):
             raise ValidationError("Invalid model filename")
         body = content.read(self.max_upload + 1)
         if not isinstance(body, bytes) or not body or len(body) > self.max_upload:

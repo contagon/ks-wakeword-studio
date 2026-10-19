@@ -2,53 +2,119 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { StudioApiError, studioApi } from "../api";
 import { useWorkspace } from "../workspace";
-import type { Batch, GenerationCapability, GenerationRecipe, Job, TtsMode } from "../types";
+import type { Batch, GenerationCapability, GenerationRecipe, Job } from "../types";
 import PaginatedTable from "../components/PaginatedTable.vue";
 import JobConsole from "../components/JobConsole.vue";
 
 const workspace = useWorkspace();
 const capabilities = ref<GenerationCapability[]>([]); const batches = ref<Batch[]>([]); const total = ref(0); const offset = ref(0); const recipe = ref<GenerationRecipe>({ language: "en", english_accent: "mixed", tts_mode: "hybrid", samples: 1, batch_size: 1 });
 const selected = ref<Set<string>>(new Set()); const loading = ref(false); const saving = ref(false); const error = ref(""); const job = ref<Job | null>(null);
+const previews = ref<Record<string, Job>>({}); const previewBusy = ref<Record<string, boolean>>({}); const previewErrors = ref<Record<string, string>>({});
+const previewRequests = new Map<string, AbortController>();
+const engineNames: Record<string, string> = { omnivoice: 'OmniVoice', qwen3: 'Qwen3-TTS', moss: 'MOSS-TTS', piper: 'Piper' };
 let loadRequest: AbortController | undefined; let mutationRequest: AbortController | undefined; let loadGeneration = 0; let mutationGeneration = 0;
 let selectionLoaded = false;
 const activeId = computed(() => workspace.selectedId.value); const word = computed(() => workspace.selected.value); const capability = computed(() => capabilities.value.find(item => item.language === recipe.value.language) ?? null);
-const modes = computed(() => capability.value ? (Object.entries(capability.value.engines) as [TtsMode, string[]][]).filter(([, engines]) => engines.length) : []);
-const accentEnabled = computed(() => Boolean(capability.value?.accent_applies) && recipe.value.tts_mode !== "piper");
+const engines = computed(() => capability.value?.engines.hybrid ?? []);
+const accentEnabled = computed(() => Boolean(capability.value?.accent_applies) && recipe.value.engines?.some(engine => engine !== 'piper'));
 function loadCurrent(id: string, token: number, controller: AbortController): boolean { return activeId.value === id && loadGeneration === token && !controller.signal.aborted; }
 function mutationCurrent(id: string, token: number, controller: AbortController): boolean { return activeId.value === id && mutationGeneration === token && !controller.signal.aborted; }
-function normalizeRecipe(): void { const cap = capability.value; if (!cap) return; if (!cap.engines[recipe.value.tts_mode].length) recipe.value.tts_mode = modes.value[0]?.[0] ?? "hybrid"; if (!accentEnabled.value) recipe.value.english_accent = "mixed"; }
-function abortWorkspaceMutations(): void { mutationRequest?.abort(); mutationRequest = undefined; mutationGeneration += 1; saving.value = false; job.value = null; }
+function normalizeRecipe(): void { const cap = capability.value; if (!cap) return; const chosen = recipe.value.engines ?? cap.engines[recipe.value.tts_mode]; recipe.value.engines = chosen.filter(engine => engines.value.includes(engine)); if (!accentEnabled.value) recipe.value.english_accent = "mixed"; }
+function abortWorkspaceMutations(): void { mutationRequest?.abort(); mutationRequest = undefined; mutationGeneration += 1; saving.value = false; job.value = null; for (const request of previewRequests.values()) request.abort(); previewRequests.clear(); previews.value = {}; previewBusy.value = {}; previewErrors.value = {}; }
 async function load(): Promise<void> {
   loadRequest?.abort(); const controller = new AbortController(); loadRequest = controller; const token = ++loadGeneration; const id = activeId.value;
   batches.value = []; total.value = 0; error.value = ""; if (!id) return; loading.value = true;
-  try { const [catalog, saved, page, selection] = await Promise.all([studioApi.generationCatalog(controller.signal), studioApi.generationRecipe(id, controller.signal).catch(cause => cause instanceof StudioApiError && cause.status === 404 ? null : Promise.reject(cause)), studioApi.batches(id, { offset: offset.value, limit: 50 }, controller.signal), selectionLoaded ? Promise.resolve(null) : studioApi.batchSelection(id, controller.signal)]); if (!loadCurrent(id, token, controller)) return; capabilities.value = catalog; if (!selectionLoaded) { if (saved) recipe.value = saved; else { const language = workspace.selected.value?.language ?? catalog[0]?.language ?? "en"; recipe.value = { language, english_accent: "mixed", tts_mode: "hybrid", samples: 1, batch_size: 1 }; } normalizeRecipe(); selected.value = new Set(selection ?? []); selectionLoaded = true; } batches.value = page.items; total.value = page.total; }
+  try {
+    const [catalog, saved, page, selection, currentWord] = await Promise.all([
+      studioApi.generationCatalog(controller.signal),
+      studioApi.generationRecipe(id, controller.signal).catch(cause => cause instanceof StudioApiError && cause.status === 404 ? null : Promise.reject(cause)),
+      studioApi.batches(id, { offset: offset.value, limit: 50 }, controller.signal),
+      selectionLoaded ? Promise.resolve(null) : studioApi.batchSelection(id, controller.signal),
+      studioApi.wakeword(id, controller.signal),
+    ]);
+    if (!loadCurrent(id, token, controller)) return;
+    capabilities.value = catalog;
+    if (!selectionLoaded) {
+      recipe.value = saved ?? { language: currentWord.language, english_accent: 'mixed', tts_mode: 'hybrid', samples: 1, batch_size: 1 };
+      normalizeRecipe(); selected.value = new Set(selection ?? []); selectionLoaded = true;
+    }
+    batches.value = page.items; total.value = page.total;
+  }
   catch (cause) { if (loadCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Unable to load generation settings."; }
   finally { if (loadCurrent(id, token, controller)) loading.value = false; }
 }
-function updateMode(value: string): void { recipe.value.tts_mode = value as TtsMode; normalizeRecipe(); }
 function updateLanguage(value: string): void { recipe.value.language = value; normalizeRecipe(); }
-function valid(): boolean { if (!Number.isInteger(recipe.value.samples) || recipe.value.samples < 1 || !Number.isInteger(recipe.value.batch_size) || recipe.value.batch_size < 1) { error.value = "Sample count and batch size must be positive integers."; return false; } return true; }
-async function save(startGeneration = false): Promise<void> {
+function toggleEngine(engine: string, checked: boolean): void { const next = new Set(recipe.value.engines); checked ? next.add(engine) : next.delete(engine); recipe.value.engines = [...next]; }
+function valid(): boolean { if (!Number.isInteger(recipe.value.samples) || recipe.value.samples < 1 || !Number.isInteger(recipe.value.batch_size) || recipe.value.batch_size < 1) { error.value = "Sample count and batch size must be positive integers."; return false; } if (!recipe.value.engines?.length) { error.value = 'Select at least one generation model.'; return false; } return true; }
+async function save(): Promise<void> {
   const id = activeId.value; if (!id || !valid()) return;
-  mutationRequest?.abort(); const controller = new AbortController(); mutationRequest = controller; const token = ++mutationGeneration; const recipeToSave = { ...recipe.value }; saving.value = true; error.value = "";
-  try { const saved = await studioApi.saveGenerationRecipe(id, recipeToSave, controller.signal); if (!mutationCurrent(id, token, controller)) return; recipe.value = saved;
-    if (!startGeneration) return;
-    const nextJob = await studioApi.generate(id, controller.signal); if (mutationCurrent(id, token, controller)) job.value = nextJob;
-  } catch (cause) { if (mutationCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : startGeneration ? "Generation job was not started." : "Recipe was not saved."; }
+  mutationRequest?.abort(); const controller = new AbortController(); mutationRequest = controller; const token = ++mutationGeneration; const recipeToSave = { ...recipe.value, engines: [...recipe.value.engines!], english_accent: accentEnabled.value ? recipe.value.english_accent : 'mixed', tts_mode: 'hybrid' as const }; saving.value = true; error.value = "";
+  try {
+    const nextJob = await studioApi.generate(id, recipeToSave, controller.signal);
+    if (mutationCurrent(id, token, controller)) { recipe.value = recipeToSave; job.value = nextJob; }
+  } catch (cause) { if (mutationCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Generation job was not started."; }
   finally { if (mutationCurrent(id, token, controller)) saving.value = false; }
 }
+async function preview(engine: string): Promise<void> {
+  const id = activeId.value; if (!id || previewBusy.value[engine]) return;
+  previewRequests.get(engine)?.abort(); const controller = new AbortController(); previewRequests.set(engine, controller);
+  previewBusy.value[engine] = true; previewErrors.value[engine] = ''; delete previews.value[engine];
+  try { const next = await studioApi.preview(id, { ...recipe.value, tts_mode: 'hybrid', engines: [engine], samples: 1, batch_size: 1, english_accent: capability.value?.accent_applies && engine !== 'piper' ? recipe.value.english_accent : 'mixed' }, controller.signal); if (!controller.signal.aborted && activeId.value === id) previews.value[engine] = next; }
+  catch (cause) { if (!controller.signal.aborted && activeId.value === id) previewErrors.value[engine] = cause instanceof Error ? cause.message : 'Preview could not start.'; }
+  finally { if (previewRequests.get(engine) === controller) { previewBusy.value[engine] = false; previewRequests.delete(engine); } }
+}
+function updatePreview(engine: string, next: Job): void { if (previews.value[engine]?.id === next.id) previews.value[engine] = next; }
+function updateGeneration(next: Job): void { const previous = job.value; if (previous?.id !== next.id) return; job.value = next; if (next.status === 'complete' && previous.status !== 'complete') { offset.value = 0; void load(); } }
 function toggle(batch: Batch, checked: boolean): void { if (batch.status !== "complete") return; const next = new Set(selected.value); checked ? next.add(batch.id) : next.delete(batch.id); selected.value = next; }
 async function saveBatches(): Promise<void> { const id = activeId.value; if (!id || !selectionLoaded || loading.value) return; mutationRequest?.abort(); const controller = new AbortController(); mutationRequest = controller; const token = ++mutationGeneration; const batchIds = [...selected.value]; saving.value = true;
   try { await studioApi.selectBatches(id, batchIds, controller.signal); if (mutationCurrent(id, token, controller)) await load(); } catch (cause) { if (mutationCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Batch selection was not saved."; } finally { if (mutationCurrent(id, token, controller)) saving.value = false; }
 }
 watch(activeId, () => { abortWorkspaceMutations(); selectionLoaded = false; selected.value = new Set(); recipe.value = { language: word.value?.language ?? 'en', english_accent: 'mixed', tts_mode: 'hybrid', samples: 1, batch_size: 1 }; offset.value = 0; void load(); }, { immediate: true });
 watch(offset, () => { void load(); });
-onBeforeUnmount(() => { loadRequest?.abort(); mutationRequest?.abort(); });
+onBeforeUnmount(() => { loadRequest?.abort(); abortWorkspaceMutations(); });
 </script>
 
 <template>
-  <section><div class="mb-4"><h1>Artificial</h1><p class="studio-muted">Saved generation recipes and retained synthetic batches are separate from human review.</p></div>
-    <div class="studio-card"><h2>Generation recipe</h2><p data-generation-phrase class="studio-note">Phrase from selected workspace: <strong>{{ word?.phrase ?? "No workspace selected" }}</strong></p><form class="grid gap-3 mt-3" @submit.prevent="save(false)"><label>Language<select name="language" :value="recipe.language" @change="updateLanguage(($event.target as HTMLSelectElement).value)"><option v-for="entry in capabilities" :key="entry.language" :value="entry.language">{{ entry.name }}</option></select></label><label>Route<select name="tts-mode" :value="recipe.tts_mode" @change="updateMode(($event.target as HTMLSelectElement).value)"><option v-for="[mode, engines] in modes" :key="mode" :value="mode">{{ mode }} ({{ engines.join(", ") }})</option></select></label><label>English accent<select name="english-accent" v-model="recipe.english_accent" :disabled="!accentEnabled"><option v-for="accent in capability?.english_accents ?? []" :key="accent.code" :value="accent.code">{{ accent.label }}</option><option v-if="!accentEnabled" value="mixed">Not applicable</option></select></label><label>Samples<input v-model.number="recipe.samples" name="samples" type="number" min="1" required></label><label>Batch size<input v-model.number="recipe.batch_size" name="batch-size" type="number" min="1" required></label><div class="flex gap-2"><button type="submit" class="studio-primary" :disabled="saving">Save recipe</button><button type="button" data-action="generate" :disabled="saving || !activeId" @click="save(true)">Generate batch</button></div></form><p v-if="capability" class="studio-muted text-xs mt-3">Participating engines are shown from the server capability catalog. Accent applies only where supported; no pronunciation preview is offered.</p><p v-if="error" class="studio-note" role="alert">{{ error }}</p><JobConsole v-if="job" :job-id="job.id" /></div>
-    <div class="studio-card mt-4"><div class="flex justify-between gap-3"><h2>Retained batches</h2><button type="button" :disabled="saving" @click="saveBatches">Save batch selection</button></div><p v-if="loading" class="studio-muted">Loading batches…</p><article v-for="batch in batches" :key="batch.id" class="studio-history mt-3"><label class="flex items-start gap-2"><input :data-batch-id="batch.id" type="checkbox" :checked="selected.has(batch.id)" :disabled="batch.status !== 'complete'" @change="toggle(batch, ($event.target as HTMLInputElement).checked)"><span><strong>{{ batch.phrase }}</strong><span class="studio-muted block text-xs">{{ batch.status }} · {{ batch.audio.length }} validated samples · {{ batch.created_at }}</span><span v-if="batch.status !== 'complete'" class="studio-note block text-xs">Only complete, atomically committed batches can be selected.</span></span></label></article><p v-if="!loading && !batches.length" class="studio-muted mt-3">No generated batches for this workspace yet.</p><PaginatedTable :total="total" :offset="offset" :limit="50" :loading="loading" @page="offset = $event" /></div>
+  <section>
+    <div class="mb-4"><h1>Artificial</h1><p class="studio-muted">Generate wakeword audio, then choose which datasets to use for training.</p></div>
+    <div class="studio-card">
+      <h2>Generate data</h2>
+      <p data-generation-phrase class="studio-muted">Wake phrase: <strong>{{ word?.phrase ?? 'No workspace selected' }}</strong></p>
+      <form class="grid gap-4 mt-3" @submit.prevent="save">
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <label>Language<select name="language" :value="recipe.language" @change="updateLanguage(($event.target as HTMLSelectElement).value)"><option v-for="entry in capabilities" :key="entry.language" :value="entry.language">{{ entry.name }}</option></select></label>
+          <label>English accent<select name="english-accent" v-model="recipe.english_accent" :disabled="!accentEnabled"><template v-if="accentEnabled"><option v-for="accent in capability?.english_accents ?? []" :key="accent.code" :value="accent.code">{{ accent.label }}</option></template><option v-else value="mixed">Not applicable</option></select></label>
+          <label>Total samples<input v-model.number="recipe.samples" name="samples" type="number" min="1" required></label>
+          <label>Batch size<input v-model.number="recipe.batch_size" name="batch-size" type="number" min="1" required></label>
+        </div>
+        <fieldset><legend class="mb-2 font-semibold">Generation models</legend>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <article v-for="engine in engines" :key="engine" class="studio-history">
+              <div class="flex items-center justify-between gap-3">
+                <label class="studio-checkbox-label"><input type="checkbox" :data-engine="engine" :checked="recipe.engines?.includes(engine)" @change="toggleEngine(engine, ($event.target as HTMLInputElement).checked)"><strong>{{ engineNames[engine] ?? engine }}</strong></label>
+                <button type="button" :data-preview="engine" :disabled="previewBusy[engine] || ['queued', 'running', 'cancelling'].includes(previews[engine]?.status ?? '') || !activeId" @click="preview(engine)">{{ previewBusy[engine] ? 'Starting…' : 'Preview' }}</button>
+              </div>
+              <p v-if="previewErrors[engine]" role="alert" class="studio-note mt-3">{{ previewErrors[engine] }}</p>
+              <JobConsole v-if="previews[engine] && previews[engine].status !== 'complete'" :job-id="previews[engine].id" @update="updatePreview(engine, $event)" />
+              <audio v-if="previews[engine]?.status === 'complete'" :data-preview-audio="engine" class="mt-3 max-w-full" :src="studioApi.previewAudioUrl(activeId, previews[engine].id)" controls autoplay :aria-label="`${engineNames[engine] ?? engine} wakeword preview`" />
+            </article>
+          </div>
+        </fieldset>
+        <p class="studio-muted text-xs">Samples are shared across the selected models. Preview generates one sample without adding it to your training data. Accent support varies by model.</p>
+        <button type="submit" data-action="generate" class="studio-primary justify-self-start" :disabled="saving || loading || !activeId">{{ saving ? 'Starting…' : 'Generate dataset' }}</button>
+      </form>
+      <p v-if="error" class="studio-note mt-3" role="alert">{{ error }}</p>
+      <JobConsole v-if="job" :job-id="job.id" @update="updateGeneration" />
+    </div>
+    <div class="studio-card mt-4">
+      <div class="flex flex-wrap items-center justify-between gap-3"><h2>Generated datasets</h2><button type="button" data-action="save-batches" :disabled="saving || loading || !activeId" @click="saveBatches">Save selection</button></div>
+      <p class="studio-muted text-xs">Select completed datasets to include in this wakeword’s training.</p>
+      <p v-if="loading" class="studio-muted mt-3">Loading datasets…</p>
+      <article v-for="batch in batches" :key="batch.id" class="studio-history mt-3">
+        <label class="studio-checkbox-label"><input :data-batch-id="batch.id" type="checkbox" :checked="selected.has(batch.id)" :disabled="batch.status !== 'complete'" @change="toggle(batch, ($event.target as HTMLInputElement).checked)"><span><strong>{{ batch.phrase }}</strong><span class="studio-muted block text-xs">{{ batch.audio.length }} samples · {{ batch.recipe.engines?.map(engine => engineNames[engine] ?? engine).join(', ') || 'Saved generation models' }} · {{ batch.created_at ? new Date(batch.created_at).toLocaleString() : '' }}</span><span v-if="batch.status !== 'complete'" class="studio-muted block text-xs">{{ batch.status }} — only completed datasets can be selected.</span></span><span class="studio-status ml-auto">{{ batch.status }}</span></label>
+      </article>
+      <p v-if="!loading && !batches.length" class="studio-muted mt-3">No generated datasets yet. Choose models above to create one.</p>
+      <PaginatedTable :total="total" :offset="offset" :limit="50" :loading="loading" @page="offset = $event" />
+    </div>
   </section>
 </template>

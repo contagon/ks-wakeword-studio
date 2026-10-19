@@ -359,6 +359,14 @@ class Generator:
         return bool(self.piper_models())
 
     def engines(self) -> list[str]:
+        explicit = getattr(self.args, 'engines', None)
+        if explicit is not None:
+            selected = explicit.split(',')
+            available = engines_for_language(self.args.language, 'hybrid', piper_available=self.piper_available())
+            if (not selected or len(set(selected)) != len(selected)
+                    or any(engine not in available for engine in selected)):
+                raise ValueError('Unsupported engine selection')
+            return selected
         return engines_for_language(
             self.args.language,
             self.args.tts_mode,
@@ -1562,6 +1570,7 @@ def parser() -> argparse.ArgumentParser:
         default=os.environ.get("MWW_ENGLISH_ACCENT", DEFAULT_ENGLISH_ACCENT),
     )
     result.add_argument("--tts-mode", default=DEFAULT_TTS_MODE)
+    result.add_argument("--engines", default=None, help="Explicit comma-separated TTS engines; no unselected engines are used")
     result.add_argument("--samples", type=int, default=50000)
     result.add_argument("--batch-size", type=int, default=8)
     result.add_argument(

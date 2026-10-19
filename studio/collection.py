@@ -178,6 +178,9 @@ class CollectionService:
                        (device_id, clip_id, run_id, state, attempts, retry, code, self._now()))
 
     def _seen(self, device_id: str, clip_id: str) -> bool:
+        from studio.workspace_deletion import source_deleted
+        if source_deleted(self.store, device_id, clip_id):
+            return True
         with self.store.transaction() as db:
             return db.execute("SELECT 1 FROM recordings WHERE device_id=? AND clip_id=?",
                               (device_id, clip_id)).fetchone() is not None

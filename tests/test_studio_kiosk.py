@@ -16,6 +16,12 @@ from studio.models import Device, IdentityMismatch, RemoteRejected, RemoteUnavai
 
 
 class KioskTests(unittest.TestCase):
+    def test_removed_model_formats_are_rejected_before_transport(self):
+        for name in ('robot.oww.onnx', 'robot.onnx', 'robot.oww.json', 'robot.wake-bundle.json'):
+            with self.subTest(name=name), self.assertRaises(ValidationError):
+                self.client.stage_model(self.device, name, io.BytesIO(b'model'))
+        self.assertEqual(self.server.requests, [])
+
     def setUp(self):
         self.server = KioskServer()
         self.addCleanup(self.server.close)
@@ -35,19 +41,19 @@ class KioskTests(unittest.TestCase):
         self.assertEqual(listing.clips[0].phrase, "Hey kitchen")
         self.assertEqual(listing.clips[0].scores, {"score": 0.95, "threshold": 0.8})
         self.assertEqual(self.client.audio(self.device, "clip-1"), b"RIFF")
-        self.client.stage_model(self.device, "hey_kitchen.onnx", io.BytesIO(b"model-bytes"))
-        self.assertIn(("/kiosk/api/voice/wake-models/upload?name=hey_kitchen.onnx", f"Bearer {TOKEN}", b"model-bytes"), self.server.requests)
+        self.client.stage_model(self.device, "hey_kitchen.tflite", io.BytesIO(b"model-bytes"))
+        self.assertIn(("/kiosk/api/voice/wake-models/upload?name=hey_kitchen.tflite", f"Bearer {TOKEN}", b"model-bytes"), self.server.requests)
         audio_request = [r for r in self.server.requests if r[0].endswith("getWakeWordActivationAudio")][0]
         self.assertEqual(json.loads(audio_request[2]), {"id": "clip-1"})
-        self.assertEqual(self.client.commit_models(self.device).added, [{"engine": "openwakeword", "id": "hey_kitchen"}])
+        self.assertEqual(self.client.commit_models(self.device).added, [{"engine": "microwakeword", "id": "hey_kitchen"}])
 
     def test_manifest_exact_files_protocol(self):
-        self.assertEqual(self.client.model_manifest(self.device), {"openwakeword/hey_kitchen.onnx": "a" * 64})
+        self.assertEqual(self.client.model_manifest(self.device), {"microwakeword/hey_kitchen.tflite": "a" * 64})
 
     def test_identity_mismatch_prevents_audio_upload_and_commit(self):
         self.server.identity["data"]["id"] = "replacement-kiosk"
         for operation in (lambda: self.client.audio(self.device, "clip-1"),
-                          lambda: self.client.stage_model(self.device, "a.onnx", io.BytesIO(b"a")),
+                          lambda: self.client.stage_model(self.device, "a.tflite", io.BytesIO(b"a")),
                           lambda: self.client.commit_models(self.device)):
             with self.assertRaises(IdentityMismatch):
                 operation()
@@ -56,14 +62,14 @@ class KioskTests(unittest.TestCase):
     def test_follower_role_drift_blocks_direct_upload(self):
         self.server.identity["data"].update(leader=False, follows="Kitchen")
         with self.assertRaises(RemoteRejected):
-            self.client.stage_model(self.device, "a.onnx", io.BytesIO(b"a"))
+            self.client.stage_model(self.device, "a.tflite", io.BytesIO(b"a"))
         self.assertFalse(any("upload" in r[0] for r in self.server.requests))
 
     def test_inactive_device_cannot_trigger_transport_requests(self):
         device = replace(self.device, active=False)
         for operation in (lambda: self.client.diagnostics(device),
                           lambda: self.client.audio(device, "clip-1"),
-                          lambda: self.client.stage_model(device, "a.onnx", io.BytesIO(b"a")),
+                          lambda: self.client.stage_model(device, "a.tflite", io.BytesIO(b"a")),
                           lambda: self.client.commit_models(device),
                           lambda: self.client.command(device, "fleetStatus", {})):
             with self.subTest(operation=operation), self.assertRaises(RemoteRejected):
@@ -92,7 +98,7 @@ class KioskTests(unittest.TestCase):
         with self.assertRaises(RemoteRejected):
             self.client.command(self.device, "fleetStatus", {})
         with self.assertRaises(ValidationError):
-            self.client.stage_model(self.device, "a.onnx", io.BytesIO(b"a" * 1025))
+            self.client.stage_model(self.device, "a.tflite", io.BytesIO(b"a" * 1025))
 
     def test_rejected_response_is_closed_even_when_connection_releases_http10_socket(self):
         original = http.client.HTTPConnection.getresponse
@@ -112,9 +118,9 @@ class KioskTests(unittest.TestCase):
                 self.assertTrue(responses[-1].isclosed())
 
     def test_upload_rejection_even_when_ok_true(self):
-        self.server.responses["/kiosk/api/voice/wake-models/upload?name=a.onnx"] = {"ok": True, "data": {"rejected": {"file": "a.onnx", "reason": TOKEN}}}
+        self.server.responses["/kiosk/api/voice/wake-models/upload?name=a.tflite"] = {"ok": True, "data": {"rejected": {"file": "a.tflite", "reason": TOKEN}}}
         with self.assertRaises(RemoteRejected) as caught:
-            self.client.stage_model(self.device, "a.onnx", io.BytesIO(b"a"))
+            self.client.stage_model(self.device, "a.tflite", io.BytesIO(b"a"))
         self.assertNotIn(TOKEN, str(caught.exception))
 
     def test_success_data_redacts_credentials_and_commit_reasons(self):
@@ -122,9 +128,9 @@ class KioskTests(unittest.TestCase):
         data = self.client.command(self.device, "fleetStatus", {})
         self.assertNotIn("secret", json.dumps(data))
         self.assertNotIn(TOKEN, json.dumps(data))
-        self.server.responses["/kiosk/api/commands/commitCustomWakeModels"] = {"ok": True, "data": {"added": [], "rejected": [{"file": "a.onnx", "reason": TOKEN, "values": {"token": "hidden"}}]}}
+        self.server.responses["/kiosk/api/commands/commitCustomWakeModels"] = {"ok": True, "data": {"added": [], "rejected": [{"file": "a.tflite", "reason": TOKEN, "values": {"token": "hidden"}}]}}
         result = self.client.commit_models(self.device)
-        self.assertEqual(result.rejected, [{"file": "a.onnx"}])
+        self.assertEqual(result.rejected, [{"file": "a.tflite"}])
 
     def test_url_validation_ipv6_private_hosts_and_no_credentials(self):
         self.assertEqual(normalize_url("http://[fd00::1]:2324/base/"), "http://[fd00::1]:2324/base")

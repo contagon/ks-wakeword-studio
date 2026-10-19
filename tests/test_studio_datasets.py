@@ -13,7 +13,7 @@ from studio.db import Store
 from studio.jobs import JobQueue, WorkerPool
 from studio.models import Conflict, NotFound, ValidationError
 from studio.workspaces import WorkspaceService
-from studio.datasets import DatasetService, mww_dataset_features, oww_dataset_config
+from studio.datasets import DatasetService, mww_dataset_features
 
 
 class DatasetTests(unittest.TestCase):
@@ -161,23 +161,9 @@ class DatasetTests(unittest.TestCase):
         self.assertFalse(any('no_speech' in row['features_dir'] for row in rows))
         self.assertEqual(mww_dataset_features([]), [])
 
-    def test_explicit_oww_replaces_not_merges_defaults_and_rejects_mww(self):
-        self.install()
-        self.service.select(self.a, ['speech'])
-        with self.assertRaisesRegex(ValidationError, 'openWakeWord'):
-            oww_dataset_config({}, self.service.snapshot(self.a))
-        rows = [dict(id='oww', path='/selected/train.npy', representation='features',
-                     adapter='oww_embeddings_npy', split='train', fingerprint='a' * 64),
-                dict(id='eval', path='/selected/eval.npy', representation='features',
-                     adapter='oww_embeddings_npy', split='evaluation', fingerprint='b' * 64)]
-        config = oww_dataset_config({'feature_data_files': {'ACAV100M_sample': '/default'},
-                                    'batch_n_per_class': {'positive': 50, 'ACAV100M_sample': 1024},
-                                    'background_paths': ['/augmentation']}, rows)
-        self.assertEqual(config['feature_data_files'], {'oww': '/selected/train.npy'})
-        self.assertEqual(config['false_positive_validation_data_path'], '/selected/eval.npy')
-        self.assertNotIn('ACAV100M_sample', config['batch_n_per_class'])
-        self.assertEqual(config['background_paths'], ['/augmentation'])
-        self.assertEqual(oww_dataset_config({}, [])['feature_data_files'], {})
+    def test_mww_rejects_incompatible_embeddings_and_raw_audio(self):
+        rows = [dict(id='incompatible', path='/selected/train.npy', representation='features',
+                     adapter='oww_embeddings_npy', split='train', fingerprint='a' * 64)]
         with self.assertRaisesRegex(ValidationError, 'microWakeWord'):
             mww_dataset_features(rows)
         with self.assertRaises(ValidationError):
@@ -220,22 +206,6 @@ class DatasetTests(unittest.TestCase):
         negatives = [row for row in config['features'] if row['truth'] is False]
         self.assertEqual(negatives, mww_dataset_features(self.service.snapshot(self.a)))
 
-    def test_oww_manifest_command_bypasses_upstream_stock_asset_setup(self):
-        from openwakeword_stage import prepare_openwakeword_stage
-        trainer = self.root / 'trainer'
-        (trainer / 'scripts').mkdir(parents=True)
-        (trainer / 'scripts/train_openwakeword.py').write_text('')
-        (trainer / 'train_openwakeword.sh').write_text('')
-        manifest = self.root / 'inputs.json'
-        manifest.write_text(json.dumps({'schema_version': 1, 'datasets': []}))
-        with patch('openwakeword_stage.ensure_openwakeword_trainer', side_effect=AssertionError('must not download')):
-            cmd, cwd, env, stage = prepare_openwakeword_stage(
-                phrase='hello', safe_word='hello', data_dir=self.root, personal_dir=self.root / 'pos',
-                negative_dir=self.root / 'neg', trained_dir=self.root / 'models',
-                environ={'TATER_OWW_TRAINER_DIR': str(trainer)}, dataset_manifest=manifest)
-        self.assertIn('oww_dataset_trainer.py', ' '.join(cmd))
-        self.assertNotIn(str(trainer / 'train_openwakeword.sh'), cmd)
-
     def test_api_selection_and_download_routes(self):
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
@@ -269,29 +239,6 @@ class DatasetTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.install()
 
-    def test_oww_bridge_actually_replaces_stock_config_in_stub_trainer(self):
-        trainer = self.root / 'stub_trainer.py'
-        output = self.root / 'config.json'
-        trainer.write_text('''import json, sys
-def make_config():
-    return {'feature_data_files': {'ACAV100M_sample': '/default'},
-            'batch_n_per_class': {'positive': 50, 'ACAV100M_sample': 1024},
-            'false_positive_validation_data_path': '/default_eval',
-            'background_paths': ['/augmentation_only']}
-def main():
-    open(sys.argv[1], 'w').write(json.dumps(make_config()))
-    return 0
-''')
-        manifest = self.root / 'inputs.json'
-        manifest.write_text(json.dumps({'schema_version': 1, 'datasets': []}))
-        result = subprocess.run([sys.executable, 'cli/oww_dataset_trainer.py', str(trainer), str(manifest), str(output)], capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        config = json.loads(output.read_text())
-        self.assertEqual(config['feature_data_files'], {})
-        self.assertIsNone(config['false_positive_validation_data_path'])
-        self.assertEqual(config['batch_n_per_class'], {'positive': 50})
-        self.assertEqual(config['background_paths'], ['/augmentation_only'])
-
     def test_failed_or_cancelled_install_preserves_previous_version(self):
         old = self.install()
         self.service.select(self.a, ['speech'])
@@ -315,14 +262,11 @@ def main():
                 self.install(content=b'too much data')
         self.assertEqual(self.service.list(self.a, status='installed').total, 0)
 
-    def test_expandable_oww_adapter_installs_a_file_not_a_mww_directory(self):
+    def test_removed_embedding_adapter_cannot_be_installed(self):
         base = json.loads(Path('studio/dataset_catalog.json').read_text())[0]
         service = DatasetService(self.store, self.jobs, catalog=[dict(base, id='oww', adapter='oww_embeddings_npy')])
-        value = service.install_archive('oww', self.archive('oww/features.npy'))
-        service.select(self.a, ['oww'])
-        self.assertTrue(Path(value.path).is_file())
-        self.assertEqual(service.snapshot(self.a), [value])
-        self.assertEqual(oww_dataset_config({}, [value])['feature_data_files'], {'oww': value.path})
+        with self.assertRaisesRegex(ValidationError, 'supported'):
+            service.install_archive('oww', self.archive('oww/features.npy'))
 
     def test_additive_v5_migration_preserves_words_and_jobs(self):
         import sqlite3

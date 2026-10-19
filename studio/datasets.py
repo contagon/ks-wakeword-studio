@@ -68,29 +68,6 @@ def mww_dataset_features(inputs) -> list[dict]:
     return rows
 
 
-def oww_dataset_config(config: dict, inputs) -> dict:
-    result = dict(config)
-    features, evaluation = {}, []
-    # Preserve positive/generated adversarial batches, not unselected stock corpora.
-    batches = {key: value for key, value in config.get('batch_n_per_class', {}).items()
-               if key in ('positive', 'adversarial_negative')}
-    for row in _inputs(inputs):
-        if row['representation'] != 'features' or row['adapter'] != 'oww_embeddings_npy':
-            raise ValidationError('Unsupported dataset for openWakeWord: requires oww_embeddings_npy features; microWakeWord tensors are incompatible')
-        if row['split'] == 'evaluation':
-            evaluation.append(row['path'])
-        else:
-            if row['id'] in ('positive', 'adversarial_negative'):
-                raise ValidationError('Reserved openWakeWord dataset ID')
-            features[row['id']] = row['path']
-            batches[row['id']] = 1024
-    if len(evaluation) > 1:
-        raise ValidationError('openWakeWord supports one evaluation feature file')
-    result.update(feature_data_files=features, batch_n_per_class=batches,
-                  false_positive_validation_data_path=evaluation[0] if evaluation else None)
-    return result
-
-
 class DatasetService:
     def __init__(self, store, jobs: JobQueue, *, catalog=None):
         self.store, self.jobs = store, jobs
@@ -224,14 +201,9 @@ class DatasetService:
                                 writer.flush()
                                 os.fsync(writer.fileno())
                 content = stage / dataset_id if (stage / dataset_id).is_dir() else stage
-                extension = {'mww_mmap': '*.ninja', 'oww_embeddings_npy': '*.npy', 'wav': '*.wav'}.get(entry['adapter'])
+                extension = {'mww_mmap': '*.ninja', 'wav': '*.wav'}.get(entry['adapter'])
                 if extension is None or not any(content.rglob(extension)):
                     raise ValidationError('Dataset archive lacks supported feature/audio files')
-                if entry['adapter'] == 'oww_embeddings_npy':
-                    files = list(content.rglob('*.npy'))
-                    if len(files) != 1:
-                        raise ValidationError('openWakeWord dataset archive requires one embedding file')
-                    content = files[0]
                 digest = hashlib.sha256(json.dumps(entry, sort_keys=True).encode())
                 size = 0
                 for file in sorted(stage.rglob('*')):
@@ -265,7 +237,7 @@ class DatasetService:
                         with open_directory(destination.parent) as descriptor:
                             os.fsync(descriptor)
                     # Do not trust an existing fingerprint symlink or escaped input.
-                    input_directory = (destination / relative).parent if entry['adapter'] == 'oww_embeddings_npy' else destination / relative
+                    input_directory = destination / relative
                     with open_directory(input_directory):
                         pass
                     db.execute('INSERT INTO studio_dataset_installations VALUES (?,?,?) ON CONFLICT(dataset_id) DO UPDATE SET fingerprint=excluded.fingerprint,manifest_json=excluded.manifest_json',
@@ -286,12 +258,13 @@ class DatasetService:
                 if row['manifest_json'] is None:
                     raise Conflict('Selected dataset is not installed')
                 value = DatasetInput(**json.loads(row['manifest_json'])['input'])
+                mww_dataset_features([value])
                 if not Path(value.path).exists():
                     raise Conflict('Selected dataset installation is missing')
                 path = Path(value.path)
                 if path.is_symlink():
                     raise ValidationError('Unsafe dataset input path')
-                with open_directory(path.parent if value.adapter == 'oww_embeddings_npy' else path):
+                with open_directory(path):
                     pass
                 result.append(value)
             return result

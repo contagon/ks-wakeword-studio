@@ -6,6 +6,8 @@ import sqlite3
 import tempfile
 import unittest
 import wave
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -85,6 +87,116 @@ class GenerationTests(unittest.TestCase):
         catalog = {item['language']: item for item in self.service.catalog()}
         self.assertEqual(catalog['en']['engines']['hybrid'], ['omnivoice', 'qwen3', 'moss', 'piper'])
         self.assertFalse(catalog['fi']['accent_applies'])
+
+    def test_explicit_engines_are_snapshotted_and_passed_to_generator(self):
+        recipe = replace(self.recipe, engines=['qwen3', 'moss'])
+        self.service.save_recipe(self.word.id, recipe)
+        job, batch = self.generate()
+        self.assertEqual(job.status, 'complete')
+        self.assertEqual(batch.recipe.engines, ['qwen3', 'moss'])
+        self.assertIn('--engines=qwen3,moss', self.runner.calls[-1][1])
+
+    def test_generation_admits_submitted_recipe_atomically_instead_of_rereading_another_tabs_settings(self):
+        from studio.api import create_router
+        app = FastAPI()
+        app.include_router(create_router(self.runtime))
+        submitted = replace(self.recipe, samples=3, engines=['qwen3'])
+        with TestClient(app) as client:
+            response = client.post(f'/api/studio/wakewords/{self.word.id}/generation/jobs', json=asdict(submitted))
+        self.assertEqual(response.status_code, 201, response.text)
+        job = response.json()
+        self.assertEqual(job['payload']['recipe'], asdict(submitted))
+        self.assertEqual(self.service.get_recipe(self.word.id), submitted)
+        self.service.save_recipe(self.word.id, replace(self.recipe, engines=['moss']))
+        self.runtime.workers.run_once('gpu')
+        self.assertEqual(self.service.get_batch(self.word.id, job['id']).recipe, submitted)
+
+    def test_explicit_engine_selection_rejects_empty_unknown_duplicate_or_unsupported(self):
+        for engines in ([], ['unknown'], ['qwen3', 'qwen3'], ['piper']):
+            with self.subTest(engines=engines), self.assertRaises(ValidationError):
+                self.service.save_recipe(self.word.id, replace(self.recipe, engines=engines))
+        with self.assertRaises(ValidationError):
+            self.service.save_recipe(self.word.id, replace(self.recipe, language='fi', english_accent='mixed', engines=['qwen3']))
+
+    def test_preview_is_one_engine_one_sample_without_recipe_or_batch_side_effects(self):
+        job = self.service.enqueue_preview(self.word.id, replace(self.recipe, engines=['moss']))
+        self.assertEqual(job.kind, 'preview')
+        self.assertTrue(self.runtime.workers.run_once('gpu'))
+        self.assertEqual(self.runtime.jobs.get(job.id).status, 'complete')
+        self.assertEqual(self.service.preview_audio(self.word.id, job.id), wav())
+        self.assertEqual(self.service.list(self.word.id).total, 0)
+        self.assertEqual(self.service.get_recipe(self.word.id), self.recipe)
+        self.assertIn('--samples=1', self.runner.calls[-1][1])
+        self.assertIn('--engines=moss', self.runner.calls[-1][1])
+        with self.service.store.transaction() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM audio_records').fetchone()[0], 0)
+        with self.assertRaises(NotFound):
+            self.service.preview_audio(self.other.id, job.id)
+
+    def test_preview_must_choose_exactly_one_engine_and_audio_waits_for_completion(self):
+        with self.assertRaises(ValidationError):
+            self.service.enqueue_preview(self.word.id, replace(self.recipe, engines=['moss', 'qwen3']))
+        job = self.service.enqueue_preview(self.word.id, replace(self.recipe, engines=['moss']))
+        with self.assertRaises(NotFound):
+            self.service.preview_audio(self.word.id, job.id)
+
+    def test_preview_api_uses_workspace_ownership_and_returns_wav_only_after_completion(self):
+        from studio.api import create_router
+        app = FastAPI()
+        app.include_router(create_router(self.runtime))
+        client = TestClient(app)
+        base = f'/api/studio/wakewords/{self.word.id}/generation/previews'
+        response = client.post(base, json=asdict(replace(self.recipe, engines=['qwen3'])))
+        self.assertEqual(response.status_code, 201, response.text)
+        job_id = response.json()['id']
+        self.assertEqual(client.get(f'{base}/{job_id}/audio').status_code, 404)
+        self.runtime.workers.run_once('gpu')
+        response = client.get(f'{base}/{job_id}/audio')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['content-type'], 'audio/wav')
+        self.assertEqual(response.content, wav())
+        self.assertEqual(client.get(f'/api/studio/wakewords/{self.other.id}/generation/previews/{job_id}/audio').status_code, 404)
+
+    def test_preview_invalid_audio_fails_without_retaining_training_data(self):
+        self.runner.mode = 'invalid'
+        job = self.service.enqueue_preview(self.word.id, replace(self.recipe, engines=['qwen3']))
+        self.runtime.workers.run_once('gpu')
+        self.assertEqual(self.runtime.jobs.get(job.id).status, 'failed')
+        self.assertEqual(self.service.list(self.word.id).total, 0)
+        with self.assertRaises(NotFound):
+            self.service.preview_audio(self.word.id, job.id)
+
+    def test_batch_blob_publication_and_references_are_atomic_against_workspace_gc(self):
+        self.runtime.samples.import_audio(self.other.id, 'positive', io.BytesIO(wav()))
+        job = self.service.enqueue(self.word.id)
+        prepared, release, deleted = threading.Event(), threading.Event(), threading.Event()
+        put = self.runtime.blobs.put
+
+        def pause(stream):
+            result = put(stream)
+            if not prepared.is_set():
+                prepared.set()
+                if not release.wait(3):
+                    raise RuntimeError('test writer was not released')
+            return result
+
+        def remove():
+            self.runtime.workspaces.delete(self.other.id)
+            deleted.set()
+
+        with ThreadPoolExecutor(max_workers=2) as pool, patch.object(self.runtime.blobs, 'put', side_effect=pause):
+            worker = pool.submit(self.runtime.workers.run_once, 'gpu')
+            self.assertTrue(prepared.wait(3))
+            deletion = pool.submit(remove)
+            try:
+                self.assertFalse(deleted.wait(.05), 'GC must wait for batch audio references')
+            finally:
+                release.set()
+                self.assertTrue(worker.result(timeout=3))
+                deletion.result(timeout=3)
+        self.assertEqual(self.runtime.jobs.get(job.id).status, 'complete')
+        batch = self.service.get_batch(self.word.id, job.id)
+        self.assertEqual(self.runtime.blobs.read(batch.audio[0].normalized_hash), wav())
 
     def test_selection_endpoint_includes_batches_beyond_visible_page(self):
         from fastapi import FastAPI

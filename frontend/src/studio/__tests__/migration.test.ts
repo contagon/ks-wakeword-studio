@@ -27,20 +27,12 @@ beforeEach(() => {
 });
 afterEach(() => { wrapper?.unmount(); vi.unstubAllGlobals(); });
 
-describe("legacy migration first-run flow", () => {
-  it("inspects inventory, requires explicit unknown assignments, and reports import", async () => {
+describe("wakewords does not expose legacy migration", () => {
+  it("does not inspect or offer to import singleton legacy files", async () => {
     wrapper = mount(TrainerApp, { attachTo: document.body });
     await flushPromises();
-    expect(wrapper.text()).toContain("Legacy import");
-    expect(wrapper.text()).toContain("3 audio files");
-    const importButton = wrapper.get('[data-action="legacy-import"]');
-    expect(importButton.attributes("disabled")).toBeDefined();
-    await wrapper.get('input[name="legacy-phrase-unknown phrase"]').setValue("legacy");
-    await wrapper.get('input[name="legacy-model-unknown"]').setValue("legacy");
-    expect(importButton.attributes("disabled")).toBeUndefined();
-    await importButton.trigger("click");
-    await flushPromises();
-    expect(requests.find(request => request.path === "/api/studio/migration/import")?.body).toEqual({ word_id: "legacy", phrase_assignments: { "unknown phrase": "legacy" }, model_assignments: { unknown: "legacy" } });
-    expect(wrapper.text()).toContain("Imported 3 samples and 1 archived model");
+    expect(wrapper.text()).not.toContain("Legacy import");
+    expect(wrapper.find('[data-action="legacy-import"]').exists()).toBe(false);
+    expect(requests.some(request => request.path.startsWith('/api/studio/migration'))).toBe(false);
   });
 });

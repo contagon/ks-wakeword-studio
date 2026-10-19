@@ -25,6 +25,14 @@ const lists = () => server.requests.filter(r => r.method === "GET" && /\/wakewor
 const row = (ui: VueWrapper, id: string) => ui.get(`[data-row-id="${id}"]`);
 
 describe("provenance-aware sample library", () => {
+  it("keeps less-used filters in a closed More filters disclosure", async () => {
+    const ui = await open();
+    const details = ui.get('details[data-more-filters]');
+    expect(details.attributes('open')).toBeUndefined();
+    expect(details.get('summary').text()).toBe('More filters');
+    for (const name of ['source', 'kind', 'after', 'before']) expect(details.find(`[name=${name}]`).exists()).toBe(true);
+    expect(ui.get('input[name=search]').element.closest('details')).toBeNull();
+  });
   it("replaces the legacy samples mapping with a paginated, provenance-rich table", async () => {
     const ui = await open();
     expect(ui.get("h1").text()).toBe("Samples");

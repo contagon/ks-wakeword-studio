@@ -69,10 +69,7 @@ class DeploymentService:
         return version
 
     def artifacts(self, version):
-        """Validate the entire archive before uploading any byte. Only weights
-        and the MWW manifest go over the wire; OWW metadata/bundles are local.
-        The companion's distinct `.oww` stem avoids MWW grouping collisions.
-        """
+        """Validate the entire archive; upload only the microWakeWord pair."""
         root = self.store.root / 'models' / version.word_id / version.id
         if Path(version.path) != root or root.is_symlink():
             raise ValidationError('Invalid archive path')
@@ -82,9 +79,6 @@ class DeploymentService:
                     raise ValidationError('Archive checksum mismatch')
             slug = version.model_id
             names = [slug + '.json', slug + '.tflite']
-            companion = slug + '.oww.onnx'
-            if companion in version.checksums:
-                names.append(companion)
             if not all(n in version.checksums for n in names):
                 raise ValidationError('Missing publication artifact')
             content = {n: checked_file(root / n, root).read_bytes() for n in names}
@@ -105,7 +99,7 @@ class DeploymentService:
     @staticmethod
     def _expected(content):
         import hashlib
-        return {('openwakeword/' if n.endswith('.onnx') else 'microwakeword/') + n:
+        return {'microwakeword/' + n:
                 hashlib.sha256(b).hexdigest() for n, b in content.items()}
 
     def archive(self, version_id, word_id):
@@ -206,11 +200,13 @@ class DeploymentService:
             self._reconcile()
 
     def publish(self, version_id):
-        version = self.version(version_id)
-        self.artifacts(version)  # reject tampering before changing desired intent
-        if version.origin == 'legacy':
-            version = self._validate_legacy(version)
         with self._lock('intent'):
+            # Validation reads/writes archives too; deletion must wait for the
+            # entire publication, not just the subsequent network mutation.
+            version = self.version(version_id)
+            self.artifacts(version)  # reject tampering before changing desired intent
+            if version.origin == 'legacy':
+                version = self._validate_legacy(version)
             self._reconcile()
             with self.store.transaction() as db:
                 self._intent(db, version)
@@ -342,7 +338,7 @@ class DeploymentService:
         expected, required = {}, set()
         for current, files in affected.values():
             expected.update(self._expected(files))
-            required.update(('openwakeword' if n.endswith('.onnx') else 'microwakeword', n.rsplit('.', 1)[0]) for n in files)
+            required.update(('microwakeword', n.rsplit('.', 1)[0]) for n in files)
             for name, data in files.items():
                 device = self._device(current, indirect=False)
                 self.devices.client.stage_model(device, name, io.BytesIO(data))

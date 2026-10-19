@@ -49,9 +49,9 @@ class PublicationContractTests(unittest.TestCase):
         self.addCleanup(server.close)
         client = KioskClient(lambda _: TOKEN, timeout=1)
         device = Device('kiosk-leader', server.url, 'leader')
-        server.responses['/kiosk/api/voice/wake-models/upload?name=x.onnx'] = {'ok': False}
+        server.responses['/kiosk/api/voice/wake-models/upload?name=x.tflite'] = {'ok': False}
         with self.assertRaises(RemoteRejected):
-            client.stage_model(device, 'x.onnx', io.BytesIO(b'weights'))
+            client.stage_model(device, 'x.tflite', io.BytesIO(b'weights'))
         before = len(server.requests)
         with self.assertRaises(ValidationError):
             client.stage_model(device, 'x.zip', io.BytesIO(b'archive is not a model'))

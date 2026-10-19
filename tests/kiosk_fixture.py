@@ -40,8 +40,8 @@ class KioskServer:
                     data = {"fleetIdentity": owner.identity, "fleetStatus": owner.fleet,
                             "getWakeWordActivations": fixture("diagnostics"),
                             "getWakeWordActivationAudio": {"ok": True, "data": {"mimeType": "audio/wav", "base64": "UklGRg=="}},
-                            "commitCustomWakeModels": {"ok": True, "data": {"added": [{"engine": "openwakeword", "id": "hey_kitchen"}], "rejected": []}},
-                            "customWakeModelsManifest": {"ok": True, "data": {"files": {"openwakeword/hey_kitchen.onnx": "a" * 64}}}}.get(command, {"ok": True})
+                            "commitCustomWakeModels": {"ok": True, "data": {"added": [{"engine": "microwakeword", "id": "hey_kitchen"}], "rejected": []}},
+                            "customWakeModelsManifest": {"ok": True, "data": {"files": {"microwakeword/hey_kitchen.tflite": "a" * 64}}}}.get(command, {"ok": True})
                 status, headers, payload = data if isinstance(data, tuple) else (200, {}, json.dumps(copy.deepcopy(data)).encode())
                 try:
                     self.send_response(status)

@@ -1,3 +1,2 @@
-- Fixed personalized openWakeWord verifier training to load the generated ONNX model through ONNX Runtime instead of incorrectly requesting LiteRT.
-- Pinned both regular NVIDIA and Blackwell images to the tested openWakeWord Trainer v1.0.2 release.
-- Documented the required `--shm-size=8g` launch setting that prevents PyTorch DataLoader shared-memory bus errors.
+- Training and deployment now support microWakeWord exclusively; companion-model controls, training stacks and uploads have been removed.
+- Existing model archives remain intact. Only the microWakeWord JSON/TFLite pair is published.

@@ -15,24 +15,28 @@ let resolveRecipeSave: ((response: Response) => void) | undefined;
 let manyBatches = false;
 let delayPage = false;
 let resolvePage: ((response: Response) => void) | undefined;
+let newWorkspace = false;
 function host() { return { components: { ArtificialPage }, setup() { workspace = createWorkspace(useStudioRoutes()); provide(workspaceKey, workspace); onMounted(() => { void workspace.load(); }); }, template: "<ArtificialPage />" }; }
 
 beforeEach(() => {
-  delayRecipeSave = false; resolveRecipeSave = undefined; manyBatches = false; delayPage = false; resolvePage = undefined;
+  delayRecipeSave = false; resolveRecipeSave = undefined; manyBatches = false; delayPage = false; resolvePage = undefined; newWorkspace = false;
   history.replaceState(null, "", "#/artificial?word=a");
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://localhost"); const path = url.pathname;
     if (path === "/api/studio/wakewords") return json({ items: words, total: 2, offset: 0, limit: 100 });
     if (path.match(/\/wakewords\/[ab]$/)) return json(words.find(word => path.endsWith(word.id)));
-    if (path.endsWith("/queue")) return json({ items: [], total: 0, offset: 0, limit: 1 }); if (path.endsWith("/models")) return json({ items: [], total: 0, offset: 0, limit: 1 }); if (path === "/api/studio/schedules") return json([]);
-    if (path === "/api/studio/generation/catalog") return json([{ language: "en", name: "English", accent_applies: true, english_accents: [{ code: "us", label: "US" }], engines: { hybrid: ["modern", "piper"], modern: ["modern"], piper: ["piper"] } }, { language: "fr", name: "French", accent_applies: false, english_accents: [], engines: { hybrid: ["modern"], modern: ["modern"], piper: [] } }]);
+    if (path.endsWith("/queue")) return newWorkspace ? new Promise<Response>(() => {}) : json({ items: [], total: 0, offset: 0, limit: 1 }); if (path.endsWith("/models")) return json({ items: [], total: 0, offset: 0, limit: 1 }); if (path === "/api/studio/schedules") return json([]);
+    if (path === "/api/studio/generation/catalog") return json([{ language: "en", name: "English", accent_applies: true, english_accents: [{ code: "us", label: "US" }], engines: { hybrid: ["omnivoice", "qwen3", "moss", "piper"], modern: ["omnivoice", "qwen3", "moss"], piper: ["piper"] } }, { language: "fr", name: "French", accent_applies: false, english_accents: [], engines: { hybrid: ["omnivoice", "qwen3", "moss"], modern: ["omnivoice", "qwen3", "moss"], piper: [] } }]);
+    if (path.endsWith('/generation/previews')) return json({ ...job('preview-ready', 'queued'), kind: 'preview' }, 201);
+    if (path.endsWith('/jobs/preview-ready')) return json({ ...job('preview-ready', 'queued'), kind: 'preview', status: 'complete', result: { preview: true } });
+    if (path.endsWith('/jobs/preview-ready/logs')) return json({ text: '' });
     const word = path.match(/^\/api\/studio\/wakewords\/([ab])\/generation\/(recipe|batches|jobs)$/);
     if (delayPage && word?.[1] === 'a' && word[2] === 'batches' && url.searchParams.get('offset') === '50') return new Promise<Response>(resolve => { resolvePage = resolve; });
     if (path.endsWith('/generation/selection')) return json(manyBatches && path.includes('/a/') ? ['batch-0', 'batch-55'] : path.includes('/a/') ? ['ready'] : []);
     if (manyBatches && word?.[2] === 'batches' && init?.method !== 'PUT') { const offset = Number(url.searchParams.get('offset') ?? 0); return json({ items: word[1] === 'a' ? Array.from({ length: Math.min(50, 60 - offset) }, (_, i) => ({ id: `batch-${offset + i}`, word_id: 'a', phrase: 'Hey Cedar', recipe, status: 'complete', created_at: '', finished_at: '', audio: [], selected: [0, 55].includes(offset + i) })) : [], total: word[1] === 'a' ? 60 : 0, offset, limit: 50 }); }
-    if (word?.[2] === "recipe") { if (init?.method === "PUT") { const response = json(JSON.parse(String(init.body))); return delayRecipeSave ? new Promise<Response>(resolve => { resolveRecipeSave = resolve; }) : response; } return word[1] === "a" ? json(recipe) : json({ ...recipe, language: "fr", english_accent: "mixed", tts_mode: "modern" }); }
+    if (word?.[2] === "recipe") { if (init?.method === "PUT") { const response = json(JSON.parse(String(init.body))); return delayRecipeSave ? new Promise<Response>(resolve => { resolveRecipeSave = resolve; }) : response; } if (newWorkspace) return json({}, 404); return word[1] === "a" ? json(recipe) : json({ ...recipe, language: "fr", english_accent: "mixed", tts_mode: "modern" }); }
     if (word?.[2] === "batches") { if (init?.method === "PUT") return json({ items: [], total: 0, offset: 0, limit: 50 }); return json({ items: word[1] === "a" ? [{ id: "ready", word_id: "a", phrase: "Hey Cedar", recipe, status: "complete", created_at: "", finished_at: "", audio: [{ audio_id: "x", original_hash: "o", normalized_hash: "n", family_id: "f" }], selected: true }, { id: "partial", word_id: "a", phrase: "Hey Cedar", recipe, status: "failed", created_at: "", finished_at: "", audio: [], selected: false }] : [], total: word[1] === "a" ? 2 : 0, offset: 0, limit: 50 }); }
-    if (word?.[2] === "jobs") return json(job("generation-queued", "queued"), 201);
+    if (word?.[2] === "jobs") { const response = json(job("generation-queued", "queued"), 201); return delayRecipeSave ? new Promise<Response>(resolve => { resolveRecipeSave = resolve; }) : response; }
     if (path.match(/\/jobs\/generation-(queued|failed|cancelled)$/)) return json(job(`generation-${path.split("-").at(-1)}`, path.split("-").at(-1) as "queued" | "failed" | "cancelled"));
     if (path.match(/\/jobs\/generation-.*\/logs$/)) return json({ text: "bounded trusted log" });
     if (path.endsWith("/cancel")) return json(job("generation-queued", "cancelled"));
@@ -42,6 +46,12 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ArtificialPage", () => {
+  it('uses the workspace language before overview requests finish for a new workspace', async () => {
+    newWorkspace = true; history.replaceState(null, '', '#/artificial?word=b');
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    expect((ui.get('[name="language"]').element as HTMLSelectElement).value).toBe('fr');
+    ui.unmount();
+  });
   it('preserves full selections and unsaved changes across pages, and resets pagination on word change', async () => {
     manyBatches = true;
     const ui = mount(host()); await flushPromises(); await flushPromises();
@@ -53,11 +63,11 @@ describe("ArtificialPage", () => {
     await ui.get('input[data-batch-id="batch-56"]').setValue(true);
     await previous().trigger('click'); await flushPromises(); await flushPromises();
     expect((ui.get('input[data-batch-id="batch-1"]').element as HTMLInputElement).checked).toBe(true);
-    await ui.findAll('button').find(button => button.text() === 'Save batch selection')!.trigger('click'); await flushPromises();
+    await ui.get('[data-action="save-batches"]').trigger('click'); await flushPromises();
     const saves = vi.mocked(fetch).mock.calls.filter(([input, init]) => String(input).includes('/generation/batches') && init?.method === 'PUT');
     expect(JSON.parse(String(saves.at(-1)?.[1]?.body)).batch_ids.sort()).toEqual(['batch-0', 'batch-1', 'batch-55', 'batch-56']);
     await next().trigger('click'); await flushPromises();
-    await ui.findAll('button').find(button => button.text() === 'Save batch selection')!.trigger('click'); await flushPromises();
+    await ui.get('[data-action="save-batches"]').trigger('click'); await flushPromises();
     const secondSave = vi.mocked(fetch).mock.calls.filter(([input, init]) => String(input).includes('/generation/batches') && init?.method === 'PUT').at(-1);
     expect(JSON.parse(String(secondSave?.[1]?.body)).batch_ids.sort()).toEqual(['batch-0', 'batch-1', 'batch-55', 'batch-56']);
     workspace.selectedId.value = 'b'; await flushPromises(); await flushPromises();
@@ -75,15 +85,17 @@ describe("ArtificialPage", () => {
     await flushPromises(); await flushPromises();
     expect(ui.find('[data-batch-id="stale"]').exists()).toBe(false);
     expect(ui.text()).not.toContain('Old word');
-    await ui.findAll('button').find(button => button.text() === 'Save batch selection')!.trigger('click'); await flushPromises();
+    await ui.get('[data-action="save-batches"]').trigger('click'); await flushPromises();
     const save = vi.mocked(fetch).mock.calls.find(([input, init]) => String(input).includes('/b/generation/batches') && init?.method === 'PUT');
     expect(JSON.parse(String(save?.[1]?.body)).batch_ids).toEqual([]);
     ui.unmount();
   });
-  it("uses server language/mode capabilities, gates accent for Piper and non-English, keeps the workspace phrase immutable, and validates counts", async () => {
+  it("uses individual engines, gates accent for Piper and non-English, and validates counts", async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     expect(ui.get('[data-generation-phrase]').text()).toContain("Hey Cedar"); expect(ui.find('input[name="phrase"]').exists()).toBe(false);
-    await ui.get('select[name="tts-mode"]').setValue("piper"); await flushPromises();
+    expect(ui.find('select[name="tts-mode"]').exists()).toBe(false);
+    expect(ui.text()).not.toContain('Save recipe');
+    for (const engine of ['omnivoice', 'qwen3', 'moss']) await ui.get(`[data-engine="${engine}"]`).setValue(false);
     expect((ui.get('select[name="english-accent"]').element as HTMLSelectElement).disabled).toBe(true);
     await ui.get('input[name="samples"]').setValue("0"); await ui.get("form").trigger("submit");
     expect(ui.get('[role="alert"]').text()).toContain("positive");
@@ -91,7 +103,32 @@ describe("ArtificialPage", () => {
     expect(ui.get('[role="alert"]').text()).toContain("positive");
     workspace.selectedId.value = "b"; await flushPromises(); await flushPromises();
     expect(ui.get('[data-generation-phrase]').text()).toContain("Okay Maple"); expect((ui.get('select[name="english-accent"]').element as HTMLSelectElement).disabled).toBe(true);
-    expect((ui.get('select[name="tts-mode"]').element as HTMLSelectElement).value).toBe("modern");
+    expect(ui.find('[data-engine="piper"]').exists()).toBe(false);
+    ui.unmount();
+  });
+
+  it('previews exactly one model without saving a recipe and plays its returned audio', async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    await ui.get('[data-preview="qwen3"]').trigger('click'); await flushPromises(); await flushPromises();
+    const preview = vi.mocked(fetch).mock.calls.find(([input]) => String(input).endsWith('/generation/previews'));
+    expect(JSON.parse(String(preview?.[1]?.body))).toMatchObject({ engines: ['qwen3'], samples: 1, batch_size: 1, language: 'en', english_accent: 'us' });
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+    expect(ui.get('audio[data-preview-audio="qwen3"]').attributes('src')).toBe('/api/studio/wakewords/a/generation/previews/preview-ready/audio');
+    workspace.selectedId.value = 'b'; await flushPromises(); await flushPromises();
+    expect(ui.find('[data-preview-audio]').exists()).toBe(false);
+    ui.unmount();
+  });
+
+  it('submits exactly the checked engines and rejects an empty engine selection', async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    for (const engine of ['omnivoice', 'moss', 'piper']) await ui.get(`[data-engine="${engine}"]`).setValue(false);
+    await ui.get('form').trigger('submit'); await flushPromises();
+    const save = vi.mocked(fetch).mock.calls.find(([input, init]) => String(input).endsWith('/generation/jobs') && init?.method === 'POST');
+    expect(JSON.parse(String(save?.[1]?.body)).engines).toEqual(['qwen3']);
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+    await ui.get('[data-engine="qwen3"]').setValue(false);
+    await ui.get('form').trigger('submit');
+    expect(ui.get('[role="alert"]').text()).toContain('at least one');
     ui.unmount();
   });
 
@@ -99,7 +136,7 @@ describe("ArtificialPage", () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     expect((ui.get('input[data-batch-id="ready"]').element as HTMLInputElement).checked).toBe(true);
     expect((ui.get('input[data-batch-id="partial"]').element as HTMLInputElement).disabled).toBe(true);
-    await ui.get('[data-action="generate"]').trigger("click"); await flushPromises();
+    await ui.get('form').trigger('submit'); await flushPromises();
     expect(ui.get('[data-job-id="generation-queued"]').text()).toContain("queued");
     await ui.get('[data-action="cancel-job"]').trigger("click"); await flushPromises();
     expect(ui.get('[data-job-id="generation-queued"]').text()).toContain("cancelled");
@@ -112,7 +149,7 @@ describe("ArtificialPage", () => {
   it("binds Generate to the word captured at click time and clears stale save busy state on a switch", async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     delayRecipeSave = true;
-    await ui.get('[data-action="generate"]').trigger("click"); await flushPromises();
+    await ui.get('form').trigger('submit'); await flushPromises();
     workspace.selectedId.value = "b"; await flushPromises();
     expect(resolveRecipeSave).toBeTypeOf("function"); resolveRecipeSave?.(json(recipe)); await flushPromises(); await flushPromises();
     const generatedForB = vi.mocked(fetch).mock.calls.some(([input, init]) => String(input).endsWith("/wakewords/b/generation/jobs") && init?.method === "POST");

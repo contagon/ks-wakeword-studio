@@ -1,5 +1,7 @@
 # Kiosk Wakeword Studio Implementation Plan
 
+Historical plan. Update (2026-10-18): companion-engine tasks and tests below are superseded by microWakeWord-only training and publication. They do not describe currently supported functionality.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver a compact multi-wakeword studio that scrapes kiosk diagnostics, supports manual classification, trains on cron schedules, and publishes reversible model updates through a fleet leader or standalone kiosks.

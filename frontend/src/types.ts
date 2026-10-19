@@ -73,7 +73,6 @@ export interface AutoTrainForm extends JsonRecord {
   advertised_base_url: string;
   tater_url: string;
   notify_satellites: boolean;
-  train_openwakeword: boolean;
 }
 
 export interface AutoTrainPayload extends JsonRecord {
@@ -94,9 +93,6 @@ export interface WakeWordItem extends JsonRecord {
   esphomeJsonUrl?: string;
   model_url?: string;
   modelUrl?: string;
-  dual_model?: boolean;
-  bundle_url?: string;
-  openwakeword_model_url?: string;
 }
 
 export interface ManagedDataItem extends JsonRecord {

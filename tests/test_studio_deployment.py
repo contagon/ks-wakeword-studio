@@ -319,7 +319,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(self.status()['excluded'].state, 'synced')
         self.assertEqual(self.client.uploads('excluded'), [])
 
-    def test_companion_uses_distinct_stem_and_no_oww_metadata_is_uploaded(self):
+    def test_historical_companion_artifacts_are_never_uploaded(self):
         from studio.models import TrainingResult
         class Adapter:
             def run(self, manifest, root, on_log, cancel):
@@ -332,9 +332,9 @@ class DeploymentTests(unittest.TestCase):
         self.runtime.training.adapter_factory = lambda context: Adapter()
         self.train()
         names = {n for _, n, _ in self.client.uploads()}
-        self.assertEqual(names, {'hello_robot.json', 'hello_robot.tflite', 'hello_robot.oww.onnx'})
+        self.assertEqual(names, {'hello_robot.json', 'hello_robot.tflite'})
         self.assertEqual(self.status()['solo'].state, 'published')
-        self.assertIn('openwakeword/hello_robot.oww.onnx', self.client.loaded['solo'])
+        self.assertNotIn('openwakeword/hello_robot.oww.onnx', self.client.loaded['solo'])
 
     def test_api_archive_history_publish_and_cross_word_rollback_validation(self):
         from fastapi import FastAPI

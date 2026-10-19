@@ -24,6 +24,13 @@ export function createWorkspace(routes: StudioRoutes) {
     notice.value = available || !id ? "" : unavailable;
     selectedId.value = available ? id : wakewords.value[0]?.id ?? "";
   }
+  function remove(id: string) {
+    // Invalidate any pre-deletion list response so it cannot resurrect the word.
+    listRequest?.abort();
+    loading.value = false;
+    wakewords.value = wakewords.value.filter(word => word.id !== id);
+    if (selectedId.value === id) select(wakewords.value[0]?.id ?? "");
+  }
   async function refreshSelected() {
     wordRequest?.abort();
     const controller = new AbortController();
@@ -86,7 +93,7 @@ export function createWorkspace(routes: StudioRoutes) {
   }
   watch(selectedId, () => { void refreshSelected(); }, { flush: "sync" });
   onScopeDispose(() => { disposed = true; listRequest?.abort(); wordRequest?.abort(); });
-  return { wakewords, selectedId, selected, summary, loading, selectedLoading, error, selectedError, notice, load, select, refreshSelected };
+  return { wakewords, selectedId, selected, summary, loading, selectedLoading, error, selectedError, notice, load, select, remove, refreshSelected };
 }
 export type Workspace = ReturnType<typeof createWorkspace>;
 export const workspaceKey: InjectionKey<Workspace> = Symbol("studio-workspace");

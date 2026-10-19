@@ -49,11 +49,12 @@ describe("NegativeDatasetsPage", () => {
   it("searches, filters, paginates a 200-entry real catalog, and exposes install state/progress and provenance", async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     expect(ui.text()).toContain("1–50 of 200"); expect(ui.text()).toContain("Corpus 0"); expect(ui.text()).toContain("Example source"); expect(ui.text()).toContain("CC-BY");
-    expect(ui.get('[data-oww-compatibility]').text()).toContain("MWW-only"); expect(ui.get('[data-oww-compatibility]').text()).toContain("dinner_party_eval");
+    expect(ui.find('[data-oww-compatibility]').exists()).toBe(false);
+    expect(ui.get('input[data-dataset-id="set-0"]').element.closest('label')?.classList.contains('studio-checkbox-label')).toBe(true);
     await ui.get('[data-action="next-page"]').trigger("click"); await flushPromises();
     expect(ui.text()).toContain("51–100 of 200"); expect(ui.text()).toContain("Corpus 50");
     await ui.get("input[name=dataset-search]").setValue("speech"); await flushPromises();
-    expect(ui.text()).toContain("Corpus 150"); expect(ui.text()).toContain("1–1 of 1");
+    expect(ui.text()).toContain("Corpus 150"); expect(ui.find('.studio-pagination').exists()).toBe(false);
     await ui.get("input[name=dataset-search]").setValue(""); await flushPromises();
     await ui.get("select[name=dataset-status]").setValue("running"); await flushPromises();
     expect(ui.text()).not.toContain("Corpus 150"); expect(ui.text()).toContain("Corpus 2"); expect(ui.get('[data-job-id="download-2"]').text()).toContain("running");

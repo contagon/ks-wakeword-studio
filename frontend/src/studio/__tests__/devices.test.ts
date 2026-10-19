@@ -24,6 +24,18 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("shared fleet registry", () => {
+  it("opens registration for an empty fleet and collapses it once configured", async () => {
+    const ui = mount(DeviceRegistry, { props: { surface: "scrape" } });
+    await flushPromises();
+    expect(ui.get('details[data-device-registration]').attributes('open')).toBeDefined();
+    await ui.get('input[name="url"]').setValue('http://leader');
+    await ui.get('input[name="token"]').setValue('token');
+    await ui.get('form[data-device-add]').trigger('submit');
+    await flushPromises();
+    expect(ui.get('details[data-device-registration]').attributes('open')).toBeUndefined();
+    expect(ui.get('[data-device-registration] summary').text()).toContain('Add device');
+    ui.unmount();
+  });
   it.each(["scrape", "deploy"] as const)("shares a leader added from the %s surface with the other surface and never offers follower deploy", async surface => {
     const other = surface === "scrape" ? "deploy" : "scrape";
     const first = mount(DeviceRegistry, { props: { surface } });

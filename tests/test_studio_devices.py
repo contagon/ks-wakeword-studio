@@ -154,7 +154,7 @@ class DeviceTests(unittest.TestCase):
         for device in (updated, cached):
             for operation in (lambda: self.service.client.diagnostics(device),
                               lambda: self.service.client.audio(device, "clip-1"),
-                              lambda: self.service.client.stage_model(device, "a.onnx", io.BytesIO(b"a")),
+                              lambda: self.service.client.stage_model(device, "a.tflite", io.BytesIO(b"a")),
                               lambda: self.service.client.commit_models(device)):
                 with self.assertRaises(RemoteRejected):
                     operation()

@@ -55,14 +55,17 @@ onBeforeUnmount(() => registry.abort());
 
 <template>
   <section class="studio-card" data-device-registry>
-    <div class="flex flex-wrap items-start justify-between gap-3"><div><h2>Fleet setup</h2><p class="studio-muted">Register one fleet leader or standalone kiosks. A leader is authoritative: its existing mirror can propagate selections and remove follower-only models. This studio never edits enabled selections or uploads directly to followers.</p></div><button type="button" :disabled="registry.loading.value" @click="registry.load(true)">Refresh registry</button></div>
+    <div class="flex flex-wrap items-start justify-between gap-3"><div><h2>Fleet setup</h2><p class="studio-muted">Register a fleet leader or standalone kiosks.</p></div><button type="button" :disabled="registry.loading.value" @click="registry.load(true)">Refresh registry</button></div>
+    <details class="mt-3"><summary>Fleet safety details</summary><p class="studio-muted">Register one fleet leader or standalone kiosks. A leader is authoritative: its existing mirror can propagate selections and remove follower-only models. This studio never edits enabled selections or uploads directly to followers.</p><p v-if="props.surface === 'deploy'" class="studio-muted text-xs mt-3">Publication staging prerequisite: upload staging must start clean and no concurrent manual uploads may occur while the trainer owns a publication. This condition cannot be checked automatically.</p></details>
     <p v-if="notice" class="studio-note" role="status">{{ notice }}</p><p v-if="error || registry.error.value" class="studio-note" role="alert">{{ error || registry.error.value }}</p>
-    <form data-device-add class="grid gap-3 mt-3" @submit.prevent="add">
+    <details data-device-registration class="mt-3" :open="!registry.devices.value.length"><summary>Add device</summary>
+    <form data-device-add class="studio-registration-row" @submit.prevent="add">
       <label>Address<input v-model="url" required name="url" autocomplete="url" placeholder="http://kiosk.local:8789"></label>
       <label>Role<select v-model="role" name="role"><option value="standalone">Standalone</option><option value="leader">Fleet leader</option></select></label>
       <label>Admin token<input ref="tokenInput" required name="token" type="password" autocomplete="new-password"></label>
       <button type="submit" class="studio-primary" :disabled="busy === 'add'">Add device</button>
     </form>
+    </details>
     <p v-if="registry.loading.value" class="studio-muted mt-3">Loading registered devices…</p>
     <div v-else class="mt-4 grid gap-2">
       <article v-for="device in registry.devices.value" :key="device.id" class="studio-device-row" :data-device-id="device.id">
@@ -71,6 +74,5 @@ onBeforeUnmount(() => registry.abort());
       </article>
       <p v-if="!registry.devices.value.length" class="studio-muted">No kiosks registered yet.</p>
     </div>
-    <p v-if="props.surface === 'deploy'" class="studio-muted text-xs mt-3">Publication staging prerequisite: upload staging must start clean and no concurrent manual uploads may occur while the trainer owns a publication. This condition cannot be checked automatically.</p>
   </section>
 </template>

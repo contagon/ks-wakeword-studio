@@ -92,6 +92,7 @@ class GenerationRecipe:
     tts_mode: str
     samples: int
     batch_size: int
+    engines: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -118,7 +119,6 @@ class Batch:
 @dataclass(frozen=True)
 class TrainingSettings:
     training_steps: int = 40000
-    train_openwakeword: bool = False
 
 
 @dataclass(frozen=True)

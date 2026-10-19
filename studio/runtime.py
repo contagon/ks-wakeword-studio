@@ -50,8 +50,10 @@ class StudioRuntime:
             try:
                 blobs = BlobStore(store.root / "blobs")
                 blobs.recover()
+                from studio.workspace_deletion import recover_workspace_deletions
+                recover_workspace_deletions(store, blobs)
                 self._blobs = blobs
-                self._workspaces = WorkspaceService(store)
+                self._workspaces = WorkspaceService(store, blobs=blobs)
                 self._samples = SampleService(store, blobs)
                 self._devices = DeviceService(store)
                 self._collection = CollectionService(store, self._samples, self._devices, clock=self.clock)
@@ -67,6 +69,7 @@ class StudioRuntime:
                 self._workers.register('scrape', 'collection', self._collect_job)
                 self._workers.register('download', 'download', self._datasets.execute)
                 self._workers.register('generation', 'gpu', self._generation.handle)
+                self._workers.register('preview', 'gpu', self._generation.handle_preview)
                 self._workers.register('train', 'gpu', self._training.handle)
                 self._workers.register_completion('train', lambda job: self._deployment.retry_due(self.clock()))
                 self._jobs.recover()

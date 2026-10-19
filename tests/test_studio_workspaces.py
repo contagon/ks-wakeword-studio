@@ -41,6 +41,14 @@ class WorkspaceTests(unittest.TestCase):
             self.service.create("Different phrase", "de", "hello")
         self.assertEqual(self.service.list(0, 50).total, 1)
 
+    def test_generated_model_ids_are_safe_unique_and_stable(self):
+        for phrase in ("Hey kitchen", "你好", "!!!", "é" * 200):
+            first = self.service.create(phrase, "en")
+            second = self.service.create(phrase, "en")
+            self.assertRegex(first.model_id, r"^[a-z0-9][a-z0-9_-]{0,63}$")
+            self.assertNotEqual(first.model_id, second.model_id)
+            self.assertEqual(self.service.update(first.id, WakewordUpdate(phrase="Changed")).model_id, first.model_id)
+
     def test_phrase_edit_keeps_model_id(self):
         word = self.service.create("Old phrase", "en", "stable_id")
         updated = self.service.update(word.id, WakewordUpdate(phrase="New phrase"))
@@ -99,6 +107,15 @@ class WorkspaceAPITests(unittest.TestCase):
         self.runtime.shutdown()
         self.runtime.startup()
         self.assertEqual(self.runtime.workspaces.get(first.id), first)
+
+    def test_create_without_model_id_and_delete_workspace(self):
+        response = self.client.post('/api/studio/wakewords', json={'phrase': 'Hello', 'language': 'en'})
+        self.assertEqual(response.status_code, 201, response.text)
+        word = response.json()
+        self.assertTrue(word['model_id'])
+        self.assertEqual(self.client.delete(f'/api/studio/wakewords/{word["id"]}').status_code, 204)
+        self.assertEqual(self.client.get(f'/api/studio/wakewords/{word["id"]}').status_code, 404)
+        self.assertEqual(self.client.delete(f'/api/studio/wakewords/{word["id"]}').status_code, 404)
 
     def test_workspace_apis_never_expose_tokens(self):
         secret = "private-admin-token-should-not-leak"

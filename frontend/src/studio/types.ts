@@ -1,7 +1,7 @@
 /** Public records from studio/models.py. IDs are opaque; timestamps are UTC ISO strings. */
 export interface Page<T> { items: T[]; total: number; offset: number; limit: number }
 export interface Wakeword { id: string; phrase: string; language: string; readonly model_id: string; created_at: string; updated_at: string }
-export type CreateWakeword = Pick<Wakeword, "phrase" | "language" | "model_id">;
+export type CreateWakeword = Pick<Wakeword, "phrase" | "language"> & { model_id?: string };
 export type UpdateWakeword = Partial<Pick<Wakeword, "phrase" | "language">>;
 export interface Schedule { scope: string; cron: string; timezone: string; enabled: boolean; next_run_at: string }
 export type ScheduleInput = Pick<Schedule, "cron" | "timezone" | "enabled">;
@@ -38,10 +38,10 @@ export interface CollectionCounters { listed: number; new: number; already_seen:
 export interface CollectionRun extends CollectionCounters { id: string; started_at: string; finished_at: string | null; status: string; devices: (CollectionCounters & { device_id: string; status: string; errors: string[] })[] }
 export interface Dataset { id: string; name: string; description: string; source: string; license: string; representation: string; split: string; adapter: string; purpose: string; download_bytes: number | null; installed_bytes: number | null; fingerprint: string | null; selected: boolean; status: string; job_id: string | null; error_code: string | null }
 export type TtsMode = "hybrid" | "modern" | "piper";
-export interface GenerationRecipe { language: string; english_accent: string; tts_mode: TtsMode; samples: number; batch_size: number }
+export interface GenerationRecipe { language: string; english_accent: string; tts_mode: TtsMode; samples: number; batch_size: number; engines?: string[] | null }
 export interface GenerationCapability { language: string; name: string; accent_applies: boolean; english_accents: { code: string; label: string }[]; engines: Record<TtsMode, string[]> }
 export interface Batch { id: string; word_id: string; phrase: string; recipe: GenerationRecipe; status: string; created_at: string; finished_at: string | null; audio: { audio_id: string; original_hash: string; normalized_hash: string; family_id: string }[]; selected: boolean }
-export interface TrainingSettings { training_steps: number; train_openwakeword: boolean }
+export interface TrainingSettings { training_steps: number }
 export interface TrainingCounts { positive: number; negative: number; artificial: number }
 export interface RunManifest { schema_version: number; run_id: string; word_id: string; model_id: string; phrase: string; language: string; config: TrainingSettings; seed: number; audio: { audio_id: string; original_hash: string; normalized_hash: string; family_id: string; path: string; label: string; split: string; sample_id: string | null; revision: number | null; batch_id: string | null }[]; datasets: { id: string; path: string; representation: string; split: string; adapter: string; fingerprint: string }[]; augmentation?: AugmentationInput[]; selected_batches: string[]; fingerprint: string; created_at: string }
 export interface AugmentationInput { id: string; path: string; fingerprint: string }

@@ -470,6 +470,17 @@ class ModernTtsTests(unittest.TestCase):
             args.tts_mode = "hybrid"
             self.assertEqual(instance.engines()[-1], "piper")
 
+            args.engines = 'moss,qwen3'
+            self.assertEqual(instance.engines(), ['moss', 'qwen3'])
+            for invalid in ('', 'qwen3,qwen3', 'unrecognized'):
+                args.engines = invalid
+                with self.subTest(engines=invalid), self.assertRaises(ValueError):
+                    instance.engines()
+            args.language = 'fi'
+            args.engines = 'qwen3'
+            with self.assertRaises(ValueError):
+                instance.engines()
+
     def test_voice_descriptions_are_distinct_for_default_bank(self) -> None:
         descriptions = generator_module.qwen_descriptions("English", 128)
         self.assertEqual(len(descriptions), 128)

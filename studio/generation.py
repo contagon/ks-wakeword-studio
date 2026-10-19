@@ -6,7 +6,7 @@ import os
 import re
 import stat
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -69,9 +69,64 @@ class GenerationService:
                 or type(recipe.samples) is not int or recipe.samples < 1
                 or type(recipe.batch_size) is not int or recipe.batch_size < 1):
             raise ValidationError('Unsupported recipe')
-        if not tts.engines_for_language(recipe.language, recipe.tts_mode,
-                                        piper_available=self._piper_available(recipe.language)):
+        available = tts.engines_for_language(recipe.language, 'hybrid',
+                                             piper_available=self._piper_available(recipe.language))
+        if recipe.engines is not None:
+            if (not isinstance(recipe.engines, list) or not recipe.engines
+                    or not all(isinstance(engine, str) and engine in available for engine in recipe.engines)
+                    or len(set(recipe.engines)) != len(recipe.engines)):
+                raise ValidationError('Unsupported engine selection')
+        elif not tts.engines_for_language(recipe.language, recipe.tts_mode,
+                                          piper_available=self._piper_available(recipe.language)):
             raise ValidationError('No available engines')
+
+    def enqueue_preview(self, word_id, recipe):
+        self._validate(recipe)
+        if recipe.engines is None or len(recipe.engines) != 1:
+            raise ValidationError('Preview requires one engine')
+        recipe = replace(recipe, samples=1, batch_size=1)
+        with self.store.transaction() as db:
+            word = self._word(db, word_id)
+            return self.jobs._enqueue(db, 'preview', word_id,
+                                      {'phrase': word['phrase'], 'recipe': asdict(recipe)}, None, None, self.clock())
+
+    def handle_preview(self, job, context):
+        if (context.queue is not self.jobs or context.job.id != job.id or job.id not in self.jobs._owners
+                or job.kind != 'preview' or self.jobs.get(job.id).status != 'running'):
+            raise Conflict('Owned preview context required')
+        recipe = GenerationRecipe(**job.payload['recipe'])
+        self._validate(recipe)
+        output = self._run_generator(job, context, job.payload['phrase'], recipe)
+        audio = list(self._read_audio(output, recipe.samples))
+        if len(audio) != 1 or context.cancelled():
+            raise Conflict('Preview incomplete or cancelled')
+        with open_directory(self.store.scoped_directory('jobs', job.id)) as directory:
+            fd = os.open('preview.wav', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+            with os.fdopen(fd, 'wb') as output:
+                output.write(audio[0][1])
+                output.flush()
+                os.fsync(output.fileno())
+        return {'preview': True}
+
+    def preview_audio(self, word_id, job_id):
+        with self.store.transaction() as db:
+            self._word(db, word_id)
+            row = db.execute("SELECT 1 FROM studio_jobs WHERE id=? AND word_id=? AND kind='preview' AND status='complete'",
+                             (job_id, word_id)).fetchone()
+            if row is None:
+                raise NotFound('Preview not ready')
+            with open_directory(self.store.scoped_directory('jobs', job_id)) as directory:
+                try:
+                    fd = os.open('preview.wav', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+                    with os.fdopen(fd, 'rb') as source:
+                        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                            raise ValidationError('Unsafe preview')
+                        data = source.read(self.blobs.max_bytes + 1)
+                except FileNotFoundError as exc:
+                    raise NotFound('Preview unavailable') from exc
+                if len(data) > self.blobs.max_bytes:
+                    raise ValidationError('Preview too large')
+                return canonical_wav(data)
 
     def save_recipe(self, word_id, recipe):
         self._validate(recipe)
@@ -89,19 +144,23 @@ class GenerationService:
                 raise NotFound('Generation recipe not saved')
             return GenerationRecipe(**json.loads(row[0]))
 
-    def enqueue(self, word_id):
+    def enqueue(self, word_id, recipe=None):
         # Admit the phrase, recipe and job together. Later edits cannot rewrite them.
         with self.store.transaction() as db:
             word = self._word(db, word_id)
-            row = db.execute('SELECT recipe FROM generation_recipes WHERE word_id=?', (word_id,)).fetchone()
-            if row is None:
-                raise NotFound('Generation recipe not saved')
-            recipe = GenerationRecipe(**json.loads(row[0]))
+            if recipe is None:
+                row = db.execute('SELECT recipe FROM generation_recipes WHERE word_id=?', (word_id,)).fetchone()
+                if row is None:
+                    raise NotFound('Generation recipe not saved')
+                recipe = GenerationRecipe(**json.loads(row[0]))
             self._validate(recipe)
+            encoded = json.dumps(asdict(recipe), sort_keys=True)
+            db.execute('INSERT INTO generation_recipes VALUES (?,?) ON CONFLICT(word_id) DO UPDATE SET recipe=excluded.recipe',
+                       (word_id, encoded))
             job = self.jobs._enqueue(db, 'generation', word_id,
                                      {'phrase': word['phrase'], 'recipe': asdict(recipe)}, None, None, self.clock())
             db.execute('INSERT INTO generation_batches VALUES (?,?,?,?,NULL)',
-                       (job.id, word_id, word['phrase'], row[0]))
+                       (job.id, word_id, word['phrase'], encoded))
             return job
 
     def _batch(self, db, word_id, batch_id):
@@ -161,6 +220,30 @@ class GenerationService:
                 raise Conflict('Generation job not admitted')
             phrase, recipe = row['phrase'], GenerationRecipe(**json.loads(row['recipe']))
         self._validate(recipe)
+        # GPU work occurs outside SQL. Blob publication and reference admission
+        # share the GC write lock, so another workspace cannot collect a blob
+        # between these two operations, even if its content is identical.
+        output = self._run_generator(job, context, phrase, recipe)
+        with self.store.transaction() as db:
+            if db.execute('SELECT status FROM studio_jobs WHERE id=?', (job.id,)).fetchone()[0] != 'running' or context.stop_event.is_set():
+                raise Conflict('Generation cancelled')
+            for index, (data, normalized) in enumerate(self._read_audio(output, recipe.samples)):
+                if context.stop_event.is_set():
+                    raise Conflict('Generation cancelled')
+                original = self.blobs.put(io.BytesIO(data)).sha256
+                canonical = self.blobs.put(io.BytesIO(normalized)).sha256
+                known = db.execute('SELECT family_id FROM audio_families WHERE content_hash=?', (canonical,)).fetchone()
+                family = known[0] if known else canonical
+                db.execute('INSERT OR IGNORE INTO audio_families VALUES (?,?)', (canonical, family))
+                audio_id = uuid4().hex
+                db.execute('INSERT INTO audio_records VALUES (?,?,?,?,NULL,NULL,NULL,?)',
+                           (audio_id, original, canonical, family, self._now()))
+                db.execute('INSERT INTO generation_batch_audio VALUES (?,?,?)', (job.id, index, audio_id))
+            db.execute('UPDATE generation_batches SET committed_at=? WHERE id=?', (self._now(), job.id))
+        context.log('Synthetic batch validated')
+        return self.get_batch(job.word_id, job.id)
+
+    def _run_generator(self, job, context, phrase, recipe):
         root = self.store.scoped_directory('jobs', job.id)
         output = root / 'generation' / 'samples'
         with open_directory(output.parent):
@@ -171,19 +254,20 @@ class GenerationService:
                    f'--data-dir={self.store.root.parent}', f'--output-dir={output}',
                    f'--language={recipe.language}', f'--english-accent={recipe.english_accent}',
                    f'--tts-mode={recipe.tts_mode}', f'--samples={recipe.samples}', f'--batch-size={recipe.batch_size}',
+                   *([f'--engines={",".join(recipe.engines)}'] if recipe.engines is not None else []),
                    '--', phrase]
         context.log('Generating synthetic batch')
         context.run(command, cwd=str(root))
         if context.cancelled():
             raise Conflict('Generation cancelled')
-        prepared = []
+        return output
+
+    def _read_audio(self, output, samples):
         with open_directory(output) as directory:
             names = sorted(name for name in os.listdir(directory) if name.lower().endswith('.wav'))
-            if len(names) != recipe.samples:
+            if len(names) != samples:
                 raise ValidationError('Incomplete batch')
             for name in names:
-                if context.cancelled():
-                    raise Conflict('Generation cancelled')
                 fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
                 with os.fdopen(fd, 'rb') as source:
                     if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
@@ -192,26 +276,7 @@ class GenerationService:
                 if len(data) > self.blobs.max_bytes:
                     raise ValidationError('Generated audio too large')
                 normalized = canonical_wav(data)
-                original = self.blobs.put(io.BytesIO(data)).sha256
-                canonical = self.blobs.put(io.BytesIO(normalized)).sha256
-                prepared.append((original, canonical))
-        # Files are durable before metadata becomes visible. Cancellation and the
-        # complete set of audio records are committed under one SQL write lock.
-        with self.store.transaction() as db:
-            if db.execute('SELECT status FROM studio_jobs WHERE id=?', (job.id,)).fetchone()[0] != 'running' or context.stop_event.is_set():
-                raise Conflict('Generation cancelled')
-            for index, (original, canonical) in enumerate(prepared):
-                known = db.execute('SELECT family_id FROM audio_families WHERE content_hash=?', (canonical,)).fetchone()
-                family = known[0] if known else canonical
-                db.execute('INSERT OR IGNORE INTO audio_families VALUES (?,?)', (canonical, family))
-                audio_id = uuid4().hex
-                db.execute('INSERT INTO audio_records VALUES (?,?,?,?,NULL,NULL,NULL,?)',
-                           (audio_id, original, canonical, family, self._now()))
-                db.execute('INSERT INTO generation_batch_audio VALUES (?,?,?)', (job.id, index, audio_id))
-            db.execute('UPDATE generation_batches SET committed_at=? WHERE id=?', (self._now(), job.id))
-        context.log('Synthetic batch validated')
-        # The worker alone completes the Job after child ownership is released.
-        return self.get_batch(job.word_id, job.id)
+                yield data, normalized
 
     def handle(self, job, context):
         batch = self.execute(job, context)

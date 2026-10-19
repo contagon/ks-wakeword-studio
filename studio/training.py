@@ -21,6 +21,11 @@ def encode(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False)
 
 
+def load_settings(value):
+    """Read historical settings without restoring the removed companion option."""
+    return TrainingSettings(**{key: item for key, item in value.items() if key != 'train_openwakeword'})
+
+
 def load_manifest(value):
     data = json.loads(value)
     if 'legacy_identity' in data:
@@ -28,7 +33,7 @@ def load_manifest(value):
         return LegacyRun(**{key: data[key] for key in LegacyRun.__dataclass_fields__ if key in data})
     from studio.augmentation import AugmentationInput
     data['augmentation'] = tuple(AugmentationInput(**item) for item in data.get('augmentation', []))
-    data['config'] = TrainingSettings(**data['config'])
+    data['config'] = load_settings(data['config'])
     data['audio'] = tuple(TrainingAudio(**a) for a in data['audio'])
     data['datasets'] = tuple(DatasetInput(**d) for d in data['datasets'])
     data['selected_batches'] = tuple(data['selected_batches'])
@@ -51,11 +56,11 @@ class TrainingService:
         WorkspaceService(self.store).get(word_id)
         with self.store.transaction() as db:
             row = db.execute('SELECT config FROM training_settings WHERE word_id=?', (word_id,)).fetchone()
-            return TrainingSettings(**json.loads(row[0])) if row else TrainingSettings()
+            return load_settings(json.loads(row[0])) if row else TrainingSettings()
 
     def save_settings(self, word_id, settings):
         if (not isinstance(settings, TrainingSettings) or type(settings.training_steps) is not int
-                or not 1 <= settings.training_steps <= 10000000 or type(settings.train_openwakeword) is not bool):
+                or not 1 <= settings.training_steps <= 10000000):
             raise ValidationError('Invalid training settings')
         WorkspaceService(self.store).get(word_id)
         with self.store.transaction() as db:
@@ -89,7 +94,7 @@ class TrainingService:
             if word is None:
                 raise NotFound('Workspace not found')
             config = db.execute('SELECT config FROM training_settings WHERE word_id=?', (word_id,)).fetchone()
-            settings = TrainingSettings(**json.loads(config[0])) if config else TrainingSettings()
+            settings = load_settings(json.loads(config[0])) if config else TrainingSettings()
             datasets = tuple(self.datasets.snapshot(word_id, _db=db))
             seed = db.execute('SELECT seed FROM training_seed WHERE id=1').fetchone()[0]
             rows = db.execute("SELECT a.*,s.id sample_id,s.revision,s.label,NULL batch_id FROM samples s JOIN audio_records a ON a.id=s.audio_id "

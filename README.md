@@ -9,7 +9,7 @@
   </a>
 </p>
 
-Kiosk Wakeword Studio manages independent wakeword workspaces, collects rolling kiosk diagnostics, supports manual review and synthetic batches, schedules NVIDIA/CUDA training, and publishes reversible archived models through one fleet leader plus standalone kiosks. microWakeWord is supported by the current dataset catalog; optional openWakeWord requires separately provisioned compatible inputs (see below).
+Kiosk Wakeword Studio manages independent wakeword workspaces, collects rolling kiosk diagnostics, supports manual review and synthetic batches, schedules NVIDIA/CUDA training, and publishes reversible archived microWakeWord models through one fleet leader plus standalone kiosks.
 
 Real samples come from device-captured wake audio, close misses, or manual uploads. Every saved sample is normalized to `16 kHz / mono / 16-bit PCM WAV` before training.
 
@@ -98,7 +98,7 @@ in the same `docker run` command.
 The flags:
 
 - `--gpus all` enables GPU acceleration.
-- `--shm-size=8g` gives PyTorch DataLoader workers enough shared memory during openWakeWord training. This is separate from free disk space and requires recreating an existing container.
+- `--shm-size=8g` provides shared memory for audio processing workers. This is separate from free disk space and requires recreating an existing container.
 - `--network host` exposes the trainer server directly on your host. Studio initiates authenticated requests to kiosks; it does not require legacy satellite push uploads.
 - `-e REC_PORT=8789` sets the trainer web UI and captured-audio port. Change this value if `8789` is already in use.
 - `-v $(pwd):/data` persists models, downloaded voices, datasets, samples, and generated wake-word artifacts.
@@ -164,7 +164,7 @@ These setup commands perform real, potentially large downloads/conversions. Run
 them to completion while training is stopped; Studio does not silently install
 corpora after taking a snapshot. Missing/empty/unsafe roots fail training with
 setup guidance. Studio hashes each installed file and retains independent copies
-under `studio/augmentation/<content-fingerprint>/`. Both MWW and optional OWW use
+under `studio/augmentation/<content-fingerprint>/`. microWakeWord uses
 only these pinned paths, never the mutable shared roots. Raw corpus copies are
 **not classifier-negative features**, nor are they labeled human negatives.
 
@@ -172,7 +172,7 @@ Intentional cost: the first snapshot of each distinct corpus version needs an
 additional full corpus copy plus temporary staging space; changed versions remain
 retained for old manifests. Unchanged versions share retained storage across words
 and runs. Every snapshot scans/hashes the shared and retained bytes, and the engine
-boundary verifies retained checksums again (OWW verifies at its boundary too).
+boundary verifies retained checksums again.
 Expect substantial disk I/O and snapshot latency on large installations, even for
 an unchanged scheduled run. No automatic corpus pruning is performed; retain these
 directories with the database and archives. Do not edit retained copies manually.
@@ -297,20 +297,24 @@ build; global collection and each word's training schedule are independent.
 
 ### TTS and dataset compatibility
 
-Recipes expose available languages and `modern`, `hybrid`, or `piper` modes through
-the server catalog. Piper availability depends on installed voices; English accent
+The Artificial page has generation settings above a list of generated datasets.
+Choose individual models (OmniVoice, Qwen3-TTS, MOSS-TTS, and installed Piper voices)
+using checkboxes. **Generate dataset** remembers the settings and splits the total
+sample count across the selected models. Each model's **Preview** generates one
+sample of the workspace phrase using the current language/accent, with playback
+controls; previews never enter the training datasets or change saved settings.
+Both generation and previews use the GPU queue and report real job progress.
+Piper availability depends on installed voices; English accent
 emphasis applies only where supported. Completed selected synthetic batches join
 explicitly reviewed real audio; generation is not silently rerun by training.
 Evaluation families remain stable across variants and historical runs.
 
 The current negative catalog contains **MWW feature tensors only** (`mww_mmap`),
-not generic WAV backgrounds or OWW embeddings. `dinner_party_eval` is evaluation-only
+not generic WAV backgrounds or other engines' embeddings. `dinner_party_eval` is evaluation-only
 and is never sampled as a training negative. Augmentation backgrounds are separate
-from classifier negatives. Optional OWW requires explicit compatible
-`oww_embeddings_npy` inputs, including evaluation embeddings, plus suitable reviewed
-negative families; raw-audio catalog conversion is not implemented. An incompatible
+from classifier negatives. Raw-audio catalog conversion is not implemented. An incompatible
 selection fails with an actionable error—no silent stock-negative download or
-cross-engine reuse. Real training also requires independent positive train,
+incompatible feature reuse. Real training also requires independent positive train,
 validation and testing families (and corresponding reviewed-negative splits when
 used); a tiny smoke-test corpus is not sufficient for actual ML training.
 
@@ -473,14 +477,13 @@ The default Tater URL, `http://127.0.0.1:8501`, assumes the documented host netw
 2. Choose the language and TTS source.
 3. Optionally check browser pronunciation with `System preview`.
 4. Review the positive and negative sample counts.
-5. Leave `Build the openWakeWord companion model` enabled for a dual-model bundle, or turn it off for an MWW-only run.
-6. Click `Start training` and watch the popup training console.
+5. Click `Start training` and watch the popup training console.
 
 Personal samples are optional. Training can run with zero personal samples after confirmation, using generated TTS samples and the stock negative datasets.
 
 Reviewed negative samples are converted into `/data/work/reviewed_negative_features/` and inserted into the training YAML as a hard-negative feature set when present.
 
-The first dual-model run downloads a pinned revision of Tater's openWakeWord trainer and creates a separate environment under `/data/openwakeword`. Those assets are cached for later runs. OWW training starts only after MWW succeeds, publishes through a staging directory, and cannot overwrite the existing MWW JSON/TFLite pair. Calibration automatically packages a stricter OWW-only threshold and a separate recall-preserving threshold for MWW + OWW confirmation; users do not enter these values manually. The upstream OWW custom-training path is strongest for English; validate other languages carefully or use the MWW-only checkbox.
+Training produces a calibrated microWakeWord JSON/TFLite pair. No companion engine or separate training environment is installed.
 
 On RTX 50-series / Blackwell GPUs, the Blackwell Docker image keeps sample generation and augmentation in the normal Python 3.12 trainer environment, then runs only the TensorFlow training/export stage in `/data/.venv-blackwell` with Python 3.13 and the Blackwell-native TensorFlow wheel.
 
@@ -549,13 +552,9 @@ The trainer also syncs Tater-ready wake-word artifacts into:
 ```text
 /data/trained_wake_words/<wake_word>.tflite
 /data/trained_wake_words/<wake_word>.json
-/data/trained_wake_words/<wake_word>.oww.onnx         # Echo openWakeWord classifier
-/data/trained_wake_words/<wake_word>.oww.json
-/data/trained_wake_words/<wake_word>.oww.verifier.pkl # when positive + negative clips exist
-/data/trained_wake_words/<wake_word>.wake-bundle.json
 ```
 
-The original `<wake_word>.json` and `<wake_word>.tflite` names are unchanged for existing Tater and ESPHome clients. The additive bundle manifest links the MWW TFLite and OWW ONNX models, their SHA-256 hashes, and the calibrated OWW threshold/patience. The `Wake Words` tab exposes the MWW, OWW, and bundle links.
+The `<wake_word>.json` and `<wake_word>.tflite` names remain compatible with existing Tater and ESPHome clients. The `Wake Words` tab exposes the JSON manifest and TFLite model links.
 
 The JSON keeps the standard microWakeWord fields for compatibility:
 

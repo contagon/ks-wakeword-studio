@@ -26,6 +26,16 @@ async function contentOf(src: string | undefined) { return (await media.contents
 const playerSrc = (ui: VueWrapper) => ui.find("audio[data-audio-player]").attributes("src");
 
 describe("keyboard-first classification", () => {
+  it("shows playback guidance only after the current audio is ready", async () => {
+    const audio = server.hold(r => r.url.pathname.endsWith('/s1/audio'));
+    const ui = await open();
+    expect(ui.text()).not.toContain('Press Space once');
+    audio.release(); await settle();
+    expect(ui.text()).toContain('Press Space once');
+    server.db.samples = [];
+    await ui.get('select[name=kind]').setValue('true'); await settle();
+    expect(ui.text()).not.toContain('Press Space once');
+  });
   it("refills beyond 100 acknowledged labels without false queue completion", async () => {
     server.db.samples = Array.from({ length: 125 }, (_, index) => sample(`many-${index}`, "a"));
     const ui = await open();

@@ -34,7 +34,7 @@ class StudioPackagingTests(unittest.TestCase):
                 self.assertIn(['cli/', '/root/mww-scripts/cli/'], copies)
                 self.assertIn(['static/', '/root/mww-scripts/static/'], copies)
                 entrypoints = next(row[:-1] for row in copies if 'trainer_server.py' in row)
-                self.assertTrue({'run.sh', 'train_wake_word', 'trainer_server.py', 'openwakeword_stage.py',
+                self.assertTrue({'run.sh', 'train_wake_word', 'trainer_server.py',
                                  'requirements.txt'}.issubset(entrypoints))
                 self.assertIn('EXPOSE 8789', manifest)
                 self.assertNotIn('npm ', manifest)
@@ -49,7 +49,7 @@ class StudioPackagingTests(unittest.TestCase):
                     shutil.copytree(REPO_ROOT / "studio", package, ignore=shutil.ignore_patterns("__pycache__"))
                     shutil.copyfile(REPO_ROOT / 'tts_config.py', package.parent / 'tts_config.py')
                     shutil.copytree(REPO_ROOT / 'cli', package.parent / 'cli', ignore=shutil.ignore_patterns('__pycache__'))
-                    for helper in ('dataset_config.py', 'studio_train.py', 'validate_studio_model.py', 'oww_dataset_trainer.py',
+                    for helper in ('dataset_config.py', 'studio_train.py', 'validate_studio_model.py',
                                    'tts_generate_samples.py', 'wake_word_sample_trainer'):
                         self.assertTrue((package.parent / 'cli' / helper).is_file())
                     self.assertTrue((package / "schema.sql").is_file())

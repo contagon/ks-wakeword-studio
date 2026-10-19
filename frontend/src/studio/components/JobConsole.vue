@@ -4,6 +4,7 @@ import { studioApi } from "../api";
 import type { Job } from "../types";
 
 const props = withDefaults(defineProps<{ jobId: string; intervalMs?: number; logLimit?: number }>(), { intervalMs: 2000, logLimit: 8192 });
+const emit = defineEmits<{ update: [job: Job] }>();
 const job = ref<Job | null>(null);
 const log = ref("");
 const error = ref("");
@@ -22,6 +23,7 @@ async function refresh(current = ++generation): Promise<void> {
     const [next, tail] = await Promise.all([studioApi.job(props.jobId, controller.signal), studioApi.jobLogs(props.jobId, props.logLimit, controller.signal)]);
     if (controller.signal.aborted || current !== generation || props.jobId !== next.id) return;
     job.value = next; log.value = tail.text;
+    emit('update', next);
     schedule(current);
   } catch (cause) {
     if (!controller.signal.aborted && current === generation) error.value = cause instanceof Error ? cause.message : "Unable to load job status.";
@@ -32,7 +34,7 @@ async function cancel(): Promise<void> {
   request?.abort(); if (timer) clearTimeout(timer); timer = undefined; const current = ++generation; const controller = new AbortController(); request = controller; error.value = "";
   try {
     const next = await studioApi.cancelJob(props.jobId, controller.signal);
-    if (!controller.signal.aborted && current === generation) { job.value = next; if (!terminal.value) await refresh(current); }
+    if (!controller.signal.aborted && current === generation) { job.value = next; emit('update', next); if (!terminal.value) await refresh(current); }
   } catch (cause) { if (!controller.signal.aborted && current === generation) error.value = cause instanceof Error ? cause.message : "Unable to cancel job."; }
 }
 watch(() => props.jobId, () => { stop(); job.value = null; log.value = ""; void refresh(); }, { immediate: true });

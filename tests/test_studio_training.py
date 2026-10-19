@@ -157,8 +157,9 @@ class TrainingTests(unittest.TestCase):
         app.include_router(create_router(self.runtime))
         with TestClient(app) as client:
             base = f'/api/studio/wakewords/{self.word.id}/training'
-            self.assertEqual(client.put(base + '/settings', json={'training_steps': 123, 'train_openwakeword': False}).status_code, 200)
-            self.assertEqual(client.get(base + '/settings').json()['training_steps'], 123)
+            self.assertEqual(client.put(base + '/settings', json={'training_steps': 123}).status_code, 200)
+            self.assertEqual(client.get(base + '/settings').json(), {'training_steps': 123})
+            self.assertEqual(client.put(base + '/settings', json={'training_steps': 123, 'train_openwakeword': True}).status_code, 422)
             self.assertEqual(client.get(base + '/counts').json()['positive'], 0)
             self.assertEqual(client.post(base + '/jobs').status_code, 201)
             self.assertEqual(client.get(base + '/runs').json()['total'], 1)
@@ -250,7 +251,7 @@ class TrainingTests(unittest.TestCase):
             finally:
                 store.close()
 
-    def test_dataset_versions_pinned_at_start_and_oww_incompatibility_before_commands(self):
+    def test_dataset_versions_pinned_at_start_and_mww_settings_reused(self):
         import zipfile
         from studio.models import TrainingSettings
         self.audio()
@@ -268,11 +269,11 @@ class TrainingTests(unittest.TestCase):
         self.assertEqual(self.runtime.datasets.snapshot(self.word.id), [])
         self.runner.hook = None
         self.runtime.datasets.select(self.word.id, ['speech'])
-        self.service.save_settings(self.word.id, TrainingSettings(123, True))
-        failed = self.run_job()
-        self.assertEqual(failed.status, 'failed')
-        self.assertEqual(len(self.runner.calls), 1)
-        self.assertIn('cannot consume microWakeWord feature tensors', self.runtime.jobs.log_tail(failed.id))
+        self.service.save_settings(self.word.id, TrainingSettings(123))
+        completed = self.run_job()
+        self.assertEqual(completed.status, 'complete')
+        self.assertEqual(len(self.runner.calls), 2)
+        self.assertEqual(asdict(self.service.get_manifest(self.word.id, completed.id).config), {'training_steps': 123})
 
     def test_quarantined_source_is_not_an_effective_training_input(self):
         from studio.models import DiagnosticClip, SampleQuery

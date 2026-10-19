@@ -47,7 +47,7 @@ class CreateWakeword(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     phrase: str
     language: str
-    model_id: str
+    model_id: str | None = None
 
 
 class DeviceCredentials(BaseModel):
@@ -122,6 +122,7 @@ class GenerationRecipeBody(BaseModel):
     tts_mode: str
     samples: int
     batch_size: int
+    engines: list[str] | None = None
 
 
 class MigrationImportBody(BaseModel):
@@ -139,7 +140,6 @@ class BatchSelectionBody(BaseModel):
 class TrainingSettingsBody(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     training_steps: int
-    train_openwakeword: bool
 
 
 class PublishBody(BaseModel):
@@ -263,8 +263,17 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
         return runtime.generation.save_recipe(word_id, GenerationRecipe(**body.model_dump()))
 
     @router.post('/wakewords/{word_id}/generation/jobs', response_model=Job, status_code=201)
-    def generate_batch(word_id: str) -> Job:
-        return runtime.generation.enqueue(word_id)
+    def generate_batch(word_id: str, body: GenerationRecipeBody | None = None) -> Job:
+        return runtime.generation.enqueue(word_id, GenerationRecipe(**body.model_dump()) if body else None)
+
+    @router.post('/wakewords/{word_id}/generation/previews', response_model=Job, status_code=201)
+    def generate_preview(word_id: str, body: GenerationRecipeBody) -> Job:
+        return runtime.generation.enqueue_preview(word_id, GenerationRecipe(**body.model_dump()))
+
+    @router.get('/wakewords/{word_id}/generation/previews/{job_id}/audio')
+    def preview_audio(word_id: str, job_id: str):
+        return Response(runtime.generation.preview_audio(word_id, job_id), media_type='audio/wav',
+                        headers={'Cache-Control': 'no-store'})
 
     @router.get('/wakewords/{word_id}/generation/batches', response_model=Page[Batch])
     def batches(word_id: str, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)) -> Page[Batch]:
@@ -373,6 +382,11 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.patch("/wakewords/{word_id}", response_model=Wakeword)
     def update_word(word_id: str, body: UpdateWakeword) -> Wakeword:
         return runtime.workspaces.update(word_id, WakewordUpdate(body.phrase, body.language))
+
+    @router.delete("/wakewords/{word_id}", status_code=204)
+    def delete_word(word_id: str) -> Response:
+        runtime.workspaces.delete(word_id)
+        return Response(status_code=204)
 
     @router.get("/wakewords/{word_id}/samples", response_model=Page[Sample])
     def list_samples(word_id: str, query: SampleQuery = Depends(sample_query)) -> Page[Sample]:

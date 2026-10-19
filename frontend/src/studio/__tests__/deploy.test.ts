@@ -104,4 +104,15 @@ describe("Deploy page", () => {
     expect(actionSignal?.aborted).toBe(true);
     resolveAction?.(json([publication("a")]));
   });
+  it("keeps staging and quarantine warnings prominent with full publication details expandable", async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    const notice = ui.get('[data-staging-notice]');
+    expect(notice.text()).toContain('clean staging required');
+    expect(notice.get('[data-quarantine-notice]').element.closest('details')).toBeNull();
+    const details = notice.get('details');
+    expect(details.attributes('open')).toBeUndefined();
+    expect(details.text()).toContain('Followers are indirect recipients only');
+    expect(details.text()).toContain('stop uploads');
+    ui.unmount();
+  });
 });

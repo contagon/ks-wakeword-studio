@@ -2,6 +2,8 @@
 
 Status: approved by user on 2026-10-17; implementation planning authorized. Execution approach to be selected after plan review.
 
+Update (2026-10-18): training and publication are microWakeWord-only. Historical companion-engine implementation notes are superseded; kiosk cache-refresh observations still describe the external kiosk contract.
+
 ## Intent
 
 Repurpose this NVIDIA Docker trainer around improving multiple wakewords using Kiosk Satellite diagnostic recordings. The core workflow is scheduled collection, fast manual labeling, manual or scheduled training, and automatic publication of successful models. Preserve dated model versions for rollback.
@@ -85,7 +87,7 @@ Search/filter by label, source/device, date, and real versus artificial; paginat
 
 ### Train
 
-Manual launch and wakeword-specific autotrain cron/timezone. Show effective training inputs, positive/negative/artificial counts, model outputs (microWakeWord with optional openWakeWord companion as already supported), progress/logs, run history, errors, and cancellation.
+Manual launch and wakeword-specific autotrain cron/timezone. Show effective training inputs, positive/negative/artificial counts, microWakeWord model outputs, progress/logs, run history, errors, and cancellation.
 
 Defaults proposed by builder: skip scheduled runs if input/config fingerprints have not changed; no additional "minimum new negatives" threshold; at most one GPU training/generation job at a time with a durable queue. Serialize jobs and snapshot their inputs when they actually begin, not while they wait. Labels created during an active run are picked up next time. Pin selected synthetic batches and negative dataset versions/fingerprints. Persist enough input references/content to keep archived-run provenance valid if the visible library changes; use content-addressed/reference-counted storage or retained run copies (builder chooses).
 

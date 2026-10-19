@@ -2,6 +2,7 @@
 
 import re
 import sqlite3
+import unicodedata
 from collections.abc import Callable
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -15,9 +16,10 @@ def utc_now() -> datetime:
 
 
 class WorkspaceService:
-    def __init__(self, store: Store, clock: Callable[[], datetime] = utc_now):
+    def __init__(self, store: Store, clock: Callable[[], datetime] = utc_now, *, blobs=None):
         self.store = store
         self.clock = clock
+        self.blobs = blobs
 
     def _timestamp(self) -> str:
         return self.clock().astimezone(timezone.utc).isoformat()
@@ -57,9 +59,13 @@ class WorkspaceService:
             raise ValidationError("Invalid workspace text")
         return value.strip()
 
-    def create(self, phrase: str, language: str, model_id: str) -> Wakeword:
+    def create(self, phrase: str, language: str, model_id: str | None = None) -> Wakeword:
         phrase = self._text(phrase, 200)
         language = self._text(language, 35)
+        if model_id is None:
+            ascii_phrase = unicodedata.normalize('NFKD', phrase).encode('ascii', 'ignore').decode().lower()
+            slug = re.sub(r'[^a-z0-9]+', '_', ascii_phrase).strip('_')[:31].rstrip('_') or 'wakeword'
+            model_id = slug + '_' + uuid4().hex
         if not isinstance(model_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", model_id):
             raise ValidationError("Invalid model identifier")
         now = self._timestamp()
@@ -71,6 +77,10 @@ class WorkspaceService:
         except sqlite3.IntegrityError as exc:
             raise Conflict("Model identifier already exists") from exc
         return word
+
+    def delete(self, word_id: str) -> None:
+        from studio.workspace_deletion import delete_workspace
+        delete_workspace(self.store, word_id, self.blobs)
 
     def get(self, word_id: str) -> Wakeword:
         with self.store.transaction() as db:
