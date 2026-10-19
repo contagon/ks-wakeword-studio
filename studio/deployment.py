@@ -184,12 +184,20 @@ class DeploymentService:
             db.execute("INSERT OR IGNORE INTO deployment_events(version_id) SELECT v.id FROM model_versions v "
                        "JOIN studio_jobs j ON j.id=v.run_id WHERE j.status='complete' AND j.kind='train' AND NOT EXISTS "
                        "(SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id)")
-            rows = db.execute("SELECT v.version FROM deployment_events e JOIN model_versions v ON v.id=e.version_id "
+            rows = db.execute("SELECT v.version,v.rowid AS archive_order FROM deployment_events e JOIN model_versions v ON v.id=e.version_id "
                               "JOIN studio_jobs j ON j.id=v.run_id WHERE e.consumed=0 AND j.status='complete' AND NOT EXISTS "
                               "(SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id) ORDER BY v.rowid").fetchall()
             for row in rows:
                 version = ModelVersion(**json.loads(row[0]))
-                self._intent(db, version)
+                policy = db.execute('SELECT settings,archive_cursor FROM workspace_automation WHERE word_id=?', (version.word_id,)).fetchone()
+                enabled = policy and json.loads(policy['settings'])['deployment_policy']['after_training']
+                if enabled and row['archive_order'] > policy['archive_cursor']:
+                    current = db.execute('SELECT version_id FROM deployment_intents WHERE word_id=?', (version.word_id,)).fetchone()
+                    if not current or current[0] != version.id:
+                        self._intent(db, version)
+                    db.execute('UPDATE workspace_automation SET deployment_cursor=MAX(deployment_cursor,?) WHERE word_id=?', (row['archive_order'], version.word_id))
+                if policy:
+                    db.execute('UPDATE workspace_automation SET archive_cursor=MAX(archive_cursor,?) WHERE word_id=?', (row['archive_order'], version.word_id))
                 db.execute('UPDATE deployment_events SET consumed=1 WHERE version_id=?', (version.id,))
             for intent in db.execute('SELECT * FROM deployment_intents').fetchall():
                 self._enroll(db, intent['word_id'], intent['version_id'], intent['revision'])
@@ -199,7 +207,7 @@ class DeploymentService:
         with self._lock('intent'):
             self._reconcile()
 
-    def publish(self, version_id):
+    def publish(self, version_id, *, automatic=False):
         with self._lock('intent'):
             # Validation reads/writes archives too; deletion must wait for the
             # entire publication, not just the subsequent network mutation.
@@ -209,7 +217,21 @@ class DeploymentService:
                 version = self._validate_legacy(version)
             self._reconcile()
             with self.store.transaction() as db:
-                self._intent(db, version)
+                order = db.execute('SELECT rowid FROM model_versions WHERE id=?', (version.id,)).fetchone()[0]
+                current = db.execute('SELECT version_id FROM deployment_intents WHERE word_id=?', (version.word_id,)).fetchone()
+                policy = db.execute('SELECT settings,deployment_cursor FROM workspace_automation WHERE word_id=?', (version.word_id,)).fetchone()
+                eligible = not automatic or (policy and json.loads(policy['settings'])['deployment']['enabled'] and order > policy['deployment_cursor'])
+                if eligible and (not automatic or not current or current[0] != version.id):
+                    self._intent(db, version)
+                if not automatic:
+                    from dataclasses import asdict
+                    from studio.models import AutomationSettings
+                    watermark = db.execute('SELECT COALESCE(MAX(rowid),0) FROM model_versions WHERE word_id=?', (version.word_id,)).fetchone()[0]
+                    db.execute('INSERT INTO workspace_automation(word_id,settings,archive_cursor,deployment_cursor) VALUES (?,?,?,?) '
+                        'ON CONFLICT(word_id) DO UPDATE SET archive_cursor=MAX(archive_cursor,excluded.archive_cursor),deployment_cursor=MAX(deployment_cursor,excluded.deployment_cursor)',
+                        (version.word_id, json.dumps(asdict(AutomationSettings())), watermark, watermark))
+                elif eligible:
+                    db.execute('UPDATE workspace_automation SET deployment_cursor=MAX(deployment_cursor,?) WHERE word_id=?', (order, version.word_id))
             self._run_due(aware_utc(self.clock()), word_id=version.word_id)
             return self.status(version.word_id)
 

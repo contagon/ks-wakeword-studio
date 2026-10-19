@@ -126,6 +126,9 @@ class DeploymentTests(unittest.TestCase):
         augmentation_fixture(Path(self.temp.name))
         self.runtime = StudioRuntime(Path(self.temp.name), runner=self.runner, clock=lambda: self.now)
         self.word = self.runtime.workspaces.create('Hello robot', 'en', 'hello_robot')
+        from dataclasses import replace
+        policy = self.runtime.automation.get(self.word.id).settings
+        self.runtime.automation.save(self.word.id, replace(policy, deployment_policy=replace(policy.deployment_policy, after_training=True)))
         self.runtime.samples.import_audio(self.word.id, 'positive', io.BytesIO(wav(1)))
         self.client = FixtureKiosk()
         self.runtime.devices.client = self.client
@@ -434,7 +437,7 @@ class DeploymentTests(unittest.TestCase):
             store = Store.open(root)
             try:
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 12)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 13)
                     self.assertEqual(db.execute('SELECT phrase FROM wakewords').fetchone()[0], 'Retained')
                     self.assertEqual(db.execute('SELECT count(*) FROM publications').fetchone()[0], 0)
             finally:
@@ -647,6 +650,9 @@ class DeploymentTests(unittest.TestCase):
         root = Path(self.temp.name)
         self.runtime.shutdown()
         with sqlite3.connect(root / 'studio/studio.sqlite3') as db:
+            db.execute('DROP TABLE automation_reviews')
+            db.execute('DROP TABLE automation_events')
+            db.execute('DROP TABLE workspace_automation')
             db.execute('DROP TABLE deployment_staging_blocks')
             db.execute('DROP TABLE deployment_staging')
             db.execute('PRAGMA user_version=9')
@@ -656,7 +662,7 @@ class DeploymentTests(unittest.TestCase):
         with self.runtime.devices.store.transaction() as db:
             names = db.execute("SELECT filenames FROM deployment_staging WHERE device_id='leader' AND word_id=?", (self.word.id,)).fetchone()
             self.assertEqual(set(json.loads(names[0])), {'hello_robot.json', 'hello_robot.tflite'})
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 12)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 13)
         other = self.other_version()
         self.service.publish(other.id)
         self.assertEqual(self.client.files['leader']['microwakeword/hello_robot.tflite'],

@@ -91,3 +91,17 @@ class AutomationService:
                     if pending:
                         self.jobs._enqueue(db, 'classify', row['word_id'], {}, 'collection:' + row['id'], None, self.jobs.clock())
                 db.execute('INSERT INTO automation_events(event_key,word_id) VALUES (?,?)', ('collection:' + row['id'], row['word_id']))
+
+    def handle_deploy(self, job, context):
+        if context.cancelled() or self.scheduled_disabled(job) or not self.get(job.word_id).settings.deployment.enabled:
+            return {'skipped': True, 'reason': 'disabled'}
+        with self.store.transaction() as db:
+            policy = db.execute('SELECT deployment_cursor FROM workspace_automation WHERE word_id=?', (job.word_id,)).fetchone()
+            row = db.execute("SELECT v.id FROM model_versions v JOIN studio_jobs j ON j.id=v.run_id "
+                "WHERE v.word_id=? AND v.rowid>? AND j.status='complete' AND j.kind='train' "
+                "AND NOT EXISTS (SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id) ORDER BY v.rowid DESC LIMIT 1",
+                (job.word_id, policy[0] if policy else 0)).fetchone()
+        if not row:
+            return {'skipped': True, 'reason': 'no_new_archive'}
+        self.deployment.publish(row['id'], automatic=True)
+        return {'version_id': row['id']}

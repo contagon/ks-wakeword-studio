@@ -22,3 +22,4 @@ CREATE TABLE automation_reviews (
 UPDATE studio_schedules SET enabled=0 WHERE scope='scrape';
 UPDATE studio_jobs SET status='cancelled' WHERE schedule_scope='scrape' AND status='queued';
 UPDATE deployment_events SET consumed=1;
+INSERT OR IGNORE INTO deployment_events(version_id,consumed) SELECT id,1 FROM model_versions;

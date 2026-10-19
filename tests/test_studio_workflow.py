@@ -137,6 +137,9 @@ class StudioWorkflowTests(unittest.TestCase):
 
     def test_api_workflow_scrapes_labels_schedules_archives_publishes_and_rolls_back(self):
         word = self.client.post("/api/studio/wakewords", json={"phrase": "Hello robot", "language": "en", "model_id": "hello_robot"}).json()
+        from dataclasses import replace
+        policy = self.runtime.automation.get(word['id']).settings
+        self.runtime.automation.save(word['id'], replace(policy, deployment_policy=replace(policy.deployment_policy, after_training=True)))
         second = self.client.post("/api/studio/wakewords", json={"phrase": "Other robot", "language": "en", "model_id": "other_robot"}).json()
         leader = self.client.post("/api/studio/devices", json={"url": self.leader.url, "password": PASSWORD, "role": "leader"}).json()
         discovered = self.client.post(f"/api/studio/devices/{leader['id']}/refresh").json()

@@ -69,6 +69,7 @@ class StudioRuntime:
                 self._migration = MigrationService(store, self._samples, self._training, legacy_active=self.legacy_active, clock=self.clock)
                 self._schedules = ScheduleService(store, self._jobs, clock=self.clock)
                 self._automation = AutomationService(store, self._jobs, self._schedules)
+                self._automation.deployment = self._deployment
                 self._classification = ClassificationService(store, self._jobs, self._samples, self._automation)
                 self._workers = WorkerPool(self._jobs, clock=self.clock, runner=self.runner, schedules=self._schedules,
                                            maintenance=self._maintenance)
@@ -76,8 +77,9 @@ class StudioRuntime:
                 self._workers.register('download', 'download', self._datasets.execute)
                 self._workers.register('generation', 'gpu', self._generation.handle)
                 self._workers.register('preview', 'gpu', self._generation.handle_preview)
-                self._workers.register('train', 'gpu', self._training.handle)
+                self._workers.register('train', 'gpu', self._train_job)
                 self._workers.register('classify', 'gpu', self._classification.handle)
+                self._workers.register('deploy', 'collection', self._automation.handle_deploy)
                 self._workers.register_completion('scrape', lambda job: self._automation.reconcile())
                 self._workers.register_completion('train', lambda job: self._deployment.retry_due(self.clock()))
                 self._jobs.recover()
@@ -95,6 +97,11 @@ class StudioRuntime:
     def _maintenance(self, now):
         self._automation.reconcile()
         self._deployment.retry_due(now)
+
+    def _train_job(self, job, context):
+        if self._automation.scheduled_disabled(job):
+            return {'skipped': True, 'reason': 'disabled'}
+        return self._training.handle(job, context)
 
     @property
     def migration(self) -> MigrationService:

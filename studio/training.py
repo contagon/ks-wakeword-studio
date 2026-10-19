@@ -190,8 +190,10 @@ class TrainingService:
         previous = [version for version in self.versions(job.word_id).items if version.origin == 'training']
         with self.store.transaction() as db:
             scope = db.execute('SELECT schedule_scope FROM studio_jobs WHERE id=?', (job.id,)).fetchone()[0]
+            automation = db.execute('SELECT settings FROM workspace_automation WHERE word_id=?', (job.word_id,)).fetchone()
+            skip_unchanged = json.loads(automation[0])['skip_unchanged'] if automation else True
         scheduled = job.payload.get('trigger') == 'scheduled' or scope == 'train:' + job.word_id
-        if scheduled and previous and previous[0].fingerprint == manifest.fingerprint:
+        if scheduled and skip_unchanged and previous and previous[0].fingerprint == manifest.fingerprint:
             context.log('Unchanged configuration and data; scheduled training skipped')
             return None
         if context.cancelled():
