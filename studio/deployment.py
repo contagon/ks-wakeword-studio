@@ -225,11 +225,12 @@ class DeploymentService:
                     self._intent(db, version)
                 if not automatic:
                     from dataclasses import asdict
-                    from studio.models import AutomationSettings
+                    from studio.automation import AutomationService
+                    effective_settings = AutomationService.settings_in(db, version.word_id)
                     watermark = db.execute('SELECT COALESCE(MAX(rowid),0) FROM model_versions WHERE word_id=?', (version.word_id,)).fetchone()[0]
                     db.execute('INSERT INTO workspace_automation(word_id,settings,archive_cursor,deployment_cursor) VALUES (?,?,?,?) '
                         'ON CONFLICT(word_id) DO UPDATE SET archive_cursor=MAX(archive_cursor,excluded.archive_cursor),deployment_cursor=MAX(deployment_cursor,excluded.deployment_cursor)',
-                        (version.word_id, json.dumps(asdict(AutomationSettings())), watermark, watermark))
+                        (version.word_id, json.dumps(asdict(effective_settings)), watermark, watermark))
                 elif eligible:
                     db.execute('UPDATE workspace_automation SET deployment_cursor=MAX(deployment_cursor,?) WHERE word_id=?', (order, version.word_id))
             self._run_due(aware_utc(self.clock()), word_id=version.word_id)

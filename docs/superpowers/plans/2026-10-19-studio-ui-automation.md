@@ -201,3 +201,18 @@ Scopes: `scrape:{word_id}`, `classify:{word_id}`, `train:{word_id}`, `deploy:{wo
 - Contracts: one aggregate settings API; enabled schedules use four stable scope prefixes; deployment flags are not conflated with training; readonly status fields are not accepted on PUT.
 - Failure classes: stale UI requests (6/7), mapping races (2), revision races/undo/model failures (3), callback/restart/rollback/migration (1/3/4), storage/no-selection/voices/narrow UI (5–8).
 - Scope: no new dependencies, hardware operations, unrelated user changes or prototype code in shipped files. Production implementation waits for plan review and an execution-method choice.
+
+## Execution and review results
+
+Implemented natively on `polish-microwakeword-studio` as requested, after checkpoint `f10ca14`. All nine implementation tasks have test-backed commits. Independent source review found no critical issues; its four important findings were reproduced with failing tests and corrected in one final fix pass:
+
+- Preserve inherited training schedules when explicit publication first initializes automation watermarks.
+- Invalidate label/undo/conflict responses when the selected workspace changes.
+- Refresh the shared Unmapped inbox after collection and expose an explicit inbox refresh action.
+- Report actual collection outcomes and failed/imported/unmapped/evicted counts, not just queue-handler completion, with a highlighted history link.
+
+The reviewer’s keyboard-focus minor was treated as important because an open modal allowed keyboard access to background workspace/create controls. Edit dialogs now contain Tab/Shift+Tab and restore focus on Escape; unit and browser tests cover this.
+
+Final verification: **102 frontend tests**, **9 fixture browser tests**, typecheck, production build and whitespace checks pass. Full Python run: **426 passed, 1 skipped**, plus the single pre-existing failure `tests/test_compose.py::ComposeTests::test_resolved_service_keeps_loopback_gpu_and_existing_data_volume`; deselecting only that named test gives 426 passed / 1 skipped / 1 deselected. That unrelated deployment configuration was deliberately not repaired.
+
+Validation uses fixture kiosks and stubbed inference/training, not real hardware/model downloads or live deployments. Generated bundles were rebuilt and exercised by the browser suite rather than manually reviewing minified output. Preview server files/access links remain untracked to avoid committing temporary session keys. Local `compose.yaml` and `.env` changes that appeared during execution are user work and are preserved outside implementation commits. No merge, push, Docker restart or live device operation was performed.

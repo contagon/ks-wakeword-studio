@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import TrainerApp from "../../TrainerApp.vue";
-import { fakeMedia, fakeStudio, press, recording, sample, type Req } from "./fakeStudio";
+import { fakeMedia, fakeStudio, press, recording, sample, json, type Req } from "./fakeStudio";
 
 let wrapper: VueWrapper | undefined;
 let server: ReturnType<typeof fakeStudio>;
@@ -24,8 +24,59 @@ const isLabel = (id: string) => (r: Req) => r.method === "POST" && r.url.pathnam
 async function settle() { for (let i = 0; i < 4; i++) await flushPromises(); }
 async function contentOf(src: string | undefined) { return (await media.contents()).find(([url]) => url === src)?.[1]; }
 const playerSrc = (ui: VueWrapper) => ui.find("audio[data-audio-player]").attributes("src");
+async function completedCollection(ui: VueWrapper, result: object) {
+  const job = { id: 'collect-test', kind: 'scrape', word_id: 'a', resource: 'collection', payload: {}, created_at: '', started_at: null, finished_at: '', result };
+  server.hold(r => r.url.pathname.endsWith('/jobs/collect-test'), () => json({ ...job, status: 'complete' })).release();
+  server.hold(r => r.url.pathname.endsWith('/jobs/collect-test/logs'), () => json({ text: '' })).release();
+  server.hold(r => r.url.pathname.endsWith('/a/collection/jobs'), () => json({ ...job, status: 'queued', result: {} })).release();
+  await ui.get('[data-action="collect-now"]').trigger('click'); await settle();
+}
 
 describe("keyboard-first classification", () => {
+  it('shows failed collection outcomes instead of reporting only completed queue work', async () => {
+    const ui = await open();
+    await completedCollection(ui, { run_id: 'failed-run', status: 'partial', new: 0, failed: 2, unmapped: 0, evicted: 0 });
+    const outcome = ui.get('[data-collection-outcome]');
+    expect(outcome.attributes('role')).toBe('alert');
+    expect(outcome.text()).toContain('Collection needs attention');
+    expect(outcome.text()).toContain('0 imported');
+    expect(outcome.text()).toContain('2 failed');
+    expect(outcome.get('a').attributes('href')).toContain('tab=collect');
+  });
+  it('refreshes newly collected unknown sources without leaving Unmapped', async () => {
+    const ui = await open();
+    await ui.get('#classify-tab-unmapped').trigger('click');
+    expect(ui.text()).toContain('No unmapped recordings.');
+    server.db.unmapped.push(recording('new-source', { phrase: 'New unknown phrase' }));
+    await completedCollection(ui, { run_id: 'new-run', status: 'complete', new: 1, new_mapped: 0, failed: 0 });
+    expect(ui.get('#classify-panel-unmapped').text()).toContain('New unknown phrase');
+    server.db.unmapped.push(recording('another-source', { phrase: 'Another unknown phrase' }));
+    await ui.get('[data-action="refresh-unmapped"]').trigger('click'); await settle();
+    expect(ui.get('#classify-panel-unmapped').text()).toContain('Another unknown phrase');
+  });
+  it('ignores an old label conflict after switching workspaces', async () => {
+    const ui = await open();
+    const delayed = server.hold(isLabel('s1'), () => new Response('{}', { status: 409 }));
+    press('p'); await settle();
+    await ui.get('#studio-word').setValue('b'); await settle();
+    Object.assign(server.db.samples.find(s => s.id === 's1')!, { revision: 2, label: 'negative' });
+    delayed.release(); await settle();
+    expect(current(ui)).toBe('b1');
+    expect(ui.find('[data-classify-error]').exists()).toBe(false);
+    expect(audioFetches().filter(id => id === 'b1')).toHaveLength(1);
+  });
+
+  it('does not announce an old undo result in the replacement workspace', async () => {
+    const ui = await open();
+    press('p'); await settle();
+    const delayed = server.hold(r => r.url.pathname.endsWith('/a/samples/s1/undo'));
+    press('z'); await settle();
+    await ui.get('#studio-word').setValue('b'); await settle();
+    delayed.release(); await settle();
+    expect(current(ui)).toBe('b1');
+    expect(ui.text()).not.toContain('Last label restored');
+    expect(ui.get('[data-progress]').text()).toContain('0 reviewed');
+  });
   it("shows playback guidance only after the current audio is ready", async () => {
     const audio = server.hold(r => r.url.pathname.endsWith('/s1/audio'));
     const ui = await open();

@@ -45,6 +45,7 @@ html[data-studio-theme="dark"] .studio-app { --studio-text: #e0e8f0; --studio-bg
 .studio-selected { border-color: var(--studio-selected); box-shadow: inset 0 0 0 1px var(--studio-selected); }
 .studio-muted { color: var(--studio-muted); }
 .studio-note { padding: 11px; background: var(--studio-note); border: 1px solid var(--studio-note-border); border-radius: 7px; margin-bottom: 12px; }
+.studio-note.studio-collection-warning { background: var(--studio-warning); border-color: var(--studio-warning-border); }
 .studio-app button.studio-primary { background: var(--studio-primary); color: white; border-color: var(--studio-primary); }
 .studio-app button.studio-primary:hover { background: var(--studio-primary-hover); }
 .studio-skip { position: absolute; left: 10px; top: -100px; z-index: 10; background: var(--studio-surface); padding: 12px; }

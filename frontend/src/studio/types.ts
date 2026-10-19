@@ -18,7 +18,7 @@ export type TrainResult = { run_id: string; version_id: string } | { run_id: str
 export interface GenerationPayload { phrase: string; recipe: GenerationRecipe }
 export interface GenerationResult { batch_id: string }
 export interface ScrapePayload { device_ids?: string[] | null }
-export interface ScrapeResult { run_id: string; status: string }
+export interface ScrapeResult { run_id: string; status: string; new?: number; new_mapped?: number; failed?: number; unmapped?: number; evicted?: number }
 export interface DownloadPayload { dataset_id: string }
 export interface DownloadResult { dataset_id: string; fingerprint: string }
 interface JobRecord<K extends string, R extends JobResource, P, T> { id: string; kind: K; word_id: string | null; resource: R; payload: P; status: JobStatus; created_at: string; started_at: string | null; finished_at: string | null; result: T | JobFailure | EmptyJobResult }

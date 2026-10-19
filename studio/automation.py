@@ -22,7 +22,8 @@ class AutomationService:
     def __init__(self, store, jobs, schedules):
         self.store, self.jobs, self.schedules = store, jobs, schedules
 
-    def settings_in(self, db, word_id):
+    @staticmethod
+    def settings_in(db, word_id):
         if not db.execute('SELECT 1 FROM wakewords WHERE id=?', (word_id,)).fetchone():
             raise NotFound('Wakeword not found')
         row = db.execute('SELECT settings FROM workspace_automation WHERE word_id=?', (word_id,)).fetchone()

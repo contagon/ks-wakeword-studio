@@ -144,6 +144,22 @@ describe("compact studio workspace", () => {
     expect(ui.text()).toContain('Hello Cedar');
     expect(records[0].model_id).toBe('cedar');
   });
+  it('contains keyboard focus in the edit modal and restores it on Escape', async () => {
+    const ui = await open();
+    (ui.get('.studio-card details').element as HTMLDetailsElement).open = true;
+    await ui.get('[data-action="edit-workspace"]').trigger('click'); await flushPromises();
+    const form = ui.get('[data-form="edit"]');
+    const first = form.get('input[name="phrase"]');
+    const cancel = form.findAll('button').find(button => button.text() === 'Cancel')!;
+    (cancel.element as HTMLButtonElement).focus();
+    await cancel.trigger('keydown', { key: 'Tab' });
+    expect(document.activeElement).toBe(first.element);
+    await first.trigger('keydown', { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(cancel.element);
+    await cancel.trigger('keydown', { key: 'Escape' });
+    expect(ui.find('[data-form="edit"]').exists()).toBe(false);
+    expect(document.activeElement).toBe(ui.get('[data-action="edit-workspace"]').element);
+  });
   it("creates a real workspace and selects the server's immutable identity", async () => {
     const ui = await open();
     await ui.get('[data-form="create"] input[name="phrase"]').setValue('Hi Birch');

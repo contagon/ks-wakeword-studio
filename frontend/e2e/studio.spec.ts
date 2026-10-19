@@ -237,6 +237,15 @@ test('workspace creation hides identity and permanent deletion blocks active job
   await expect(page.locator('#studio-word')).toHaveValue(a.id);
   await expect(page.locator('[data-form="edit"]')).toHaveCount(0);
   await page.getByText('Actions', { exact: true }).click();
+  await page.locator('[data-action="edit-workspace"]').click();
+  const editPhrase = page.locator('[data-form="edit"] [name="phrase"]');
+  await expect(editPhrase).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(editPhrase).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-action="edit-workspace"]')).toBeFocused();
   const queued = await request.post(`/api/studio/wakewords/${a.id}/generation/previews`, { data: { language: 'en', english_accent: 'mixed', tts_mode: 'hybrid', engines: ['qwen3'], samples: 1, batch_size: 1 } });
   expect(queued.ok()).toBeTruthy();
   const job = await queued.json();

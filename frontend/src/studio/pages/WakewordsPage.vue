@@ -15,6 +15,14 @@ const editing = ref(false), editInput = ref<HTMLInputElement>();
 const editTrigger = ref<HTMLButtonElement>();
 async function openEdit() { editing.value = true; await nextTick(); editInput.value?.focus(); }
 function closeEdit() { editing.value = false; editTrigger.value?.focus(); }
+function containEditFocus(event: KeyboardEvent) {
+  if (event.key !== 'Tab') return;
+  const form = event.currentTarget as HTMLFormElement;
+  const controls = Array.from(form.querySelectorAll<HTMLElement>('input:not(:disabled), select:not(:disabled), button:not(:disabled), [tabindex="0"]'));
+  const first = controls[0], last = controls.at(-1);
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+}
 let mutation: AbortController | undefined;
 watch(selected, word => { edit.phrase = word?.phrase ?? ""; edit.language = word?.language ?? ""; }, { immediate: true });
 watch(selectedId, () => { mutation?.abort(); saving.value = false; editing.value = false; confirmingDelete.value = false; formError.value = ""; saved.value = ""; });
@@ -93,7 +101,7 @@ async function save(mode: "create" | "edit") {
       </form>
     </div>
     <div v-if="selected && editing" class="studio-modal-backdrop" @keydown.esc="!saving && closeEdit()">
-      <form data-form="edit" class="studio-card grid gap-3" role="dialog" aria-modal="true" aria-label="Edit wakeword" @submit.prevent="save('edit')">
+      <form data-form="edit" class="studio-card grid gap-3" role="dialog" aria-modal="true" aria-label="Edit wakeword" @keydown="containEditFocus" @submit.prevent="save('edit')">
         <h2>Edit {{ selected.phrase }}</h2>
         <label>Display phrase<input ref="editInput" v-model="edit.phrase" name="phrase" required maxlength="200" autocomplete="off"></label>
         <label>Language<input v-model="edit.language" name="language" required autocomplete="off"></label>

@@ -127,7 +127,8 @@ class StudioRuntime:
             mapped = db.execute("SELECT count(*) FROM collection_attempts a JOIN recordings r "
                 "ON r.device_id=a.device_id AND r.clip_id=a.clip_id WHERE a.run_id=? AND a.state='complete' AND r.word_id=?",
                 (result.id, job.word_id)).fetchone()[0]
-        return {'run_id': result.id, 'status': result.status, 'new': result.new, 'new_mapped': mapped}
+        return {'run_id': result.id, 'status': result.status, 'new': result.new, 'new_mapped': mapped,
+                'failed': result.failed, 'unmapped': result.unmapped, 'evicted': result.evicted}
 
     @property
     def deployment(self) -> DeploymentService:

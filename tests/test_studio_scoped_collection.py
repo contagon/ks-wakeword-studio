@@ -41,6 +41,10 @@ def test_manual_collect_queues_when_automatic_off(tmp_path):
             assert response.json()['status'] == 'queued'
             assert response.json()['word_id'] == word.id
             runtime.workers.run_once('collection')
-            assert runtime.jobs.get(response.json()['id']).status == 'complete'
+            finished = runtime.jobs.get(response.json()['id'])
+            assert finished.status == 'complete'
+            assert finished.result['failed'] == 0
+            assert finished.result['unmapped'] == 0
+            assert finished.result['evicted'] == 0
     finally:
         runtime.shutdown()

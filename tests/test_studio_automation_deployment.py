@@ -76,3 +76,17 @@ def test_skip_unchanged_can_be_disabled_for_scheduled_training(prepared):
     runtime.workers.run_once('gpu')
     assert runtime.training.successful_version(job.id) is not None
     assert runtime.training.versions(word.id).total == 2
+
+
+def test_manual_publication_preserves_inherited_training_schedule(prepared):
+    runtime, word = prepared
+    runtime.schedules.save('train:' + word.id, '0 3 * * *', 'Europe/Berlin', True)
+    before = runtime.automation.get(word.id).settings
+    version = train(runtime, word)
+    runtime.deployment.publish(version.id)
+    assert runtime.automation.get(word.id).settings == before
+    runtime.automation.save(word.id, runtime.automation.get(word.id).settings)
+    actual = next(s for s in runtime.schedules.list() if s.scope == 'train:' + word.id)
+    assert actual.enabled
+    assert actual.cron == '0 3 * * *'
+    assert actual.timezone == 'Europe/Berlin'
