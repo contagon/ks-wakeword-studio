@@ -5,6 +5,9 @@ export type CreateWakeword = Pick<Wakeword, "phrase" | "language"> & { model_id?
 export type UpdateWakeword = Partial<Pick<Wakeword, "phrase" | "language">>;
 export interface Schedule { scope: string; cron: string; timezone: string; enabled: boolean; next_run_at: string }
 export type ScheduleInput = Pick<Schedule, "cron" | "timezone" | "enabled">;
+export interface ClassificationPolicy { enabled: boolean; trigger: 'after_collection' | 'schedule'; engine: 'faster_whisper' | 'parakeet_onnx'; auto_negatives: boolean; promote_close_misses: boolean }
+export interface AutomationSettings { collection: ScheduleInput; classification: ClassificationPolicy; classification_schedule: ScheduleInput; training: ScheduleInput; skip_unchanged: boolean; deployment: ScheduleInput; deployment_policy: { after_training: boolean } }
+export interface AutomationStatus { settings: AutomationSettings; schedules: Schedule[]; last_jobs: Partial<Record<'scrape' | 'classify' | 'train' | 'deploy', Job | null>> }
 export type JobStatus = "queued" | "running" | "cancelling" | "complete" | "failed" | "cancelled" | "interrupted";
 export type JobResource = "gpu" | "collection" | "download";
 /** Cancelled/interrupted jobs may finish with no result; handler crashes record only a code. */
@@ -24,7 +27,9 @@ export type GenerationJob = JobRecord<"generation", "gpu", GenerationPayload, Ge
 export type ScrapeJob = JobRecord<"scrape", "collection", ScrapePayload, ScrapeResult>;
 export type DownloadJob = JobRecord<"download", "download", DownloadPayload, DownloadResult>;
 /** Discriminated on `kind`; the server only admits these four kinds. */
-export type Job = TrainJob | GenerationJob | ScrapeJob | DownloadJob;
+export type Job = TrainJob | GenerationJob | ScrapeJob | DownloadJob
+  | JobRecord<'classify', 'gpu', Record<string, never>, Record<string, number | string | boolean>>
+  | JobRecord<'deploy', 'collection', Record<string, never>, Record<string, string | boolean>>;
 /** The generic queue endpoint is used only for collection; other kinds have dedicated, validated endpoints. */
 export interface EnqueueScrapeJob { kind: "scrape"; payload?: ScrapePayload; dedupe_key?: string }
 export interface WorkerHealth { workers_started: boolean; degraded: boolean; loops: { component: string; status: string; failure_count: number; consecutive_failures: number; last_error_code: string | null; last_failure_at: string | null; last_success_at: string | null }[] }

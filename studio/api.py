@@ -1,6 +1,7 @@
 """Studio HTTP boundary with explicit public records and sanitized errors."""
 
 from collections.abc import Callable
+from typing import Literal
 from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -14,6 +15,8 @@ from studio.models import (CollectionRun, Conflict, CredentialsRequired, Device,
                            DeploymentCapabilities, StudioCapabilities, LegacyRun)
 from studio.migration import LegacyImportSelection, LegacyInventory, MigrationReport
 from studio.runtime import StudioRuntime
+from studio.automation import settings_from_dict
+from studio.models import AutomationStatus
 from studio.storage import AUDIO_MIMES
 
 
@@ -102,6 +105,31 @@ class ScheduleBody(BaseModel):
     enabled: bool
 
 
+class ClassificationBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    enabled: bool
+    trigger: Literal['after_collection', 'schedule']
+    engine: Literal['faster_whisper', 'parakeet_onnx']
+    auto_negatives: bool
+    promote_close_misses: bool
+
+
+class DeploymentPolicyBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    after_training: bool
+
+
+class AutomationBody(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    collection: ScheduleBody
+    classification: ClassificationBody
+    classification_schedule: ScheduleBody
+    training: ScheduleBody
+    skip_unchanged: bool
+    deployment: ScheduleBody
+    deployment_policy: DeploymentPolicyBody
+
+
 class JobBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     kind: str
@@ -161,6 +189,14 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     def generation_defaults():
         from tts_config import DEFAULT_GENERATION_SAMPLES, DEFAULT_GENERATION_BATCH_SIZE
         return {'samples': DEFAULT_GENERATION_SAMPLES, 'batch_size': DEFAULT_GENERATION_BATCH_SIZE}
+
+    @router.get('/wakewords/{word_id}/automation', response_model=AutomationStatus)
+    def automation(word_id: str):
+        return runtime.automation.get(word_id)
+
+    @router.put('/wakewords/{word_id}/automation', response_model=AutomationStatus)
+    def save_automation(word_id: str, body: AutomationBody):
+        return runtime.automation.save(word_id, settings_from_dict(body.model_dump()))
 
     @router.get('/capabilities', response_model=StudioCapabilities)
     def capabilities() -> StudioCapabilities:

@@ -1,6 +1,7 @@
 import type { EnqueueScrapeJob, ModelMetrics, ScrapeJob, Page, Wakeword, CreateWakeword, UpdateWakeword, Device, SourceMapping, Recording, Sample, SampleQuery, Pagination, CollectionRun, Schedule, ScheduleInput, Job, WorkerHealth, Dataset, GenerationRecipe, GenerationCapability, Batch, TrainingSettings, TrainingCounts, RunManifest, ModelVersion, Publication, DeploymentCapabilities, LegacyInventory, LegacyImportSelection, MigrationReport, StudioCapabilities } from "./types";
 
 import type { LegacyRun } from './types';
+import type { AutomationSettings, AutomationStatus } from './types';
 
 const base = "/api/studio";
 const segment = encodeURIComponent;
@@ -75,6 +76,9 @@ export const studioApi = {
   scrape: (device_ids?: string[], signal?: AbortSignal) => post<CollectionRun>("/scrape", { device_ids }, signal),
   scrapeRuns: (params?: Pagination, signal?: AbortSignal) => get<Page<CollectionRun>>("/scrape/runs", params, signal),
   schedules: (signal?: AbortSignal) => get<Schedule[]>("/schedules", undefined, signal),
+  automation: (word: string, signal?: AbortSignal) => get<AutomationStatus>(`${wordPath(word)}/automation`, undefined, signal),
+  saveAutomation: (word: string, settings: AutomationSettings, signal?: AbortSignal) => put<AutomationStatus>(`${wordPath(word)}/automation`, settings, signal),
+  collect: (word: string, device_ids?: string[], signal?: AbortSignal) => post<ScrapeJob>(`${wordPath(word)}/collection/jobs`, { device_ids }, signal),
   saveSchedule: (scope: string, body: ScheduleInput, signal?: AbortSignal) => put<Schedule>(`/schedules/${segment(scope)}`, body, signal),
   jobs: (params?: Pagination, signal?: AbortSignal) => get<Page<Job>>("/jobs", params, signal),
   enqueueScrape: (body: EnqueueScrapeJob, signal?: AbortSignal) => post<ScrapeJob>("/jobs", body, signal),

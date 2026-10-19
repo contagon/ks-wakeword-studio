@@ -5,6 +5,9 @@ import pytest
 from studio.db import Store
 from studio.models import NotFound, ValidationError
 from studio.runtime import StudioRuntime
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from studio.api import create_router
 
 
 def test_new_workspace_automation_defaults(tmp_path):
@@ -94,5 +97,28 @@ def test_delete_removes_only_target_automation(tmp_path):
         with runtime.jobs.store.transaction() as db:
             assert not db.execute('SELECT 1 FROM workspace_automation WHERE word_id=?', (a.id,)).fetchone()
             assert not db.execute('SELECT 1 FROM studio_schedules WHERE scope LIKE ?', ('%:' + a.id,)).fetchone()
+    finally:
+        runtime.shutdown()
+
+
+def test_automation_api_roundtrip_and_strict_nested_validation(tmp_path):
+    runtime = StudioRuntime(tmp_path)
+    try:
+        word = runtime.workspaces.create('Cedar', 'en')
+        app = FastAPI()
+        app.include_router(create_router(runtime))
+        with TestClient(app) as api:
+            path = f'/api/studio/wakewords/{word.id}/automation'
+            response = api.get(path)
+            assert response.status_code == 200
+            settings = response.json()['settings']
+            settings['collection']['enabled'] = True
+            assert api.put(path, json=settings).status_code == 200
+            settings['classification']['engine'] = 'bogus-sensitive-input'
+            rejected = api.put(path, json=settings)
+            assert rejected.status_code == 422
+            assert 'bogus-sensitive-input' not in rejected.text
+            assert api.get(path).json()['settings']['classification']['engine'] == 'faster_whisper'
+            assert api.get('/api/studio/wakewords/missing/automation').status_code == 404
     finally:
         runtime.shutdown()
