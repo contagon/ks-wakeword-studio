@@ -21,7 +21,8 @@ from pathlib import Path
 from studio.models import Conflict, Job, LoopHealth, NotFound, Page, ValidationError, WorkerHealth
 from studio.storage import open_directory
 
-RESOURCES = {'train': 'gpu', 'generation': 'gpu', 'preview': 'gpu', 'scrape': 'collection', 'download': 'download'}
+RESOURCES = {'train': 'gpu', 'generation': 'gpu', 'preview': 'gpu', 'classify': 'gpu',
+             'deploy': 'collection', 'scrape': 'collection', 'download': 'download'}
 ACTIVE = ('running', 'cancelling')
 LOG_LIMIT = 65536
 
@@ -162,7 +163,7 @@ class JobQueue:
         return row
 
     def _enqueue(self, db, kind, word_id, payload, dedupe_key, scope, now):
-        if kind not in RESOURCES or (kind in ('train', 'generation', 'preview') and word_id is None):
+        if kind not in RESOURCES or (kind in ('train', 'generation', 'preview', 'classify', 'deploy') and word_id is None):
             raise ValidationError('Invalid job kind or workspace')
         encoded = safe_json(payload)
         if dedupe_key is not None and (not isinstance(dedupe_key, str) or not 1 <= len(dedupe_key) <= 512):

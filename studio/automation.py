@@ -69,3 +69,25 @@ class AutomationService:
                        'ON CONFLICT(word_id) DO UPDATE SET settings=excluded.settings',
                        (word_id, json.dumps(asdict(settings)), cursor))
         return self.get(word_id)
+
+    def scheduled_disabled(self, job):
+        with self.store.transaction() as db:
+            row = db.execute('SELECT schedule_scope FROM studio_jobs WHERE id=?', (job.id,)).fetchone()
+            if not row or not row[0]:
+                return False
+            schedule = db.execute('SELECT enabled FROM studio_schedules WHERE scope=?', (row[0],)).fetchone()
+            return not schedule or not schedule[0]
+
+    def reconcile(self):
+        with self.store.transaction() as db:
+            rows = db.execute("SELECT * FROM studio_jobs WHERE kind='scrape' AND status='complete' AND word_id IS NOT NULL "
+                "AND NOT EXISTS (SELECT 1 FROM automation_events WHERE event_key='collection:'||studio_jobs.id)").fetchall()
+            for row in rows:
+                settings = self.settings_in(db, row['word_id'])
+                result = json.loads(row['result'])
+                if (settings.classification.enabled and settings.classification.trigger == 'after_collection'
+                        and result.get('new_mapped', 0) > 0 and not result.get('skipped')):
+                    pending = db.execute("SELECT 1 FROM samples WHERE word_id=? AND label='pending' AND deleted=0 LIMIT 1", (row['word_id'],)).fetchone()
+                    if pending:
+                        self.jobs._enqueue(db, 'classify', row['word_id'], {}, 'collection:' + row['id'], None, self.jobs.clock())
+                db.execute('INSERT INTO automation_events(event_key,word_id) VALUES (?,?)', ('collection:' + row['id'], row['word_id']))

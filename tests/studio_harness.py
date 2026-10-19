@@ -65,6 +65,12 @@ class StubGpuRunner:
     def run(self, context, argv, *, cwd=None):
         values = {item.split("=", 1)[0]: item.split("=", 1)[1]
                   for item in argv if isinstance(item, str) and item.startswith("--") and "=" in item}
+        if any(str(item).endswith('studio_classify.py') for item in argv):
+            manifest = json.loads(Path(values['--input-manifest']).read_text())
+            Path(values['--output-json']).write_text(json.dumps([
+                {'id': sample['id'], 'transcript': 'turn the lights off',
+                 'engine': manifest['engine'], 'model': 'fixture'} for sample in manifest['samples']]))
+            return 0
         if any(str(item).endswith("tts_generate_samples.py") for item in argv):
             output = Path(values["--output-dir"])
             output.mkdir(parents=True, exist_ok=True)

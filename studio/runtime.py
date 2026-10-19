@@ -12,6 +12,7 @@ from studio.workspaces import WorkspaceService
 from studio.jobs import JobQueue, WorkerPool, utc_now
 from studio.schedules import ScheduleService
 from studio.automation import AutomationService
+from studio.classification import ClassificationService
 from studio.models import WorkerHealth
 from studio.datasets import DatasetService
 from studio.generation import GenerationService
@@ -37,6 +38,7 @@ class StudioRuntime:
         self._jobs: JobQueue | None = None
         self._schedules: ScheduleService | None = None
         self._automation: AutomationService | None = None
+        self._classification = None
         self._workers: WorkerPool | None = None
         self._datasets: DatasetService | None = None
         self._generation: GenerationService | None = None
@@ -67,13 +69,16 @@ class StudioRuntime:
                 self._migration = MigrationService(store, self._samples, self._training, legacy_active=self.legacy_active, clock=self.clock)
                 self._schedules = ScheduleService(store, self._jobs, clock=self.clock)
                 self._automation = AutomationService(store, self._jobs, self._schedules)
+                self._classification = ClassificationService(store, self._jobs, self._samples, self._automation)
                 self._workers = WorkerPool(self._jobs, clock=self.clock, runner=self.runner, schedules=self._schedules,
-                                           maintenance=self._deployment.retry_due)
+                                           maintenance=self._maintenance)
                 self._workers.register('scrape', 'collection', self._collect_job)
                 self._workers.register('download', 'download', self._datasets.execute)
                 self._workers.register('generation', 'gpu', self._generation.handle)
                 self._workers.register('preview', 'gpu', self._generation.handle_preview)
                 self._workers.register('train', 'gpu', self._training.handle)
+                self._workers.register('classify', 'gpu', self._classification.handle)
+                self._workers.register_completion('scrape', lambda job: self._automation.reconcile())
                 self._workers.register_completion('train', lambda job: self._deployment.retry_due(self.clock()))
                 self._jobs.recover()
                 self._deployment.reconcile()
@@ -81,6 +86,15 @@ class StudioRuntime:
             except BaseException:
                 store.close()
                 raise
+
+    @property
+    def classification(self):
+        self.startup()
+        return self._classification
+
+    def _maintenance(self, now):
+        self._automation.reconcile()
+        self._deployment.retry_due(now)
 
     @property
     def migration(self) -> MigrationService:
@@ -102,7 +116,11 @@ class StudioRuntime:
                 if not schedule or not schedule['enabled']:
                     return {'skipped': True, 'reason': 'disabled'}
         result = self._collection.run(job.payload.get('device_ids'), word_id=job.word_id, cancelled=context.cancelled)
-        return {'run_id': result.id, 'status': result.status, 'new': result.new}
+        with self._jobs.store.transaction() as db:
+            mapped = db.execute("SELECT count(*) FROM collection_attempts a JOIN recordings r "
+                "ON r.device_id=a.device_id AND r.clip_id=a.clip_id WHERE a.run_id=? AND a.state='complete' AND r.word_id=?",
+                (result.id, job.word_id)).fetchone()[0]
+        return {'run_id': result.id, 'status': result.status, 'new': result.new, 'new_mapped': mapped}
 
     @property
     def deployment(self) -> DeploymentService:
