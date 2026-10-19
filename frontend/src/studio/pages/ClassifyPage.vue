@@ -11,9 +11,10 @@ import { useWorkspace } from "../workspace";
 import type { Recording, Job } from "../types";
 import CollectionHistory from '../components/CollectionHistory.vue';
 import SourceInbox from '../components/SourceInbox.vue';
-import JobConsole from '../components/JobConsole.vue';
+import { useJobQueue } from '../jobs';
 
 const workspace = useWorkspace();
+const jobs = useJobQueue();
 const { classifyTab: tab } = workspace.routes;
 const collectionJob = ref<Job | null>(null), collecting = ref(false), collectionError = ref('');
 const collectionOutcome = computed(() => {
@@ -27,7 +28,7 @@ async function collectNow() {
   if (!workspace.selectedId.value || collecting.value || (collectionJob.value && ['queued', 'running', 'cancelling'].includes(collectionJob.value.status))) return;
   const word = workspace.selectedId.value, controller = new AbortController(); collectionRequest = controller;
   collecting.value = true; collectionError.value = '';
-  try { const job = await studioApi.collect(word, undefined, controller.signal); if (!controller.signal.aborted && workspace.selectedId.value === word) collectionJob.value = job; }
+  try { const job = await studioApi.collect(word, undefined, controller.signal); if (!controller.signal.aborted && workspace.selectedId.value === word) { collectionJob.value = job; jobs.track(job); void jobs.show(job.id); } }
   catch (cause) { if (!controller.signal.aborted) collectionError.value = cause instanceof Error ? cause.message : 'Collection was not started.'; }
   finally { if (collectionRequest === controller) collecting.value = false; }
 }
@@ -43,6 +44,7 @@ async function updateCollection(job: Job) {
     const known = new Set(queue.value.map(item => item.id)); queue.value.push(...page.items.filter(item => !known.has(item.id))); total.value = page.total;
   } catch (cause) { if (!controller.signal.aborted) collectionError.value = cause instanceof Error ? cause.message : 'Collection completed; refresh the queue to see new recordings.'; }
 }
+watch(jobs.jobs, records => { const job = collectionJob.value && records[collectionJob.value.id]; if (job) void updateCollection(job); }, { deep: true });
 const sessionSkips = new Map<string, Set<string>>();
 const queue = ref<Sample[]>([]);
 const unmapped = ref<Recording[]>([]);
@@ -206,7 +208,7 @@ onBeforeUnmount(() => { document.removeEventListener("keydown", shortcut); inbox
     <div class="studio-tabs" role="tablist" aria-label="Classification sections"><button v-for="entry in (['review', 'collect', 'unmapped'] as const)" :id="`classify-tab-${entry}`" :key="entry" role="tab" :aria-selected="tab === entry" :aria-controls="`classify-panel-${entry}`" :class="{ active: tab === entry }" @click="workspace.routes.selectClassifyTab(entry)">{{ entry === 'review' ? 'Review' : entry === 'collect' ? 'Collect' : 'Unmapped' }}</button></div>
     <p v-if="collectionError" class="studio-note" role="alert">{{ collectionError }}</p>
     <p v-if="collectionOutcome" data-collection-outcome class="studio-note" :class="{ 'studio-collection-warning': collectionWarning }" :role="collectionWarning ? 'alert' : 'status'"><strong>{{ collectionWarning ? 'Collection needs attention' : 'Collection finished' }}</strong> · {{ collectionOutcome.status }} · {{ collectionOutcome.new ?? 0 }} imported · {{ collectionOutcome.failed ?? 0 }} failed · {{ collectionOutcome.unmapped ?? 0 }} unmapped · {{ collectionOutcome.evicted ?? 0 }} evicted. <a :href="collectionHistoryHref" @click.prevent="workspace.routes.selectClassifyTab('collect')">View collection run →</a></p>
-    <JobConsole v-if="collectionJob" :job-id="collectionJob.id" @update="updateCollection" />
+    <button v-if="collectionJob" type="button" class="mt-3" @click="jobs.show(collectionJob.id)">View collection {{ collectionJob.id }} in queue</button>
     <div v-show="tab === 'review'" id="classify-panel-review" role="tabpanel" aria-labelledby="classify-tab-review">
     <div class="studio-card studio-toolbar mb-4"><label>Recording type<select name="kind" v-model="kind"><option value="">All pending</option><option value="true">Near misses</option><option value="false">Activations</option></select></label></div>
     <p v-if="notice" class="studio-note" role="status" aria-live="polite">{{ notice }}</p><p v-if="error" data-classify-error class="studio-note" role="alert" aria-live="assertive">{{ error }}</p>

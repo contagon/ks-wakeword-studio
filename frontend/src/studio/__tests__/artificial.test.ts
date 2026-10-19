@@ -4,25 +4,28 @@ import { onMounted, provide } from "vue";
 import ArtificialPage from "../pages/ArtificialPage.vue";
 import { createWorkspace, workspaceKey, type Workspace } from "../workspace";
 import { useStudioRoutes } from "../routes";
+import { createJobQueue, jobQueueKey, type JobQueue } from '../jobs';
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 const words = [{ id: "a", phrase: "Hey Cedar", language: "en", model_id: "cedar", created_at: "", updated_at: "" }, { id: "b", phrase: "Okay Maple", language: "fr", model_id: "maple", created_at: "", updated_at: "" }];
-const recipe = { language: "en", english_accent: "us", tts_mode: "hybrid", samples: 20, batch_size: 5 };
+const recipe = { language: "en", english_accent: "us", tts_mode: "hybrid" as const, samples: 20, batch_size: 5 };
 const job = (id: string, status: "queued" | "failed" | "cancelled") => ({ id, kind: "generation", word_id: "a", resource: "gpu", payload: { phrase: "Hey Cedar", recipe }, status, created_at: "", started_at: null, finished_at: status === "queued" ? null : "", result: {} });
 let workspace: Workspace;
+let queue: JobQueue;
 let delayRecipeSave = false;
 let resolveRecipeSave: ((response: Response) => void) | undefined;
 let manyBatches = false;
 let delayPage = false;
 let resolvePage: ((response: Response) => void) | undefined;
 let newWorkspace = false;
-function host() { return { components: { ArtificialPage }, setup() { workspace = createWorkspace(useStudioRoutes()); provide(workspaceKey, workspace); onMounted(() => { void workspace.load(); }); }, template: "<ArtificialPage />" }; }
+function host() { return { components: { ArtificialPage }, setup() { workspace = createWorkspace(useStudioRoutes()); provide(workspaceKey, workspace); queue = createJobQueue(); provide(jobQueueKey, queue); onMounted(() => { void workspace.load(); }); }, template: "<ArtificialPage />" }; }
 
 beforeEach(() => {
   delayRecipeSave = false; resolveRecipeSave = undefined; manyBatches = false; delayPage = false; resolvePage = undefined; newWorkspace = false;
   history.replaceState(null, "", "#/artificial?word=a");
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://localhost"); const path = url.pathname;
+    if (path === '/api/studio/jobs') return json({ items: [], total: 0, offset: 0, limit: 100 });
     if (path === "/api/studio/wakewords") return json({ items: words, total: 2, offset: 0, limit: 100 });
     if (path === '/api/studio/generation/defaults') return json({ samples: 50000, batch_size: 100 });
     if (path.match(/\/wakewords\/[ab]$/)) return json(words.find(word => path.endsWith(word.id)));
@@ -47,6 +50,18 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ArtificialPage", () => {
+  it('refreshes batches on completion while closed, but never refreshes the replacement workspace from an old job', async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    await ui.get('form').trigger('submit'); await flushPromises(); queue.open.value = false;
+    const before = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/a/generation/batches')).length;
+    queue.track({ ...job('generation-queued', 'queued'), kind: 'generation', resource: 'gpu', status: 'complete', result: { batch_id: 'ready' } }); await flushPromises();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/a/generation/batches')).length).toBeGreaterThan(before);
+    workspace.selectedId.value = 'b'; await flushPromises();
+    const next = vi.mocked(fetch).mock.calls.length;
+    queue.track({ ...job('generation-queued', 'queued'), kind: 'generation', resource: 'gpu', status: 'complete', result: { batch_id: 'ready' } }); await flushPromises();
+    expect(vi.mocked(fetch).mock.calls).toHaveLength(next);
+    ui.unmount();
+  });
   it('uses upstream counts for an unsaved recipe without changing preview counts', async () => {
     newWorkspace = true;
     const ui = mount(host()); await flushPromises(); await flushPromises();
@@ -118,6 +133,8 @@ describe("ArtificialPage", () => {
   it('previews exactly one model without saving a recipe and plays its returned audio', async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     await ui.get('[data-preview="qwen3"]').trigger('click'); await flushPromises(); await flushPromises();
+    queue.open.value = false; await queue.refresh(); await flushPromises();
+    expect(ui.find('[data-job-id]').exists()).toBe(false);
     const preview = vi.mocked(fetch).mock.calls.find(([input]) => String(input).endsWith('/generation/previews'));
     expect(JSON.parse(String(preview?.[1]?.body))).toMatchObject({ engines: ['qwen3'], samples: 1, batch_size: 1, language: 'en', english_accent: 'us' });
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
@@ -145,9 +162,10 @@ describe("ArtificialPage", () => {
     expect((ui.get('input[data-batch-id="ready"]').element as HTMLInputElement).checked).toBe(true);
     expect((ui.get('input[data-batch-id="partial"]').element as HTMLInputElement).disabled).toBe(true);
     await ui.get('form').trigger('submit'); await flushPromises();
-    expect(ui.get('[data-job-id="generation-queued"]').text()).toContain("queued");
-    await ui.get('[data-action="cancel-job"]').trigger("click"); await flushPromises();
-    expect(ui.get('[data-job-id="generation-queued"]').text()).toContain("cancelled");
+    expect(queue.jobs.value['generation-queued']?.status).toBe('queued');
+    expect(queue.open.value).toBe(true); expect(ui.find('[data-job-id]').exists()).toBe(false);
+    await queue.cancel('generation-queued'); await flushPromises();
+    expect(queue.jobs.value['generation-queued']?.status).toBe('cancelled');
     workspace.selectedId.value = "b"; await flushPromises(); await flushPromises();
     expect(ui.find('input[data-batch-id="ready"]').exists()).toBe(false); expect(ui.text()).not.toContain("Hey Cedar");
     ui.unmount();

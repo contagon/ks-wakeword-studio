@@ -4,19 +4,21 @@ import { provide } from "vue";
 import NegativeDatasetsPage from "../pages/NegativeDatasetsPage.vue";
 import { createWorkspace, workspaceKey, type Workspace } from "../workspace";
 import { useStudioRoutes } from "../routes";
+import { createJobQueue, jobQueueKey, type JobQueue } from '../jobs';
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 const words = [{ id: "a", phrase: "Hey Cedar", language: "en", model_id: "cedar", created_at: "", updated_at: "" }, { id: "b", phrase: "Okay Maple", language: "en", model_id: "maple", created_at: "", updated_at: "" }];
 const dataset = (index: number, selected = false) => ({ id: `set-${index}`, name: `Corpus ${index}`, description: index === 150 ? "speech collection" : "negative classifier corpus", source: "Example source", license: "CC-BY", representation: "features", split: index === 151 ? "evaluation" : "train", adapter: "mww_mmap", purpose: "classifier_negative", download_bytes: 1000, installed_bytes: index === 0 ? 1000 : null, fingerprint: null, selected, status: index === 0 ? "installed" : index === 2 ? "running" : "available", job_id: index === 2 ? "download-2" : null, error_code: null });
 const catalog = Array.from({ length: 200 }, (_, index) => dataset(index));
 let workspace: Workspace;
+let queue: JobQueue;
 let selectedByWord: Record<string, Set<string>>;
 let delayDatasetSave = false;
 let resolveDatasetSave: ((response: Response) => void) | undefined;
 let delayDownload = false;
 let resolveDownload: ((response: Response) => void) | undefined;
 function resolveDeferred(resolver: ((response: Response) => void) | undefined, response: Response): void { expect(resolver).toBeTypeOf("function"); if (resolver) resolver(response); }
-function host() { return { components: { NegativeDatasetsPage }, setup() { workspace = createWorkspace(useStudioRoutes()); provide(workspaceKey, workspace); }, template: "<NegativeDatasetsPage />" }; }
+function host() { return { components: { NegativeDatasetsPage }, setup() { workspace = createWorkspace(useStudioRoutes()); provide(workspaceKey, workspace); queue = createJobQueue(); provide(jobQueueKey, queue); }, template: "<NegativeDatasetsPage />" }; }
 
 beforeEach(() => {
   selectedByWord = { a: new Set(["set-0"]), b: new Set(["set-1"]) };
@@ -24,6 +26,7 @@ beforeEach(() => {
   history.replaceState(null, "", "#/negative-datasets?word=a");
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://localhost"); const path = url.pathname;
+    if (path === '/api/studio/jobs') return json({ items: [], total: 0, offset: 0, limit: 100 });
     if (path === "/api/studio/wakewords") return json({ items: words, total: 2, offset: 0, limit: 100 });
     if (path.match(/\/wakewords\/[ab]$/)) return json(words.find(word => path.endsWith(word.id)));
     if (path.endsWith("/queue")) return json({ items: [], total: 0, offset: 0, limit: 1 });
@@ -46,6 +49,17 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("NegativeDatasetsPage", () => {
+  it('refreshes completed downloads while closed without discarding unsaved dataset selections', async () => {
+    const ui = mount(host()); await flushPromises();
+    await ui.get('[data-dataset-id="set-4"]').setValue(true);
+    const download = ui.findAll('article').find(row => row.find('[data-dataset-id="set-3"]').exists())!.get('button');
+    await download.trigger('click'); await flushPromises(); queue.open.value = false;
+    const before = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/a/datasets')).length;
+    queue.track({ id: 'download-3', kind: 'download', word_id: null, resource: 'download', payload: { dataset_id: 'set-3' }, status: 'complete', created_at: '', started_at: null, finished_at: '', result: { dataset_id: 'set-3', fingerprint: 'verified' } }); await flushPromises();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/a/datasets')).length).toBeGreaterThan(before);
+    expect((ui.get('[data-dataset-id="set-4"]').element as HTMLInputElement).checked).toBe(true);
+    ui.unmount();
+  });
   it("searches, filters, paginates a 200-entry real catalog, and exposes install state/progress and provenance", async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     expect(ui.text()).toContain("1–50 of 200"); expect(ui.text()).toContain("Corpus 0"); expect(ui.text()).toContain("Example source"); expect(ui.text()).toContain("CC-BY");
@@ -57,7 +71,8 @@ describe("NegativeDatasetsPage", () => {
     expect(ui.text()).toContain("Corpus 150"); expect(ui.find('.studio-pagination').exists()).toBe(false);
     await ui.get("input[name=dataset-search]").setValue(""); await flushPromises();
     await ui.get("select[name=dataset-status]").setValue("running"); await flushPromises();
-    expect(ui.text()).not.toContain("Corpus 150"); expect(ui.text()).toContain("Corpus 2"); expect(ui.get('[data-job-id="download-2"]').text()).toContain("running");
+    expect(ui.text()).not.toContain("Corpus 150"); expect(ui.text()).toContain("Corpus 2"); expect(ui.find('[data-job-id]').exists()).toBe(false);
+    expect(ui.get('[data-action="view-dataset-job"]').text()).toContain('View in queue');
     ui.unmount();
   });
 
@@ -113,7 +128,8 @@ describe("NegativeDatasetsPage", () => {
       expect((ui.get('[data-action="save-datasets"]').element as HTMLButtonElement).disabled).toBe(false);
       const download = ui.findAll("article").find(article => article.find('input[data-dataset-id="set-3"]').exists())?.find("button");
       expect((download?.element as HTMLButtonElement).disabled).toBe(false);
-      expect(ui.find('[data-job-id="download-3"]').exists()).toBe(true);
+      expect(queue.jobs.value['download-3']?.status).toBe('running');
+      expect(queue.open.value).toBe(true); expect(ui.find('[data-job-id]').exists()).toBe(false);
     }
 
     let ui = mount(host()); await flushPromises(); await flushPromises(); await startBoth(ui);

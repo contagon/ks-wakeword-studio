@@ -11,6 +11,7 @@ beforeEach(() => {
   history.replaceState(null, "", "#/scrape?word=a");
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     const path = new URL(url, "http://localhost").pathname;
+    if (path === '/api/studio/jobs') return json({ items: [], total: 0, offset: 0, limit: 100 });
     if (path === "/api/studio/wakewords") return json({ items: [{ id: "a", phrase: "Cedar", language: "en", model_id: "cedar", created_at: "", updated_at: "" }], total: 1, offset: 0, limit: 100 });
     if (path.endsWith("/queue") || path.endsWith("/models")) return json({ items: [], total: 0, offset: 0, limit: 1 });
     if (path.endsWith("/wakewords/a")) return json({ id: "a", phrase: "Cedar", language: "en", model_id: "cedar", created_at: "", updated_at: "" });

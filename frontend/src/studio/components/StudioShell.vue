@@ -57,7 +57,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="studio-app" :class="{ 'is-narrow': narrow }">
-    <div class="studio-layout" data-studio-background :inert="queue.open.value ? '' : undefined">
+    <div class="studio-layout" data-studio-background :inert="queue.open.value ? true : undefined">
     <a class="studio-skip" href="#studio-content" @click.prevent="content?.focus()">Skip to content</a>
     <aside class="studio-sidebar">
       <div class="flex items-center justify-between gap-3">

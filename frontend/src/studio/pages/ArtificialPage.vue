@@ -4,9 +4,10 @@ import { StudioApiError, studioApi } from "../api";
 import { useWorkspace } from "../workspace";
 import type { Batch, GenerationCapability, GenerationRecipe, Job } from "../types";
 import PaginatedTable from "../components/PaginatedTable.vue";
-import JobConsole from "../components/JobConsole.vue";
+import { useJobQueue } from '../jobs';
 
 const workspace = useWorkspace();
+const queue = useJobQueue();
 const capabilities = ref<GenerationCapability[]>([]); const batches = ref<Batch[]>([]); const total = ref(0); const offset = ref(0); const recipe = ref<GenerationRecipe>({ language: "en", english_accent: "mixed", tts_mode: "hybrid", samples: 1, batch_size: 1 });
 const selected = ref<Set<string>>(new Set()); const loading = ref(false); const saving = ref(false); const error = ref(""); const job = ref<Job | null>(null);
 const previews = ref<Record<string, Job>>({}); const previewBusy = ref<Record<string, boolean>>({}); const previewErrors = ref<Record<string, string>>({});
@@ -53,7 +54,7 @@ async function save(): Promise<void> {
   mutationRequest?.abort(); const controller = new AbortController(); mutationRequest = controller; const token = ++mutationGeneration; const recipeToSave = { ...recipe.value, engines: [...recipe.value.engines!], english_accent: accentEnabled.value ? recipe.value.english_accent : 'mixed', tts_mode: 'hybrid' as const }; saving.value = true; error.value = "";
   try {
     const nextJob = await studioApi.generate(id, recipeToSave, controller.signal);
-    if (mutationCurrent(id, token, controller)) { recipe.value = recipeToSave; job.value = nextJob; }
+    if (mutationCurrent(id, token, controller)) { recipe.value = recipeToSave; job.value = nextJob; queue.track(nextJob); void queue.show(nextJob.id); }
   } catch (cause) { if (mutationCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Generation job was not started."; }
   finally { if (mutationCurrent(id, token, controller)) saving.value = false; }
 }
@@ -61,12 +62,16 @@ async function preview(engine: string): Promise<void> {
   const id = activeId.value; if (!id || previewBusy.value[engine]) return;
   previewRequests.get(engine)?.abort(); const controller = new AbortController(); previewRequests.set(engine, controller);
   previewBusy.value[engine] = true; previewErrors.value[engine] = ''; delete previews.value[engine];
-  try { const next = await studioApi.preview(id, { ...recipe.value, tts_mode: 'hybrid', engines: [engine], samples: 1, batch_size: 1, english_accent: capability.value?.accent_applies && engine !== 'piper' ? recipe.value.english_accent : 'mixed' }, controller.signal); if (!controller.signal.aborted && activeId.value === id) previews.value[engine] = next; }
+  try { const next = await studioApi.preview(id, { ...recipe.value, tts_mode: 'hybrid', engines: [engine], samples: 1, batch_size: 1, english_accent: capability.value?.accent_applies && engine !== 'piper' ? recipe.value.english_accent : 'mixed' }, controller.signal); if (!controller.signal.aborted && activeId.value === id) { previews.value[engine] = next; queue.track(next); void queue.show(next.id); } }
   catch (cause) { if (!controller.signal.aborted && activeId.value === id) previewErrors.value[engine] = cause instanceof Error ? cause.message : 'Preview could not start.'; }
   finally { if (previewRequests.get(engine) === controller) { previewBusy.value[engine] = false; previewRequests.delete(engine); } }
 }
 function updatePreview(engine: string, next: Job): void { if (previews.value[engine]?.id === next.id) previews.value[engine] = next; }
 function updateGeneration(next: Job): void { const previous = job.value; if (previous?.id !== next.id) return; job.value = next; if (next.status === 'complete' && previous.status !== 'complete') { offset.value = 0; void load(); } }
+watch(queue.jobs, jobs => {
+  if (job.value) { const next = jobs[job.value.id]; if (next && next.word_id === activeId.value) updateGeneration(next); }
+  for (const [engine, previous] of Object.entries(previews.value)) { const next = jobs[previous.id]; if (next && next.word_id === activeId.value) updatePreview(engine, next); }
+}, { deep: true });
 function toggle(batch: Batch, checked: boolean): void { if (batch.status !== "complete") return; const next = new Set(selected.value); checked ? next.add(batch.id) : next.delete(batch.id); selected.value = next; }
 async function saveBatches(): Promise<void> { const id = activeId.value; if (!id || !selectionLoaded || loading.value) return; mutationRequest?.abort(); const controller = new AbortController(); mutationRequest = controller; const token = ++mutationGeneration; const batchIds = [...selected.value]; saving.value = true;
   try { await studioApi.selectBatches(id, batchIds, controller.signal); if (mutationCurrent(id, token, controller)) await load(); } catch (cause) { if (mutationCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Batch selection was not saved."; } finally { if (mutationCurrent(id, token, controller)) saving.value = false; }
@@ -98,7 +103,7 @@ onBeforeUnmount(() => { loadRequest?.abort(); abortWorkspaceMutations(); });
               </div>
               <p v-if="model.reason" class="studio-muted text-xs mt-2">{{ model.reason }}</p>
               <p v-if="previewErrors[model.engine]" role="alert" class="studio-note mt-3">{{ previewErrors[model.engine] }}</p>
-              <JobConsole v-if="previews[model.engine] && previews[model.engine].status !== 'complete'" :job-id="previews[model.engine].id" @update="updatePreview(model.engine, $event)" />
+              <button v-if="previews[model.engine] && previews[model.engine].status !== 'complete'" type="button" @click="queue.show(previews[model.engine].id)">View preview in queue</button>
               <audio v-if="previews[model.engine]?.status === 'complete'" :data-preview-audio="model.engine" class="mt-3 max-w-full" :src="studioApi.previewAudioUrl(activeId, previews[model.engine].id)" controls autoplay :aria-label="`${engineNames[model.engine] ?? model.engine} wakeword preview`" />
             </article>
           </div>
@@ -107,7 +112,7 @@ onBeforeUnmount(() => { loadRequest?.abort(); abortWorkspaceMutations(); });
         <button type="submit" data-action="generate" class="studio-primary justify-self-start" :disabled="saving || loading || !activeId">{{ saving ? 'Starting…' : 'Generate dataset' }}</button>
       </form>
       <p v-if="error" class="studio-note mt-3" role="alert">{{ error }}</p>
-      <JobConsole v-if="job" :job-id="job.id" @update="updateGeneration" />
+      <button v-if="job" type="button" class="mt-3" @click="queue.show(job.id)">View generation in queue</button>
     </div>
     <div class="studio-card mt-4">
       <div class="flex flex-wrap items-center justify-between gap-3"><h2>Generated datasets</h2><button type="button" data-action="save-batches" :disabled="saving || loading || !activeId" @click="saveBatches">Save selection</button></div>
