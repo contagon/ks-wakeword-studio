@@ -361,8 +361,9 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
         return runtime.jobs.enqueue(body.kind, body.word_id, body.payload, body.dedupe_key)
 
     @router.get('/jobs', response_model=Page[Job])
-    def jobs(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)) -> Page[Job]:
-        return runtime.jobs.list(offset, limit)
+    def jobs(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
+             state: Literal['active', 'history'] | None = None) -> Page[Job]:
+        return runtime.jobs.list(offset, limit, state=state)
 
     @router.get('/jobs/health', response_model=WorkerHealth)
     def worker_health() -> WorkerHealth:

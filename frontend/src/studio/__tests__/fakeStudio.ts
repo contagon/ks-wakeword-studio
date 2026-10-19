@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import type { Recording, Sample } from "../types";
+import type { Job, Recording, Sample } from "../types";
 
 export const words = [
   { id: "a", phrase: "Hey Cedar", language: "en", model_id: "cedar", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
@@ -33,6 +33,7 @@ export function fakeStudio() {
   const db = {
     samples: [] as Sample[],
     unmapped: [] as Recording[],
+    jobs: [] as Job[],
     history: new Map<string, { label: string; audio_id: string }[]>(),
     audio: (id: string): Response => new Response(`audio:${id}`, { headers: { "Content-Type": "audio/wav" } }),
   };
@@ -69,6 +70,17 @@ export function fakeStudio() {
     let m: RegExpMatchArray | null;
     if (p === "/wakewords") return json(page(words, 0, 100));
     if (p === "/schedules") return json([]);
+    if (p === '/jobs') {
+      const active = (job: Job) => ['queued', 'running', 'cancelling'].includes(job.status);
+      const items = q.get('state') === 'active' ? db.jobs.filter(active) : q.get('state') === 'history' ? db.jobs.filter(j => !active(j)).slice().reverse() : db.jobs;
+      return json(page(items, off, lim));
+    }
+    if ((m = p.match(/^\/jobs\/([^/]+)(?:\/(logs|cancel))?$/))) {
+      const job = db.jobs.find(j => j.id === m![1]); if (!job) return json({}, 404);
+      if (m[2] === 'logs') return json({ text: 'Training in progress' });
+      if (m[2] === 'cancel') job.status = 'cancelled';
+      return json(job);
+    }
     if (p === "/recordings/unmapped") return json(page(db.unmapped, off, lim));
     if ((m = p.match(/^\/recordings\/([^/]+)\/assign$/))) {
       const rec = db.unmapped.find(x => x.id === m![1]);

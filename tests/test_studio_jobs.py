@@ -26,6 +26,26 @@ class FakeGroups:
 
 
 class JobTests(unittest.TestCase):
+    def test_global_active_listing_is_complete_and_history_newest_first(self):
+        older = self.enqueue()
+        with self.store.transaction() as db:
+            db.execute("UPDATE studio_jobs SET status='complete' WHERE id=?", (older.id,))
+        newer = self.jobs.enqueue('download', None, {})
+        with self.store.transaction() as db:
+            db.execute("UPDATE studio_jobs SET status='failed' WHERE id=?", (newer.id,))
+        other = WorkspaceService(self.store).create('Other', 'en', 'other')
+        jobs = [self.jobs.enqueue('scrape', other.id, {'device_ids': ['follower']}) for _ in range(105)]
+        first = self.jobs.list(0, 100, state='active')
+        second = self.jobs.list(100, 100, state='active')
+        self.assertEqual(first.total, 105)
+        self.assertEqual([j.id for j in first.items + second.items], [j.id for j in jobs])
+        self.assertEqual(first.items[0].payload['device_ids'], ['follower'])
+        history = self.jobs.list(state='history')
+        self.assertEqual([j.id for j in history.items], [newer.id, older.id])
+        self.assertEqual(history.total, 2)
+        with self.assertRaises(ValidationError):
+            self.jobs.list(state='invalid')
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

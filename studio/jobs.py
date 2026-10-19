@@ -192,12 +192,17 @@ class JobQueue:
         with self.store.transaction() as db:
             return self._record(self._row(db, job_id))
 
-    def list(self, offset=0, limit=50):
+    def list(self, offset=0, limit=50, *, state=None):
         if type(offset) is not int or type(limit) is not int or offset < 0 or not 1 <= limit <= 100:
             raise ValidationError('Invalid pagination')
+        if state not in (None, 'active', 'history'):
+            raise ValidationError('Invalid job state filter')
+        active = "status IN ('queued','running','cancelling')"
+        where = '' if state is None else ' WHERE ' + (active if state == 'active' else 'NOT ' + active)
+        order = 'rowid DESC' if state == 'history' else 'rowid'
         with self.store.transaction() as db:
-            total = db.execute('SELECT count(*) FROM studio_jobs').fetchone()[0]
-            rows = db.execute('SELECT * FROM studio_jobs ORDER BY rowid LIMIT ? OFFSET ?', (limit, offset)).fetchall()
+            total = db.execute('SELECT count(*) FROM studio_jobs' + where).fetchone()[0]
+            rows = db.execute('SELECT * FROM studio_jobs' + where + ' ORDER BY ' + order + ' LIMIT ? OFFSET ?', (limit, offset)).fetchall()
             return Page([self._record(row) for row in rows], total, offset, limit)
 
     def _owner_lock(self, job_id):

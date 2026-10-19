@@ -6,6 +6,7 @@ import type { AutomationSettings, AutomationStatus } from './types';
 const base = "/api/studio";
 const segment = encodeURIComponent;
 type Query = object;
+export type JobQuery = Pagination & { state?: 'active' | 'history' };
 function query(values: Query = {}): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(values)) if (value !== undefined && value !== null) params.set(key, String(value));
@@ -82,7 +83,7 @@ export const studioApi = {
   saveAutomation: (word: string, settings: AutomationSettings, signal?: AbortSignal) => put<AutomationStatus>(`${wordPath(word)}/automation`, settings, signal),
   collect: (word: string, device_ids?: string[], signal?: AbortSignal) => post<ScrapeJob>(`${wordPath(word)}/collection/jobs`, { device_ids }, signal),
   saveSchedule: (scope: string, body: ScheduleInput, signal?: AbortSignal) => put<Schedule>(`/schedules/${segment(scope)}`, body, signal),
-  jobs: (params?: Pagination, signal?: AbortSignal) => get<Page<Job>>("/jobs", params, signal),
+  jobs: (params?: JobQuery, signal?: AbortSignal) => get<Page<Job>>("/jobs", params, signal),
   enqueueScrape: (body: EnqueueScrapeJob, signal?: AbortSignal) => post<ScrapeJob>("/jobs", body, signal),
   health: (signal?: AbortSignal) => get<WorkerHealth>("/jobs/health", undefined, signal),
   job: (id: string, signal?: AbortSignal) => get<Job>(`/jobs/${segment(id)}`, undefined, signal),
