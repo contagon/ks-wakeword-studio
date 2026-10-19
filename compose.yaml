@@ -1,0 +1,26 @@
+name: ks-wakeword-studio
+
+services:
+  studio:
+    build:
+      context: .
+      dockerfile: dockerfile
+    image: ks-wakeword-studio:local
+    container_name: ks-wakeword-studio
+    restart: unless-stopped
+    gpus: all
+    shm_size: 8gb
+    ports:
+      - "8790:8789"
+    environment:
+      REC_PORT: "8789"
+      PIP_NO_CACHE_DIR: "1"
+    volumes:
+      - data:/data
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+volumes:
+  data:
+    name: ks-wakeword-studio-data
+    external: true

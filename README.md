@@ -46,6 +46,40 @@ which is unofficial and licensed CC BY-NC 4.0.
 
 ## Run The Container
 
+### Local Compose workflow
+
+With Docker Compose v2.30+ and the NVIDIA Container Toolkit installed:
+
+```bash
+just build
+just start
+just stop
+```
+
+`just logs` follows logs and `just status` shows service status. The `justfile`
+uses `compose.yaml`, builds `ks-wakeword-studio:local`, and exposes the UI at
+**http://localhost:8790** with GPU access and 8 GiB shared memory. Forward port
+8790 for remote access; it is deliberately bound only to loopback.
+
+Data stays in the external Docker volume `ks-wakeword-studio-data`; `just start`
+creates it if missing, and stopping/removing the Compose service does not delete
+it. Without `just`, use `docker compose build`, create the volume with
+`docker volume create ks-wakeword-studio-data`, then `docker compose up -d` or
+`docker compose stop`. First startup installs dependencies into the volume.
+
+**One-time transition from the existing `docker run` container:** Compose cannot
+adopt a manually created container with the same name. When ready to switch,
+run the commands below; the data volume is retained. Adding these files does
+not stop or replace the currently running container automatically.
+
+```bash
+docker stop ks-wakeword-studio
+docker rm ks-wakeword-studio
+just start
+```
+
+### Published image workflow
+
 ```bash
 docker run -d \
   --gpus all \
