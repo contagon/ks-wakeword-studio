@@ -2,6 +2,9 @@
 @source "./**/*.vue";
 
 .studio-layout { display: contents; }
+.studio-app .studio-device-dialog { width: min(440px, calc(100% - 40px)); margin: auto; }
+.studio-device-dialog::backdrop { background: rgb(20 35 48 / .48); }
+.studio-device-dialog > * + * { margin-top: 12px; }
 .studio-app .studio-queue-toggle { display: inline-flex; align-items: center; gap: 7px; }
 .studio-queue-toggle svg { width: 20px; height: 20px; }
 .studio-queue-badge { display: inline-block; background: var(--studio-primary); color: white; font-size: 11px; border-radius: 16px; padding: 1px 6px; font-weight: 500; }

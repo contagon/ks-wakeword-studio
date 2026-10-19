@@ -33,6 +33,18 @@ async function completedCollection(ui: VueWrapper, result: object) {
 }
 
 describe("keyboard-first classification", () => {
+  it('suppresses classification shortcuts while a job log summary has modal focus', async () => {
+    server.db.jobs.push({ id: 'modal-job', kind: 'train', word_id: 'a', resource: 'gpu', payload: {}, status: 'running', created_at: '', started_at: null, finished_at: null, result: {} });
+    const ui = await open();
+    await ui.get('[data-action="open-job-queue"]').trigger('click'); await settle();
+    const summary = ui.get('[data-job-id="modal-job"] summary'); (summary.element as HTMLElement).focus();
+    const before = current(ui);
+    for (const key of ['p', 'n', 's', 'z', 'd']) { press(key, {}, summary.element); await settle(); }
+    expect(current(ui)).toBe(before); expect(labels()).toHaveLength(0);
+    expect(ui.find('[data-classify-discard]').exists()).toBe(false);
+    await ui.get('[data-action="close-job-queue"]').trigger('click'); await settle();
+    press('p'); await settle(); expect(labels()).toHaveLength(1);
+  });
   it('shows failed collection outcomes instead of reporting only completed queue work', async () => {
     const ui = await open();
     await completedCollection(ui, { run_id: 'failed-run', status: 'partial', new: 0, failed: 2, unmapped: 0, evicted: 0 });

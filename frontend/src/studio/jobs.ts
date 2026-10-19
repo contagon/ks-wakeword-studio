@@ -18,15 +18,21 @@ export function createJobQueue() {
   const history = computed(() => historyIds.value.map(id => jobs.value[id]).filter((job): job is Job => !!job && !isActiveJob(job)));
   const hasMore = computed(() => historyIds.value.length < historyTotal.value);
   let running = false, timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false, lifecycle = 0;
   let request: AbortController | undefined, pending: Promise<void> | undefined;
   let historyDepth = 50, revision = 0;
   const revisions = new Map<string, number>();
   const cancelRequests = new Map<string, AbortController>();
+  const actionRequests = new Set<AbortController>();
 
   function track(job: Job): void {
+    if (jobs.value[job.id] && !isActiveJob(jobs.value[job.id]) && isActiveJob(job)) return;
     jobs.value = { ...jobs.value, [job.id]: job }; revisions.set(job.id, ++revision);
   }
-  function accept(job: Job, snapshot: number): void { if ((revisions.get(job.id) ?? 0) <= snapshot) jobs.value[job.id] = job; }
+  function accept(job: Job, snapshot: number): void {
+    if (jobs.value[job.id] && !isActiveJob(jobs.value[job.id]) && isActiveJob(job)) return;
+    if ((revisions.get(job.id) ?? 0) <= snapshot) jobs.value[job.id] = job;
+  }
   async function pages(state: 'active' | 'history', controller: AbortController, depth = Infinity): Promise<Page<Job>> {
     const items: Job[] = []; let total = 0;
     do {
@@ -68,26 +74,42 @@ export function createJobQueue() {
     if (running) timer = setTimeout(() => { timer = undefined; void refresh(); }, 2000);
   }
   function refresh(): Promise<void> {
+    if (stopped) return Promise.resolve();
     if (pending) return pending;
     if (timer) clearTimeout(timer); timer = undefined;
     const next = cycle().finally(() => { if (pending === next) { pending = undefined; schedule(); } });
     pending = next; return next;
   }
-  function start(): void { if (!running) { running = true; void refresh(); } }
+  function start(): void { if (!running) { stopped = false; running = true; void refresh(); } }
   function stop(): void {
+    stopped = true; lifecycle += 1;
     running = false; if (timer) clearTimeout(timer); timer = undefined;
     request?.abort(); cancelRequests.forEach(controller => controller.abort()); cancelRequests.clear();
+    actionRequests.forEach(controller => controller.abort()); actionRequests.clear();
   }
   async function show(id?: string): Promise<void> {
+    if (stopped) return;
+    const controller = new AbortController(), current = lifecycle; actionRequests.add(controller);
+    const alive = () => !controller.signal.aborted && lifecycle === current && !stopped;
     selectedJobId.value = id ?? ''; open.value = true;
-    // A refresh already underway may have read the closed state. Follow it with a drawer refresh.
-    if (pending) await pending;
-    if (id && !jobs.value[id]) {
-      try { track(await studioApi.job(id)); } catch (cause) { error.value = cause instanceof Error ? cause.message : 'Unable to load job.'; }
-    }
-    await refresh();
+    try {
+      // A refresh already underway may have read the closed state. Follow it with a drawer refresh.
+      if (pending) await pending;
+      if (!alive()) return;
+      if (id && !jobs.value[id]) {
+        const job = await studioApi.job(id, controller.signal);
+        if (!alive()) return;
+        track(job);
+      }
+      if (alive()) await refresh();
+    } catch (cause) { if (alive()) error.value = cause instanceof Error ? cause.message : 'Unable to load job.'; }
+    finally { actionRequests.delete(controller); }
   }
-  async function loadMore(): Promise<void> { historyDepth += 50; if (pending) await pending; await refresh(); }
+  async function loadMore(): Promise<void> {
+    if (stopped) return;
+    const current = lifecycle; historyDepth += 50; if (pending) await pending;
+    if (!stopped && lifecycle === current) await refresh();
+  }
   async function cancel(id: string): Promise<void> {
     if (cancelling.value.has(id) || !jobs.value[id] || !isActiveJob(jobs.value[id])) return;
     const controller = new AbortController(); cancelRequests.set(id, controller);
@@ -96,7 +118,10 @@ export function createJobQueue() {
     revisions.set(id, ++revision);
     try { const next = await studioApi.cancelJob(id, controller.signal); if (!controller.signal.aborted) track(next); }
     catch (cause) { if (!controller.signal.aborted) cancelErrors.value[id] = cause instanceof Error ? cause.message : 'Unable to cancel job.'; }
-    finally { cancelRequests.delete(id); cancelling.value = new Set([...cancelling.value].filter(value => value !== id)); }
+    finally {
+      cancelRequests.delete(id); cancelling.value = new Set([...cancelling.value].filter(value => value !== id));
+      if (!controller.signal.aborted) await refresh();
+    }
   }
   return { jobs, activeJobs, history, activeCount, historyTotal, hasMore, error, loading, open, selectedJobId, cancelling, cancelErrors, start, stop, refresh, track, show, loadMore, cancel };
 }

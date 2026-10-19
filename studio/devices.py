@@ -205,6 +205,11 @@ class DeviceService:
         except (KeyError, TypeError, ValueError, ValidationError):
             raise RemoteRejected("Invalid fleet roster") from None
         with self.store.transaction() as db:
+            # Network calls above can outlive local registry administration.
+            # Recheck under the same write lock as the upsert so removal wins.
+            current = db.execute("SELECT active, removed, role FROM devices WHERE id=?", (leader_id,)).fetchone()
+            if current is None or current['removed'] or not current['active'] or current['role'] != 'leader':
+                raise Conflict('Fleet leader changed while refreshing')
             db.execute("UPDATE devices SET active=0 WHERE role='follower' AND leader_id=?", (leader_id,))
             for device_id, url, profile_id, eligible, active in rows:
                 db.execute("""INSERT INTO devices (id,url,role,leader_id,profile_id,model_eligible,active)

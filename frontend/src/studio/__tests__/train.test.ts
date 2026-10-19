@@ -41,6 +41,20 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("TrainPage", () => {
+  it('reconciles stale initial history when the queue completes a run before counts load', async () => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (String(input).endsWith('/a/training/counts')) return new Promise<Response>(resolve => { finish = resolve; });
+      if (String(input).includes('/a/training/runs')) return Promise.resolve(json({ items: [train('queued')], total: 1, offset: 0, limit: 50 }));
+      return transport(input, init);
+    });
+    const ui = mount(host()); await flushPromises();
+    queue.track({ ...train('complete', { run_id: 'train-1', version_id: 'version-1' }), kind: 'train', resource: 'gpu', payload: {} }); await flushPromises();
+    finish(json({ positive: 3, negative: 4, artificial: 5 })); await flushPromises();
+    expect(ui.get('.studio-history .studio-status').text()).toBe('complete');
+    ui.unmount();
+  });
   it('updates run history after completion with the drawer closed without losing unsaved parameters', async () => {
     const ui = mount(host()); await flushPromises();
     await ui.get('input[name="training-steps"]').setValue('50001');

@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { studioApi } from "../api";
 import { useWorkspace } from "../workspace";
 import type { Dataset, Job, Page, TrainingCounts, TrainingSettings } from "../types";
-import { useJobQueue } from '../jobs';
+import { isActiveJob, useJobQueue } from '../jobs';
 
 const workspace = useWorkspace();
 const queue = useJobQueue();
@@ -16,8 +16,16 @@ function saveCurrent(id: string, token: number, controller: AbortController): bo
 function startCurrent(id: string, token: number, controller: AbortController): boolean { return activeId.value === id && startGeneration === token && !controller.signal.aborted; }
 function abortWorkspaceMutations(): void { saveRequest?.abort(); startRequest?.abort(); saveRequest = undefined; startRequest = undefined; saveGeneration += 1; startGeneration += 1; saving.value = false; starting.value = false; started.value = null; }
 async function allSelectedDatasets(id: string, controller: AbortController): Promise<Dataset[]> { const items: Dataset[] = []; let offset = 0; while (!controller.signal.aborted) { const page: Page<Dataset> = await studioApi.datasets(id, { status: "selected", offset, limit: 100 }, controller.signal); items.push(...page.items); offset += page.items.length; if (offset >= page.total || page.items.length === 0) break; } return items; }
+function reconcileRuns(items: Job[]): Job[] {
+  return items.map(run => {
+    const known = queue.jobs.value[run.id];
+    const current = known?.word_id === activeId.value ? known : run;
+    if (isActiveJob(current) && !known) queue.track(current);
+    return current;
+  });
+}
 async function load(): Promise<void> { loadRequest?.abort(); const controller = new AbortController(); loadRequest = controller; const token = ++loadGeneration; const id = activeId.value; counts.value = null; runs.value = []; selectedDatasets.value = []; started.value = null; error.value = ""; if (!id) return; loading.value = true;
-  try { const [nextCounts, nextSettings, nextRuns, nextDatasets] = await Promise.all([studioApi.trainingCounts(id, controller.signal), studioApi.trainingSettings(id, controller.signal), studioApi.trainingRuns(id, { limit: 50 }, controller.signal), allSelectedDatasets(id, controller)]); if (!loadCurrent(id, token, controller)) return; counts.value = nextCounts; settings.value = nextSettings; runs.value = nextRuns.items; selectedDatasets.value = nextDatasets; }
+  try { const [nextCounts, nextSettings, nextRuns, nextDatasets] = await Promise.all([studioApi.trainingCounts(id, controller.signal), studioApi.trainingSettings(id, controller.signal), studioApi.trainingRuns(id, { limit: 50 }, controller.signal), allSelectedDatasets(id, controller)]); if (!loadCurrent(id, token, controller)) return; counts.value = nextCounts; settings.value = nextSettings; runs.value = reconcileRuns(nextRuns.items); selectedDatasets.value = nextDatasets; }
   catch (cause) { if (loadCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Unable to load training configuration."; }
   finally { if (loadCurrent(id, token, controller)) loading.value = false; }
 }

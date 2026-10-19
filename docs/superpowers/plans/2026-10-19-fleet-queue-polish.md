@@ -87,3 +87,20 @@
 ## Handoff
 
 Recommended execution: Native, since these four tasks share the queue store and page lifecycle interfaces. Review the design/plan before starting implementation; isolate the implementation in a worktree and preserve all existing user changes.
+
+## Execution record
+
+- [x] Task 1: kiosk management (`5f29e56`).
+- [x] Task 2: global monitoring (`5e74ac0`).
+- [x] Task 3: compact drawer (`31e03bb`).
+- [x] Task 4: page integration (`25466bd`).
+- User explicitly chose this checkout rather than an isolated worktree. Unrelated Compose/environment changes remain untouched.
+- Tests use the existing `/tmp/opencode/wakeword-studio-venv` and a writable temporary `DATA_DIR`, not Docker's `/data` default.
+- Migration tests now reconstruct schema 13 and earlier without the new columns; the one-leader constraint excludes locally removed leaders.
+- Completion refreshes preserve unsaved dataset selections. Existing browser flows explicitly close the approved persistent modal before using background controls.
+- Training-history fixtures use distinct run IDs so enqueue reconciliation is tested realistically.
+- Independent review identified refresh/removal, cancel/polling, initial-training-load and shortcut-isolation races. All were reproduced with failing regression tests and fixed. Teardown leakage and removal-dialog focus findings were regraded as Important because they affect keyboard/lifecycle correctness, and fixed with regressions in the same pass.
+- Removal confirmation now uses a native modal dialog, retaining focus while requests are pending and restoring a surviving control after deletion. Queue lookups and delayed drawer actions are abortable on shell teardown.
+- Verification after review fixes: frontend 120 passed; Python excluding the known local Compose contract failure 431 passed/1 skipped; Playwright 10 passed; production build/typecheck and diff whitespace check passed.
+- Full Python suite before review fixes: 430 passed/1 skipped, plus one pre-existing failure in `tests/test_compose.py::ComposeTests::test_resolved_service_keeps_loopback_gpu_and_existing_data_volume` due local Compose settings. These user-owned settings remain untouched. Existing framework deprecation warnings remain.
+- Review limitations: live hardware/network behavior requires deployment validation; visuals were checked through the approved mockup and browser screenshots; generated bundles were rebuilt from the reviewed sources rather than independently hand-reviewed. No deferred minor findings.

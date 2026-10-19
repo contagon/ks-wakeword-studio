@@ -185,7 +185,7 @@ async function assign(recording: Recording): Promise<void> {
 }
 function editing(event: KeyboardEvent): boolean { const target = event.target instanceof HTMLElement ? event.target : document.activeElement; return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName)); }
 function shortcut(event: KeyboardEvent): void {
-  if (tab.value !== 'review') return;
+  if (jobs.open.value || tab.value !== 'review') return;
   if (event.repeat || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || editing(event)) return;
   const key = event.key.toLowerCase();
   if (discardOpen.value) { if (event.key === "Escape") { event.preventDefault(); discardOpen.value = false; } return; }

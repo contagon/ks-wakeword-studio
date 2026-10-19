@@ -65,3 +65,34 @@ it('preserves a just-enqueued job when an older list request finishes', async ()
   finish(Response.json({ items: [], total: 0, offset: 0, limit: 100 })); await refresh;
   expect(queue.activeCount.value).toBe(1); expect(queue.jobs.value.new?.status).toBe('queued'); queue.stop();
 });
+
+it('never regresses a terminal job when a delayed cancel response arrives after polling', async () => {
+  const s = server(); const transport = vi.mocked(fetch).getMockImplementation()!;
+  let finish!: (response: Response) => void;
+  vi.mocked(fetch).mockImplementation((input, init) => String(input).endsWith('/cancel') ? new Promise<Response>(resolve => { finish = resolve; }) : transport(input, init));
+  const queue = createJobQueue(); queue.track(job('late-cancel', 'running'));
+  const cancellation = queue.cancel('late-cancel');
+  s.history.push(job('late-cancel', 'cancelled')); await queue.refresh();
+  expect(queue.jobs.value['late-cancel']?.status).toBe('cancelled');
+  finish(Response.json(job('late-cancel', 'cancelling'))); await cancellation;
+  expect(queue.jobs.value['late-cancel']?.status).toBe('cancelled'); expect(queue.activeCount.value).toBe(0);
+  queue.stop();
+});
+
+it('aborts drawer lookup and does not issue more requests or insert state after teardown', async () => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn(async () => Response.json({ items: [], total: 0, offset: 0, limit: 100 })).mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; })); vi.stubGlobal('fetch', fetcher);
+  const queue = createJobQueue(); const shown = queue.show('late-lookup'); queue.stop();
+  finish(Response.json(job('late-lookup', 'complete'))); await shown;
+  expect(queue.jobs.value['late-lookup']).toBeUndefined(); expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it('does not resume a drawer action after its awaited refresh is stopped', async () => {
+  let finish!: (response: Response) => void;
+  const fetcher = vi.fn(async () => Response.json({ items: [], total: 0, offset: 0, limit: 100 })).mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; })); vi.stubGlobal('fetch', fetcher);
+  const queue = createJobQueue(); const refreshing = queue.refresh(); const shown = queue.show(); queue.stop();
+  finish(Response.json({ items: [], total: 0, offset: 0, limit: 100 }));
+  await refreshing;
+  await shown;
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});

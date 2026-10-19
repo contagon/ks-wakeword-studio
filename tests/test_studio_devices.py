@@ -4,6 +4,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 from dataclasses import asdict
 from pathlib import Path
 
@@ -18,6 +19,22 @@ from studio.runtime import StudioRuntime
 
 
 class DeviceTests(unittest.TestCase):
+    def test_pending_roster_cannot_restore_followers_after_leader_removal(self):
+        leader = self.service.add(self.server.url, TOKEN, 'leader')
+        self.service.refresh_fleet(leader.id)
+        command = self.service.client.command
+        def remove_before_response(*args, **kwargs):
+            result = command(*args, **kwargs)
+            if args[1] == 'fleetStatus':
+                self.service.remove(leader.id)
+            return result
+        with patch.object(self.service.client, 'command', side_effect=remove_before_response):
+            with self.assertRaises(Conflict):
+                self.service.refresh_fleet(leader.id)
+        self.assertEqual(self.service.list(), [])
+        with self.store.transaction() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM devices WHERE active=1 OR removed=0').fetchone()[0], 0)
+
     def test_address_edit_is_local_preserves_roles_and_survives_refresh(self):
         leader = self.service.add(self.server.url, TOKEN, 'leader')
         self.service.refresh_fleet(leader.id)

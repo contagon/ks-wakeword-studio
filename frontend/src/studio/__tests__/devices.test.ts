@@ -28,6 +28,23 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("shared fleet registry", () => {
+  it('isolates removal confirmation and retains focus while busy, then restores a surviving control', async () => {
+    devices = [leader, follower]; await useDeviceRegistry().load(true);
+    const ui = mount(DeviceRegistry, { attachTo: document.body, props: { surface: 'kiosks' } }); await flushPromises();
+    await ui.get('[data-device-id="follower"] [data-action="delete-device"]').trigger('click'); await flushPromises();
+    expect(ui.get('[data-device-registry-content]').attributes('inert')).toBeDefined();
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }));
+    await ui.get('[data-action="confirm-device-delete"]').trigger('click'); await flushPromises();
+    const dialog = ui.get('[role="alertdialog"]');
+    expect(document.activeElement).toBe(dialog.element);
+    await dialog.trigger('keydown', { key: 'Tab' }); expect(document.activeElement).toBe(dialog.element);
+    devices = [leader]; finish(new Response(null, { status: 204 })); await flushPromises();
+    expect(ui.find('[role="alertdialog"]').exists()).toBe(false);
+    expect(ui.get('[data-device-registry-content]').attributes('inert')).toBeUndefined();
+    expect(document.activeElement).toBe(ui.get('[data-action="refresh-registry"]').element);
+    ui.unmount();
+  });
   it('edits follower addresses, cancels edits, and confirms local removal', async () => {
     devices = [leader, follower];
     const ui = mount(DeviceRegistry, { props: { surface: 'kiosks' } });

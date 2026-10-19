@@ -15,7 +15,8 @@ const notice = ref("");
 const error = ref("");
 const editing = ref(''), editUrl = ref('');
 const deleting = ref<Device | null>(null);
-const confirmation = ref<HTMLElement>();
+const confirmation = ref<HTMLDialogElement>();
+const registryElement = ref<HTMLElement>();
 let deleteTrigger: HTMLElement | null = null;
 function edit(device: Device): void { editing.value = device.id; editUrl.value = device.url; }
 async function saveAddress(device: Device): Promise<void> {
@@ -26,12 +27,21 @@ async function saveAddress(device: Device): Promise<void> {
 }
 async function confirmDelete(device: Device, event: Event): Promise<void> {
   deleteTrigger = event.currentTarget as HTMLElement; deleting.value = device;
-  await nextTick(); confirmation.value?.querySelector<HTMLButtonElement>('button')?.focus();
+  await nextTick();
+  // Native modal dialogs isolate the entire app, including assistive technology.
+  if (typeof confirmation.value?.showModal === 'function') confirmation.value.showModal();
+  else confirmation.value?.setAttribute('open', '');
+  confirmation.value?.querySelector<HTMLButtonElement>('button')?.focus();
 }
-function closeDelete(): void { deleting.value = null; deleteTrigger?.focus(); }
+async function closeDelete(): Promise<void> {
+  deleting.value = null; await nextTick();
+  if (deleteTrigger?.isConnected) deleteTrigger.focus();
+  else registryElement.value?.querySelector<HTMLButtonElement>('[data-action="refresh-registry"]')?.focus();
+}
 function containFocus(event: KeyboardEvent): void {
   if (event.key !== 'Tab') return;
   const controls = confirmation.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');
+  if (!controls?.length) { event.preventDefault(); confirmation.value?.focus(); return; }
   const first = controls?.[0], last = controls?.[controls.length - 1];
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
@@ -39,6 +49,7 @@ function containFocus(event: KeyboardEvent): void {
 async function remove(): Promise<void> {
   if (!deleting.value || busy.value) return;
   busy.value = `delete:${deleting.value.id}`; error.value = '';
+  await nextTick(); confirmation.value?.focus();
   try { await registry.remove(deleting.value.id); closeDelete(); notice.value = 'Kiosk removed from Studio. Saved recordings and models are kept.'; sync(); }
   catch (cause) { error.value = cause instanceof Error ? cause.message : 'Kiosk was not removed.'; }
   finally { busy.value = ''; }
@@ -84,7 +95,8 @@ onBeforeUnmount(() => registry.abort());
 </script>
 
 <template>
-  <section class="studio-card" data-device-registry>
+  <section ref="registryElement" class="studio-card" data-device-registry>
+    <div data-device-registry-content :inert="deleting ? true : undefined">
     <div class="flex flex-wrap items-start justify-between gap-3"><div><h2>Fleet setup</h2><p class="studio-muted">Register a fleet leader or standalone kiosks.</p></div><button type="button" data-action="refresh-registry" :disabled="registry.loading.value" @click="registry.load(true)">Refresh registry</button></div>
     <details class="mt-3"><summary>Fleet safety details</summary><p class="studio-muted">Register one fleet leader or standalone kiosks. A leader is authoritative: its existing mirror can propagate selections and remove follower-only models. This studio never edits enabled selections or uploads directly to followers.</p><p v-if="props.surface === 'deploy'" class="studio-muted text-xs mt-3">Publication staging prerequisite: upload staging must start clean and no concurrent manual uploads may occur while the trainer owns a publication. This condition cannot be checked automatically.</p></details>
     <p v-if="notice" class="studio-note" role="status">{{ notice }}</p><p v-if="error || registry.error.value" class="studio-note" role="alert">{{ error || registry.error.value }}</p>
@@ -111,15 +123,14 @@ onBeforeUnmount(() => registry.abort());
       </article>
       <p v-if="!registry.devices.value.length" class="studio-muted">No kiosks registered yet.</p>
     </div>
-    <div v-if="deleting" class="studio-modal-backdrop" @click.self="!busy && closeDelete()" @keydown.esc="!busy && closeDelete()">
-      <section ref="confirmation" role="alertdialog" aria-modal="true" aria-label="Remove kiosk from Studio?" class="studio-card grid gap-3" @keydown="containFocus">
+    </div>
+      <dialog v-if="deleting" ref="confirmation" tabindex="-1" role="alertdialog" aria-modal="true" aria-label="Remove kiosk from Studio?" class="studio-card studio-device-dialog" @cancel.prevent="!busy && closeDelete()" @keydown.esc="!busy && closeDelete()" @keydown="containFocus" @click.self="!busy && closeDelete()">
         <h2>Remove {{ deleting.id }} from Studio?</h2>
         <p v-if="deleting.role === 'leader'">This also removes its discovered followers from the Studio registry.</p>
         <p v-else-if="deleting.role === 'follower'">This follower can be rediscovered on the next fleet refresh.</p>
         <p>Saved recordings and models are kept. This does not change the kiosk itself.</p>
         <p v-if="error" role="alert" class="studio-note">{{ error }}</p>
         <div class="flex gap-2"><button data-action="cancel-device-delete" type="button" :disabled="!!busy" @click="closeDelete">Keep kiosk</button><button data-action="confirm-device-delete" type="button" :disabled="!!busy" @click="remove">Remove from Studio</button></div>
-      </section>
-    </div>
+      </dialog>
   </section>
 </template>
