@@ -11,6 +11,7 @@ from studio.samples import SampleService
 from studio.workspaces import WorkspaceService
 from studio.jobs import JobQueue, WorkerPool, utc_now
 from studio.schedules import ScheduleService
+from studio.automation import AutomationService
 from studio.models import WorkerHealth
 from studio.datasets import DatasetService
 from studio.generation import GenerationService
@@ -35,6 +36,7 @@ class StudioRuntime:
         self._collection: CollectionService | None = None
         self._jobs: JobQueue | None = None
         self._schedules: ScheduleService | None = None
+        self._automation: AutomationService | None = None
         self._workers: WorkerPool | None = None
         self._datasets: DatasetService | None = None
         self._generation: GenerationService | None = None
@@ -64,6 +66,7 @@ class StudioRuntime:
                 self._deployment = DeploymentService(store, self._devices, self._training, clock=self.clock)
                 self._migration = MigrationService(store, self._samples, self._training, legacy_active=self.legacy_active, clock=self.clock)
                 self._schedules = ScheduleService(store, self._jobs, clock=self.clock)
+                self._automation = AutomationService(store, self._jobs, self._schedules)
                 self._workers = WorkerPool(self._jobs, clock=self.clock, runner=self.runner, schedules=self._schedules,
                                            maintenance=self._deployment.retry_due)
                 self._workers.register('scrape', 'collection', self._collect_job)
@@ -124,6 +127,11 @@ class StudioRuntime:
         self.startup()
         assert self._jobs is not None
         return self._jobs
+
+    @property
+    def automation(self):
+        self.startup()
+        return self._automation
 
     @property
     def schedules(self) -> ScheduleService:

@@ -72,6 +72,45 @@ class Schedule:
 
 
 @dataclass(frozen=True)
+class AutomationSchedule:
+    enabled: bool = False
+    cron: str = '*/30 * * * *'
+    timezone: str = 'UTC'
+
+
+@dataclass(frozen=True)
+class ClassificationPolicy:
+    enabled: bool = False
+    trigger: Literal['after_collection', 'schedule'] = 'after_collection'
+    engine: Literal['faster_whisper', 'parakeet_onnx'] = 'faster_whisper'
+    auto_negatives: bool = True
+    promote_close_misses: bool = False
+
+
+@dataclass(frozen=True)
+class DeploymentPolicy:
+    after_training: bool = False
+
+
+@dataclass(frozen=True)
+class AutomationSettings:
+    collection: AutomationSchedule = field(default_factory=AutomationSchedule)
+    classification: ClassificationPolicy = field(default_factory=ClassificationPolicy)
+    classification_schedule: AutomationSchedule = field(default_factory=lambda: AutomationSchedule(cron='0 * * * *'))
+    training: AutomationSchedule = field(default_factory=lambda: AutomationSchedule(cron='0 2 * * *'))
+    skip_unchanged: bool = True
+    deployment: AutomationSchedule = field(default_factory=lambda: AutomationSchedule(cron='0 4 * * *'))
+    deployment_policy: DeploymentPolicy = field(default_factory=DeploymentPolicy)
+
+
+@dataclass(frozen=True)
+class AutomationStatus:
+    settings: AutomationSettings
+    schedules: list[Schedule]
+    last_jobs: dict[str, 'Job | None']
+
+
+@dataclass(frozen=True)
 class Job:
     id: str
     kind: str

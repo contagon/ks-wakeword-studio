@@ -25,6 +25,10 @@ class ScheduleService:
         return Schedule(row['scope'], row['cron'], row['timezone'], bool(row['enabled']), row['next_run_at'])
 
     def save(self, scope: str, cron: str, timezone: str = 'UTC', enabled: bool = True) -> Schedule:
+        with self.store.transaction() as db:
+            return self.save_in(db, scope, cron, timezone, enabled)
+
+    def save_in(self, db, scope, cron, timezone='UTC', enabled=True):
         if (not isinstance(scope, str) or not isinstance(cron, str) or len(cron) > 256
                 or len(cron.split()) != 5 or not isinstance(timezone, str)
                 or len(timezone) > 100 or type(enabled) is not bool):
@@ -40,7 +44,7 @@ class ScheduleService:
                          else 'sun mon tue wed thu fri sat').split()
                 if name.lower() not in names:
                     raise ValidationError('Invalid cron name')
-        if scope != 'scrape' and not scope.startswith('train:'):
+        if scope != 'scrape' and (':' not in scope or scope.split(':', 1)[0] not in ('scrape', 'classify', 'train', 'deploy')):
             raise ValidationError('Invalid schedule scope')
         try:
             ZoneInfo(timezone)
@@ -50,16 +54,14 @@ class ScheduleService:
             due = self.next_run(schedule, self.clock()).isoformat()
         except (ValueError, ZoneInfoNotFoundError, OverflowError) as exc:
             raise ValidationError('Invalid schedule') from exc
-        with self.store.transaction() as db:
-            if scope.startswith('train:') and not db.execute('SELECT 1 FROM wakewords WHERE id=?', (scope[6:],)).fetchone():
-                raise NotFound('Wakeword not found')
-            old = db.execute('SELECT * FROM studio_schedules WHERE scope=?', (scope,)).fetchone()
-            # Saving an unchanged editor form must not skip an already due tick.
-            if old and (old['cron'], old['timezone'], bool(old['enabled'])) == (cron, timezone, enabled):
-                return self._record(old)
-            db.execute('INSERT INTO studio_schedules VALUES (?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET '
-                       'cron=excluded.cron, timezone=excluded.timezone, enabled=excluded.enabled, next_run_at=excluded.next_run_at',
-                       (scope, cron, timezone, int(enabled), due))
+        if ':' in scope and not db.execute('SELECT 1 FROM wakewords WHERE id=?', (scope.split(':', 1)[1],)).fetchone():
+            raise NotFound('Wakeword not found')
+        old = db.execute('SELECT * FROM studio_schedules WHERE scope=?', (scope,)).fetchone()
+        if old and (old['cron'], old['timezone'], bool(old['enabled'])) == (cron, timezone, enabled):
+            return self._record(old)
+        db.execute('INSERT INTO studio_schedules VALUES (?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET '
+                   'cron=excluded.cron, timezone=excluded.timezone, enabled=excluded.enabled, next_run_at=excluded.next_run_at',
+                   (scope, cron, timezone, int(enabled), due))
         return Schedule(scope, cron, timezone, enabled, due)
 
     def next_run(self, schedule: Schedule, after: datetime) -> datetime:
@@ -90,8 +92,8 @@ class ScheduleService:
                 occurrence = db.execute('SELECT 1 FROM studio_schedule_occurrences WHERE scope=? AND scheduled_at=?',
                                         (schedule.scope, schedule.next_run_at)).fetchone()
                 if not existing and not occurrence:
-                    word = None if schedule.scope == 'scrape' else schedule.scope[6:]
-                    job = self.jobs._enqueue(db, 'scrape' if word is None else 'train', word, {},
+                    kind, word = schedule.scope.split(':', 1) if ':' in schedule.scope else ('scrape', None)
+                    job = self.jobs._enqueue(db, kind, word, {},
                                              'schedule:' + schedule.scope + ':' + schedule.next_run_at,
                                              schedule.scope, now)
                     db.execute('INSERT INTO studio_schedule_occurrences VALUES (?,?,?)',
