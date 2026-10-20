@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, SecretStr
 from studio.models import (CollectionRun, Conflict, CredentialsRequired, Device, IdentityMismatch, SourceMapping,
                            RemoteRejected, RemoteUnavailable, NotFound, Page, Recording, Sample, SampleQuery,
                            ValidationError, Wakeword, WakewordUpdate, Job, Schedule, WorkerHealth, Dataset,
-                           Batch, GenerationRecipe, TrainingSettings, RunManifest, ModelVersion, Publication,
+                           Batch, GenerationRecipe, GenerationSubmission, GenerationSource, TrainingSettings, RunManifest, ModelVersion, Publication,
                            DeploymentCapabilities, StudioCapabilities, LegacyRun)
 from studio.migration import LegacyImportSelection, LegacyInventory, MigrationReport
 from studio.runtime import StudioRuntime
@@ -314,6 +314,14 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.post('/wakewords/{word_id}/generation/jobs', response_model=Job, status_code=201)
     def generate_batch(word_id: str, body: GenerationRecipeBody | None = None) -> Job:
         return runtime.generation.enqueue(word_id, GenerationRecipe(**body.model_dump()) if body else None)
+
+    @router.post('/wakewords/{word_id}/generation/submissions', response_model=GenerationSubmission, status_code=201)
+    def submit_generation(word_id: str, body: GenerationRecipeBody) -> GenerationSubmission:
+        return runtime.generation.submit(word_id, GenerationRecipe(**body.model_dump()))
+
+    @router.get('/wakewords/{word_id}/generation/sources', response_model=Page[GenerationSource])
+    def generation_sources(word_id: str, language: str | None = None, offset: int = 0, limit: int = 50):
+        return runtime.generation.sources(word_id, language, offset, limit)
 
     @router.post('/wakewords/{word_id}/generation/previews', response_model=Job, status_code=201)
     def generate_preview(word_id: str, body: GenerationRecipeBody) -> Job:

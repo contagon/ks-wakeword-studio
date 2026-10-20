@@ -2,7 +2,7 @@ import json
 import io
 import tempfile
 import unittest
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from studio.models import Conflict, GenerationRecipe, ValidationError
@@ -31,6 +31,44 @@ class ReferenceRunner(FixtureRunner):
 
 
 class SubmissionTests(unittest.TestCase):
+    def api(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from studio.api import create_router
+        app = FastAPI(); app.include_router(create_router(self.runtime))
+        return TestClient(app)
+
+    def test_submission_http_contract_is_additive_and_per_provider(self):
+        with self.api() as client:
+            path = f'/api/studio/wakewords/{self.word.id}/generation'
+            result = client.post(path + '/submissions', json=asdict(self.recipe))
+            self.assertEqual(result.status_code, 201, result.text)
+            body = result.json()
+            self.assertEqual(len(body['jobs']), 2)
+            self.assertEqual(body['batch_ids'], [j['id'] for j in body['jobs']])
+            self.assertEqual([j['payload']['recipe']['samples'] for j in body['jobs']], [2, 2])
+            legacy = client.post(path + '/jobs', json=asdict(self.recipe))
+            self.assertEqual(legacy.status_code, 201)
+            self.assertEqual(legacy.json()['kind'], 'generation')
+            self.assertNotIn('jobs', legacy.json())
+            self.assertEqual(client.post(path.replace(self.word.id, '0' * 32) + '/submissions', json=asdict(self.recipe)).status_code, 404)
+            self.assertEqual(client.post(path + '/submissions', json={**asdict(self.recipe), 'samples': True}).status_code, 422)
+
+    def test_source_http_contract_is_lightweight_scoped_and_bounded(self):
+        source = self.source()
+        with self.api() as client:
+            path = f'/api/studio/wakewords/{self.word.id}/generation/sources'
+            page = client.get(path, params={'language': 'en', 'limit': 1}).json()
+            self.assertEqual(page['total'], 1)
+            self.assertEqual(page['items'][0]['id'], source)
+            self.assertEqual(page['items'][0]['sample_count'], 2)
+            self.assertNotIn('audio', page['items'][0])
+            self.assertEqual(client.get(path.replace(self.word.id, self.other.id)).json()['total'], 0)
+            self.assertEqual(client.get(path, params={'offset': -1}).status_code, 422)
+            self.assertEqual(client.get(path, params={'limit': 101}).status_code, 422)
+            invalid = replace(self.recipe, engines=['moss'], moss_source_batch_ids=['0' * 32])
+            self.assertEqual(client.post(path.replace('/sources', '/submissions'), json=asdict(invalid)).status_code, 422)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

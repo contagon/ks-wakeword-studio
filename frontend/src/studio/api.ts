@@ -1,6 +1,7 @@
 import type { EnqueueScrapeJob, ModelMetrics, ScrapeJob, Page, Wakeword, CreateWakeword, UpdateWakeword, Device, SourceMapping, Recording, Sample, SampleQuery, Pagination, CollectionRun, Schedule, ScheduleInput, Job, WorkerHealth, Dataset, GenerationRecipe, GenerationCapability, Batch, TrainingSettings, TrainingCounts, RunManifest, ModelVersion, Publication, DeploymentCapabilities, LegacyInventory, LegacyImportSelection, MigrationReport, StudioCapabilities } from "./types";
 
 import type { LegacyRun } from './types';
+import type { GenerationSubmission, GenerationSource } from './types';
 import type { AutomationSettings, AutomationStatus } from './types';
 
 const base = "/api/studio";
@@ -97,6 +98,8 @@ export const studioApi = {
   generationRecipe: (word: string, signal?: AbortSignal) => get<GenerationRecipe>(`${wordPath(word)}/generation/recipe`, undefined, signal),
   saveGenerationRecipe: (word: string, body: GenerationRecipe, signal?: AbortSignal) => put<GenerationRecipe>(`${wordPath(word)}/generation/recipe`, body, signal),
   generate: (word: string, body: GenerationRecipe, signal?: AbortSignal) => post<Job>(`${wordPath(word)}/generation/jobs`, body, signal),
+  submitGeneration: (word: string, body: GenerationRecipe, signal?: AbortSignal) => post<GenerationSubmission>(`${wordPath(word)}/generation/submissions`, body, signal),
+  generationSources: (word: string, params?: Pagination & { language?: string }, signal?: AbortSignal) => get<Page<GenerationSource>>(`${wordPath(word)}/generation/sources`, params, signal),
   preview: (word: string, body: GenerationRecipe, signal?: AbortSignal) => post<Job>(`${wordPath(word)}/generation/previews`, body, signal),
   previewAudioUrl: (word: string, id: string) => `${base}${wordPath(word)}/generation/previews/${segment(id)}/audio`,
   batches: (word: string, params?: Pagination, signal?: AbortSignal) => get<Page<Batch>>(`${wordPath(word)}/generation/batches`, params, signal),

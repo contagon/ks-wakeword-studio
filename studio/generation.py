@@ -195,7 +195,7 @@ class GenerationService:
         from studio.generation_submissions import submit
         return submit(self, word_id, recipe)
 
-    def sources(self, word_id, language, offset=0, limit=50):
+    def sources(self, word_id, language=None, offset=0, limit=50):
         from studio.generation_references import list_sources
         return list_sources(self, word_id, language, offset, limit)
 

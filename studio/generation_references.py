@@ -60,11 +60,13 @@ def reference_pool(service, db, word_id, phrase, recipe, required):
 
 
 def list_sources(service, word_id, language, offset=0, limit=50):
-    if (type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100
-            or language not in service._languages()):
+    if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
         raise ValidationError('Invalid source query')
     with service.store.transaction() as db:
         word = service._word(db, word_id)
+        language = language if language is not None else word['language']
+        if language not in service._languages():
+            raise ValidationError('Invalid source query')
         rows = db.execute('SELECT b.*,j.status,j.created_at, '
                           '(SELECT count(*) FROM generation_batch_audio a WHERE a.batch_id=b.id) AS sample_count '
                           'FROM generation_batches b JOIN studio_jobs j ON j.id=b.id WHERE b.word_id=? '

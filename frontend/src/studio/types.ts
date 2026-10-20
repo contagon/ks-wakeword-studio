@@ -43,7 +43,9 @@ export interface CollectionCounters { listed: number; new: number; already_seen:
 export interface CollectionRun extends CollectionCounters { id: string; started_at: string; finished_at: string | null; status: string; devices: (CollectionCounters & { device_id: string; status: string; errors: string[] })[] }
 export interface Dataset { id: string; name: string; description: string; source: string; license: string; representation: string; split: string; adapter: string; purpose: string; download_bytes: number | null; installed_bytes: number | null; fingerprint: string | null; selected: boolean; status: string; job_id: string | null; error_code: string | null }
 export type TtsMode = "hybrid" | "modern" | "piper";
-export interface GenerationRecipe { language: string; english_accent: string; tts_mode: TtsMode; samples: number; batch_size: number; engines?: string[] | null }
+export interface GenerationRecipe { language: string; english_accent: string; tts_mode: TtsMode; samples: number; batch_size: number; engines?: string[] | null; moss_source_batch_ids?: string[]; moss_after_current?: boolean; moss_samples?: number | null }
+export interface GenerationSubmission { id: string; jobs: Job[]; batch_ids: string[] }
+export interface GenerationSource { id: string; phrase: string; language: string; providers: string[]; sample_count: number; created_at: string }
 export interface GenerationModelAvailability { engine: string; supported: boolean; available: boolean; reason: string | null }
 export interface GenerationCapability { language: string; name: string; accent_applies: boolean; english_accents: { code: string; label: string }[]; engines: Record<TtsMode, string[]>; model_availability?: GenerationModelAvailability[] }
 export interface Batch { id: string; word_id: string; phrase: string; recipe: GenerationRecipe; status: string; created_at: string; finished_at: string | null; audio: { audio_id: string; original_hash: string; normalized_hash: string; family_id: string }[]; selected: boolean }
