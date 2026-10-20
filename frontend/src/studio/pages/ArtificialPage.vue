@@ -99,7 +99,7 @@ async function preview(engine: string): Promise<void> {
 function updatePreview(engine: string, next: Job): void { if (previews.value[engine]?.id === next.id) previews.value[engine] = next; }
 watch(queue.jobs, jobs => {
   let refresh = false;
-  for (const previous of Object.values(submissionJobs.value)) { const next = jobs[previous.id]; if (next && next.word_id === activeId.value) { if (next.status === 'complete' && previous.status !== 'complete') refresh = true; submissionJobs.value[next.id] = next; if (job.value?.id === next.id) job.value = next; } }
+  for (const next of Object.values(jobs)) { if (next.kind === 'generation' && next.word_id === activeId.value) { const previous = submissionJobs.value[next.id]; if (next.status === 'complete' && previous?.status !== 'complete') refresh = true; submissionJobs.value[next.id] = next; if (job.value?.id === next.id) job.value = next; } }
   if (refresh) { offset.value = 0; void load(); void loadSources(); }
   for (const [engine, previous] of Object.entries(previews.value)) { const next = jobs[previous.id]; if (next && next.word_id === activeId.value) updatePreview(engine, next); }
 }, { deep: true });
@@ -113,6 +113,8 @@ async function deleteBatch(): Promise<void> {
     await studioApi.deleteBatch(id, batch.id, controller.signal);
     if (!mutationCurrent(id, token, controller)) return;
     const next = new Set(selected.value); next.delete(batch.id); selected.value = next; deleting.value = null;
+    recipe.value.moss_source_batch_ids = recipe.value.moss_source_batch_ids?.filter(source => source !== batch.id) ?? [];
+    sourceOffset.value = 0; void loadSources();
     if (batches.value.length === 1 && offset.value > 0) offset.value = Math.max(0, offset.value - 50);
     else await load();
   } catch (cause) {

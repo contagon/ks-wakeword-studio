@@ -89,8 +89,15 @@
 
 - [x] Update README with per-provider counts, independent training toggles, manual/after-current MOSS references, failure behavior and legacy mixed dataset limitations.
 - [x] Run full Python suite and frontend suite/build; report the named pre-existing Compose failure rather than fixing unrelated binding configuration.
-- [ ] Request an independent read-only code review of the complete feature; resolve material findings with tests.
-- [ ] Check diff/compile, commit completed feature checkpoints and report compatibility/deployment state. Never deploy or start real generation implicitly.
+- [x] Request an independent read-only code review of the complete feature; resolve material findings with tests.
+- [x] Check diff/compile, commit completed feature checkpoints and report compatibility/deployment state. Never deploy or start real generation implicitly.
+
+**Final evidence:** Python: 473 passed, 1 skipped, 228 subtests passed; the sole failure remains
+`tests/test_compose.py::ComposeTests::test_resolved_service_keeps_loopback_gpu_and_existing_data_volume`
+(`KeyError: host_ip`), unchanged from baseline. Frontend: 136 tests passed;
+typecheck, production build, compileall and diff checks passed. Independent review
+found workspace-return refresh and stale deleted-source selection issues; both
+have RED→GREEN regressions and fixes. No deployment or real GPU generation performed.
 
 ## Execution
 

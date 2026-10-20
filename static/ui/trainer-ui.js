@@ -6564,9 +6564,9 @@ var Dl = { class: "legacy-scope" }, Ol = {
 		}
 		V(n.jobs, (e) => {
 			let t = !1;
-			for (let n of Object.values(_.value)) {
-				let r = e[n.id];
-				r && r.word_id === M.value && (r.status === "complete" && n.status !== "complete" && (t = !0), _.value[r.id] = r, f.value?.id === r.id && (f.value = r));
+			for (let n of Object.values(e)) if (n.kind === "generation" && n.word_id === M.value) {
+				let e = _.value[n.id];
+				n.status === "complete" && e?.status !== "complete" && (t = !0), _.value[n.id] = n, f.value?.id === n.id && (f.value = n);
 			}
 			t && (o.value = 0, fe(), D());
 			for (let [t, n] of Object.entries(p.value)) {
@@ -6590,7 +6590,7 @@ var Dl = { class: "legacy-scope" }, Ol = {
 			try {
 				if (await $.deleteBatch(e, t.id, n.signal), !P(e, r, n)) return;
 				let a = new Set(c.value);
-				a.delete(t.id), c.value = a, g.value = null, i.value.length === 1 && o.value > 0 ? o.value = Math.max(0, o.value - 50) : await fe();
+				a.delete(t.id), c.value = a, g.value = null, s.value.moss_source_batch_ids = s.value.moss_source_batch_ids?.filter((e) => e !== t.id) ?? [], b.value = 0, D(), i.value.length === 1 && o.value > 0 ? o.value = Math.max(0, o.value - 50) : await fe();
 			} catch (t) {
 				P(e, r, n) && (d.value = t instanceof as && t.status === 409 ? "Cancel queued or active workspace jobs before deleting this dataset." : t instanceof Error ? t.message : "Dataset was not deleted.");
 			} finally {

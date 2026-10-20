@@ -122,6 +122,30 @@ describe("ArtificialPage", () => {
     expect(vi.mocked(fetch).mock.calls).toHaveLength(next);
     ui.unmount();
   });
+  it('resumes completion refresh after returning to the submitting workspace', async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    await ui.get('form').trigger('submit'); await flushPromises();
+    workspace.selectedId.value = 'b'; await flushPromises(); await flushPromises();
+    workspace.selectedId.value = 'a'; await flushPromises(); await flushPromises();
+    const before = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/a/generation/batches')).length;
+    queue.track({ ...job('generation-qwen3', 'queued'), kind: 'generation', resource: 'gpu', status: 'complete' }); await flushPromises();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/a/generation/batches')).length).toBeGreaterThan(before);
+    ui.unmount();
+  });
+  it('removes deleted MOSS sources from reference selection and refreshes the picker', async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    await ui.get('[name="moss-after-current"]').setValue(false); await flushPromises();
+    await ui.get('[data-source="ready"]').setValue(true);
+    await ui.get('[data-source="source-omni"]').setValue(true);
+    const before = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/a/generation/sources')).length;
+    await ui.get('[data-delete-batch="ready"]').trigger('click');
+    await ui.get('[data-action="confirm-batch-delete"]').trigger('click'); await flushPromises();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/a/generation/sources')).length).toBeGreaterThan(before);
+    await ui.get('[data-preview="moss"]').trigger('click'); await flushPromises();
+    const call = vi.mocked(fetch).mock.calls.find(([input]) => String(input).endsWith('/generation/previews'));
+    expect(JSON.parse(String(call?.[1]?.body)).moss_source_batch_ids).toEqual(['source-omni']);
+    ui.unmount();
+  });
   it('uses upstream counts for an unsaved recipe without changing preview counts', async () => {
     newWorkspace = true;
     const ui = mount(host()); await flushPromises(); await flushPromises();
