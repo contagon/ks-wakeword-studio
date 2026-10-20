@@ -59,6 +59,70 @@ def write_tone(
 
 
 class ModernTtsTests(unittest.TestCase):
+    def _external_moss_corpus(self, reference_count):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            references = []
+            for index in range(reference_count):
+                path = root / f'reference-{index}.wav'
+                write_tone(path, frequency=220 + index * 40)
+                import hashlib
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                references.append({'audio_id': chr(97 + index) * 32, 'path': str(path),
+                                   'normalized_hash': digest, 'family_id': digest})
+            reference_manifest = root / 'references.jsonl'
+            reference_manifest.write_text(''.join(json.dumps(r) + '\n' for r in references))
+            args = generator_module.parser().parse_args([
+                f'--data-dir={root}', f'--output-dir={root}/samples', '--engines=moss',
+                '--samples=2', '--batch-size=1', f'--reference-manifest={reference_manifest}', '--', 'hey tater',
+            ])
+            instance = generator_module.Generator(args)
+            model_entries = []
+            def external(command, **kwargs):
+                source = Path(command[command.index('--input-jsonl') + 1])
+                rows = [json.loads(line) for line in source.read_text().splitlines()]
+                if '--output-dir' in command:
+                    destination = Path(command[command.index('--output-dir') + 1])
+                    for row in rows:
+                        model_entries.append(row)
+                        write_tone(destination / f"{row['id']}.wav", frequency=220 + 30 * len(model_entries))
+                else:
+                    destination = Path(command[command.index('--output-jsonl') + 1])
+                    destination.write_text(''.join(json.dumps({'id': row['id'], 'accepted': not row['id'].endswith('0000000')}) + '\n' for row in rows))
+            with patch.object(instance, 'ensure_environment', return_value=root / 'moss-python'), \
+                 patch.object(instance, '_reference_qa_python', return_value=root / 'qa-python'), \
+                 patch.object(generator_module, 'run', side_effect=external):
+                instance.generate()
+            manifest = json.loads((root / 'samples/.generation_manifest.json').read_text())
+            self.assertEqual(len(list((root / 'samples').glob('*.wav'))), 2)
+            self.assertTrue(all(row['ref_audio'] in {r['path'] for r in references} for row in model_entries))
+            self.assertEqual(set(manifest['actual_counts']), {'moss'})
+            return model_entries, manifest
+
+    @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg not installed')
+    def test_moss_external_reference_mapping_survives_qa_rejection_and_numeric_renaming(self):
+        entries, manifest = self._external_moss_corpus(3)
+        self.assertEqual(len(entries), 3)
+        self.assertEqual(manifest['source_audio_ids'], {'0.wav': 'b' * 32, '1.wav': 'c' * 32})
+
+    @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg not installed')
+    def test_moss_refills_reuse_external_sources_not_accepted_moss_outputs(self):
+        entries, manifest = self._external_moss_corpus(2)
+        self.assertGreater(len(entries), 2)
+        self.assertEqual(manifest['source_audio_ids'], {'0.wav': 'b' * 32, '1.wav': 'a' * 32})
+
+    def test_explicit_moss_reference_manifest_rejects_wrong_engine_or_missing_pool(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'references.jsonl'
+            source.write_text('')
+            for engine in ('qwen3', 'moss'):
+                args = argparse.Namespace(phrase='hey tater', language='en', tts_mode='modern',
+                    samples=2, batch_size=1, data_dir=root, output_dir=root / 'samples',
+                    engines=engine, reference_manifest=source)
+                with self.subTest(engine=engine), self.assertRaises(ValueError):
+                    generator_module.Generator(args)
+
     def test_direct_omnivoice_uses_random_tokens_not_random_unmask_order(self):
         # Regression: random mask positions with greedy token classes cause
         # short, reference-free wake phrases to collapse into non-speech.

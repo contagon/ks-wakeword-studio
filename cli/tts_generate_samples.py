@@ -15,6 +15,7 @@ import json
 import math
 import os
 import random
+import re
 import shutil
 import signal
 import subprocess
@@ -48,7 +49,7 @@ from tts_config import (  # noqa: E402
 )
 
 
-GENERATOR_VERSION = "modern-tts-v19-four-provider-direct-corpus-safe-limits-english-accent-emphasis-ordered-token-sampling-skip-unity-tempo"
+GENERATOR_VERSION = "modern-tts-v20-four-provider-direct-corpus-safe-limits-english-accent-emphasis-ordered-token-sampling-skip-unity-tempo-moss-references"
 VOICE_BANK_VERSION = "modern-tts-voice-bank-v1-native-random-qualified-single-utterance"
 COMPATIBLE_VOICE_BANK_VERSIONS = {
     VOICE_BANK_VERSION,
@@ -364,6 +365,45 @@ class Generator:
         self.minimum_duration, self.target_duration, self.maximum_duration = duration_bounds(
             self.spoken_phrase, self.args.language
         )
+        self.external_references = self._load_external_references(getattr(args, 'reference_manifest', None))
+        self.reference_source_ids = {Path(row['path']): row['audio_id'] for row in (self.external_references or [])}
+        self.source_by_path: dict[Path, str] = {}
+        self.final_sources: dict[str, str] = {}
+
+    def _load_external_references(self, manifest):
+        if manifest is None:
+            return None
+        if self.engines() != [ENGINE_MOSS]:
+            raise ValueError('Explicit references require MOSS-only generation')
+        rows, identities, hashes = [], set(), set()
+        for line in Path(manifest).read_text(encoding='utf-8').splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if (not isinstance(row, dict) or not isinstance(row.get('audio_id'), str)
+                    or not re.fullmatch('[0-9a-f]{32}', row['audio_id'])
+                    or not isinstance(row.get('normalized_hash'), str)
+                    or not re.fullmatch('[0-9a-f]{64}', row['normalized_hash'])
+                    or not isinstance(row.get('family_id'), str) or not row['family_id']
+                    or not isinstance(row.get('path'), str)):
+                raise ValueError('Invalid MOSS reference record')
+            path = Path(row['path'])
+            if (path.is_symlink() or not path.is_file() or path.stat().st_size > 64 * 1024 * 1024
+                    or hashlib.sha256(path.read_bytes()).hexdigest() != row['normalized_hash']):
+                raise ValueError('MOSS reference integrity check failed')
+            if row['audio_id'] in identities or row['normalized_hash'] in hashes:
+                raise ValueError('MOSS reference pool must contain distinct clips')
+            identities.add(row['audio_id'])
+            hashes.add(row['normalized_hash'])
+            rows.append({**row, 'path': str(path.resolve())})
+        if len(rows) < self.args.samples:
+            raise ValueError('Not enough distinct MOSS reference clips')
+        return rows
+
+    def _generation_references(self, engine, accepted):
+        if engine == ENGINE_MOSS and self.external_references is not None:
+            return [Path(row['path']) for row in self.external_references]
+        return list(accepted)
 
     def piper_models(self) -> list[Path]:
         root = self.tools_dir / "piper-sample-generator"
@@ -408,6 +448,8 @@ class Generator:
             },
             "corpus_strategy": "direct_unique_candidates_with_provider_safety_gates",
             "duration_seconds": [self.minimum_duration, self.maximum_duration],
+            "references": [{k: row[k] for k in ('audio_id', 'normalized_hash', 'family_id')}
+                           for row in (self.external_references or [])],
         }
 
     def cache_hit(self) -> bool:
@@ -1174,6 +1216,8 @@ class Generator:
                         "ref_text": self.reference_text,
                     }
                 )
+                if self.external_references is not None:
+                    self.source_by_path[(destination / f'{item_id}.wav').resolve()] = self.reference_source_ids[reference_paths[index].resolve()]
             entries.append(entry)
             self.speed_by_path[(destination / f"{item_id}.wav").resolve()] = 1.0
         return entries
@@ -1431,6 +1475,8 @@ class Generator:
                     temp_path.replace(final_path)
                     self.accepted_hashes.add(digest)
                     accepted.append(final_path)
+                    if path.resolve() in self.source_by_path:
+                        self.final_sources[final_path.name] = self.source_by_path[path.resolve()]
                 else:
                     temp_path.unlink(missing_ok=True)
 
@@ -1481,7 +1527,7 @@ class Generator:
         for engine in ordered_engines:
             count = plan[engine]
             try:
-                entries, raw_paths = self.generate_direct_engine(engine, count, list(accepted))
+                entries, raw_paths = self.generate_direct_engine(engine, count, self._generation_references(engine, accepted))
                 qualified_paths = self.qualify_direct_candidates(engine, entries, raw_paths)
                 requested_accepts = min(count, self.args.samples - len(accepted))
                 normalized = self.normalize(qualified_paths, len(accepted), requested_accepts)
@@ -1510,7 +1556,7 @@ class Generator:
                 entries, raw_paths = self.generate_direct_engine(
                     engine,
                     missing,
-                    list(accepted),
+                    self._generation_references(engine, accepted),
                     prefix=f"fallback{attempt}_",
                 )
                 qualified_paths = self.qualify_direct_candidates(
@@ -1546,7 +1592,7 @@ class Generator:
                 entries, raw_paths = self.generate_direct_engine(
                     engine,
                     missing,
-                    list(accepted),
+                    self._generation_references(engine, accepted),
                     prefix=prefix,
                 )
                 qualified_paths = self.qualify_direct_candidates(
@@ -1587,6 +1633,7 @@ class Generator:
             "signature": self.signature(),
             "planned_counts": plan,
             "actual_counts": self.actual_counts,
+            "source_audio_ids": self.final_sources,
             "voice_bank": "",
             "generation_strategy": {
                 "direct_final_candidates": True,
@@ -1628,6 +1675,7 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--tts-mode", default=DEFAULT_TTS_MODE)
     result.add_argument("--engines", default=None, help="Explicit comma-separated TTS engines; no unselected engines are used")
+    result.add_argument("--reference-manifest", type=Path, help="Approved canonical references for MOSS-only generation")
     result.add_argument("--samples", type=int, default=50000)
     result.add_argument("--batch-size", type=int, default=8)
     result.add_argument(
