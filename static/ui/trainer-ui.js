@@ -7175,14 +7175,10 @@ var Kp = ["aria-pressed"], qp = /* @__PURE__ */ cr({
 	key: 0,
 	class: "studio-note",
 	role: "alert"
-}, dm = {
-	key: 1,
-	class: "studio-muted text-xs",
-	role: "status"
-}, fm = { class: "studio-queue-group" }, pm = { class: "studio-queue-group" }, mm = {
-	key: 6,
+}, dm = { class: "studio-queue-group" }, fm = { class: "studio-queue-group" }, pm = {
+	key: 5,
 	class: "studio-muted text-sm mt-4"
-}, hm = ["disabled"], gm = /* @__PURE__ */ cr({
+}, mm = ["disabled"], hm = /* @__PURE__ */ cr({
 	__name: "JobQueueDrawer",
 	setup(e) {
 		let t = Nc(), n = /* @__PURE__ */ R(), r = /* @__PURE__ */ R(), i = X(() => t.activeJobs.value.filter((e) => e.status !== "queued")), a = X(() => t.activeJobs.value.filter((e) => e.status === "queued")), o = X(() => {
@@ -7238,63 +7234,62 @@ var Kp = ["aria-pressed"], qp = /* @__PURE__ */ cr({
 				type: "button",
 				onClick: s[0] ||= (...e) => z(t).refresh && z(t).refresh(...e)
 			}, "Retry")])) : Y("", !0),
-			z(t).loading.value ? (W(), G("p", dm, "Refreshing jobs…")) : Y("", !0),
-			o.value ? (W(), G(U, { key: 2 }, [s[4] ||= K("h3", { class: "studio-queue-group" }, "Selected job", -1), q(am, { job: o.value }, null, 8, ["job"])], 64)) : Y("", !0),
-			i.value.length ? (W(), G(U, { key: 3 }, [K("h3", fm, "Running · " + F(i.value.length), 1), (W(!0), G(U, null, H(i.value, (e) => (W(), ia(am, {
+			o.value ? (W(), G(U, { key: 1 }, [s[4] ||= K("h3", { class: "studio-queue-group" }, "Selected job", -1), q(am, { job: o.value }, null, 8, ["job"])], 64)) : Y("", !0),
+			i.value.length ? (W(), G(U, { key: 2 }, [K("h3", dm, "Running · " + F(i.value.length), 1), (W(!0), G(U, null, H(i.value, (e) => (W(), ia(am, {
 				key: e.id,
 				job: e
 			}, null, 8, ["job"]))), 128))], 64)) : Y("", !0),
-			a.value.length ? (W(), G(U, { key: 4 }, [K("h3", pm, "Queued · " + F(a.value.length), 1), (W(!0), G(U, null, H(a.value, (e) => (W(), ia(am, {
+			a.value.length ? (W(), G(U, { key: 3 }, [K("h3", fm, "Queued · " + F(a.value.length), 1), (W(!0), G(U, null, H(a.value, (e) => (W(), ia(am, {
 				key: e.id,
 				job: e
 			}, null, 8, ["job"]))), 128))], 64)) : Y("", !0),
-			z(t).history.value.length ? (W(), G(U, { key: 5 }, [s[5] ||= K("h3", { class: "studio-queue-group" }, "Recent history", -1), (W(!0), G(U, null, H(z(t).history.value, (e) => (W(), ia(am, {
+			z(t).history.value.length ? (W(), G(U, { key: 4 }, [s[5] ||= K("h3", { class: "studio-queue-group" }, "Recent history", -1), (W(!0), G(U, null, H(z(t).history.value, (e) => (W(), ia(am, {
 				key: e.id,
 				job: e
 			}, null, 8, ["job"]))), 128))], 64)) : Y("", !0),
-			!z(t).activeCount.value && !z(t).history.value.length && !o.value && !z(t).loading.value && !z(t).error.value ? (W(), G("p", mm, "No jobs yet.")) : Y("", !0),
+			!z(t).activeCount.value && !z(t).history.value.length && !o.value && !z(t).loading.value && !z(t).error.value ? (W(), G("p", pm, "No jobs yet.")) : Y("", !0),
 			z(t).hasMore.value ? (W(), G("button", {
-				key: 7,
+				key: 6,
 				type: "button",
 				class: "studio-queue-more",
 				disabled: z(t).loading.value,
 				onClick: s[1] ||= (...e) => z(t).loadMore && z(t).loadMore(...e)
-			}, "Load older jobs", 8, hm)) : Y("", !0)
+			}, "Load older jobs", 8, mm)) : Y("", !0)
 		])], 512)], 64)) : Y("", !0);
 	}
-}), _m = ["inert"], vm = { class: "studio-sidebar" }, ym = { class: "flex items-center justify-between gap-3" }, bm = ["aria-expanded"], xm = ["hidden"], Sm = {
+}), gm = ["inert"], _m = { class: "studio-sidebar" }, vm = { class: "flex items-center justify-between gap-3" }, ym = ["aria-expanded"], bm = ["hidden"], xm = {
 	key: 0,
 	class: "studio-nav-label"
-}, Cm = [
+}, Sm = [
 	"href",
 	"data-page",
 	"aria-current",
 	"onClick"
-], wm = { class: "studio-main" }, Tm = { class: "studio-header flex flex-wrap items-center justify-between gap-3" }, Em = { class: "studio-muted text-xs" }, Dm = { class: "flex flex-wrap items-center gap-3" }, Om = {
+], Cm = { class: "studio-main" }, wm = { class: "studio-header flex flex-wrap items-center justify-between gap-3" }, Tm = { class: "studio-muted text-xs" }, Em = { class: "flex flex-wrap items-center gap-3" }, Dm = {
 	class: "flex items-center gap-3 text-xs",
 	for: "studio-word"
-}, km = ["value", "disabled"], Am = {
+}, Om = ["value", "disabled"], km = {
 	key: 0,
 	value: ""
-}, jm = ["value"], Mm = ["aria-expanded"], Nm = {
+}, Am = ["value"], jm = ["aria-expanded"], Mm = {
 	key: 0,
 	class: "studio-queue-badge"
-}, Pm = {
+}, Nm = {
 	key: 1,
 	title: "Job queue unavailable",
 	"aria-label": "Job queue unavailable"
-}, Fm = {
+}, Pm = {
 	key: 0,
 	role: "status",
 	class: "studio-note"
-}, Im = {
+}, Fm = {
 	key: 1,
 	class: "studio-note",
 	role: "alert"
-}, Lm = {
+}, Im = {
 	key: 2,
 	role: "status"
-}, Rm = /* @__PURE__ */ cr({
+}, Lm = /* @__PURE__ */ cr({
 	__name: "StudioShell",
 	setup(e) {
 		let t = ts(), n = fs(t);
@@ -7330,8 +7325,8 @@ var Kp = ["aria-pressed"], qp = /* @__PURE__ */ cr({
 				href: "#studio-content",
 				onClick: o[0] ||= Uo((e) => p.value?.focus(), ["prevent"])
 			}, "Skip to content"),
-			K("aside", vm, [
-				K("div", ym, [o[4] ||= K("div", { class: "studio-brand" }, [J("◈ Wakeword Studio"), K("small", null, "LISTEN · REFINE · DEPLOY")], -1), d.value ? (W(), G("button", {
+			K("aside", _m, [
+				K("div", vm, [o[4] ||= K("div", { class: "studio-brand" }, [J("◈ Wakeword Studio"), K("small", null, "LISTEN · REFINE · DEPLOY")], -1), d.value ? (W(), G("button", {
 					key: 0,
 					ref_key: "toggle",
 					ref: f,
@@ -7340,12 +7335,12 @@ var Kp = ["aria-pressed"], qp = /* @__PURE__ */ cr({
 					"aria-controls": "studio-navigation",
 					"aria-expanded": u.value,
 					onClick: o[1] ||= (e) => u.value = !u.value
-				}, "Menu", 8, bm)) : Y("", !0)]),
+				}, "Menu", 8, ym)) : Y("", !0)]),
 				K("nav", {
 					id: "studio-navigation",
 					"aria-label": "Main navigation",
 					hidden: h.value
-				}, [(W(!0), G(U, null, H(z(Qo), (e, n) => (W(), G(U, { key: e.id }, [(e.group === "Data" || e.group === "Models") && z(Qo)[n - 1]?.group !== e.group ? (W(), G("div", Sm, F(e.group), 1)) : Y("", !0), K("a", {
+				}, [(W(!0), G(U, null, H(z(Qo), (e, n) => (W(), G(U, { key: e.id }, [(e.group === "Data" || e.group === "Models") && z(Qo)[n - 1]?.group !== e.group ? (W(), G("div", xm, F(e.group), 1)) : Y("", !0), K("a", {
 					href: z(t).href(e.id),
 					"data-page": e.id,
 					class: P({
@@ -7354,23 +7349,23 @@ var Kp = ["aria-pressed"], qp = /* @__PURE__ */ cr({
 					}),
 					"aria-current": m.value.id === e.id ? "page" : void 0,
 					onClick: Uo((t) => b(e.id), ["prevent"])
-				}, F(e.name), 11, Cm)], 64))), 128))], 8, xm),
+				}, F(e.name), 11, Sm)], 64))), 128))], 8, bm),
 				o[5] ||= K("p", { class: "studio-sidebar-note" }, [
 					J("Independent workspaces."),
 					K("br"),
 					J("Device selections stay unchanged.")
 				], -1)
 			]),
-			K("div", wm, [K("header", Tm, [K("div", Em, F(m.value.group) + " / " + F(m.value.name), 1), K("div", Dm, [
-				K("label", Om, [o[6] ||= J("WAKEWORD ", -1), K("select", {
+			K("div", Cm, [K("header", wm, [K("div", Tm, F(m.value.group) + " / " + F(m.value.name), 1), K("div", Em, [
+				K("label", Dm, [o[6] ||= J("WAKEWORD ", -1), K("select", {
 					id: "studio-word",
 					value: z(a),
 					disabled: !z(i).length,
 					onChange: o[2] ||= (e) => z(n).select(e.target.value)
-				}, [z(i).length ? Y("", !0) : (W(), G("option", Am, "No wakewords")), (W(!0), G(U, null, H(z(i), (e) => (W(), G("option", {
+				}, [z(i).length ? Y("", !0) : (W(), G("option", km, "No wakewords")), (W(!0), G(U, null, H(z(i), (e) => (W(), G("option", {
 					key: e.id,
 					value: e.id
-				}, F(e.phrase), 9, jm))), 128))], 40, km)]),
+				}, F(e.phrase), 9, Am))), 128))], 40, Om)]),
 				q(qp),
 				K("button", {
 					type: "button",
@@ -7388,9 +7383,9 @@ var Kp = ["aria-pressed"], qp = /* @__PURE__ */ cr({
 						"stroke-width": "1.7",
 						"aria-hidden": "true"
 					}, [K("path", { d: "M8 6h13M8 12h13M8 18h13M3 6h1M3 12h1M3 18h1" })], -1),
-					z(r).activeCount.value ? (W(), G("span", Nm, F(z(r).activeCount.value), 1)) : Y("", !0),
-					z(r).error.value ? (W(), G("span", Pm, "!")) : Y("", !0)
-				], 8, Mm)
+					z(r).activeCount.value ? (W(), G("span", Mm, F(z(r).activeCount.value), 1)) : Y("", !0),
+					z(r).error.value ? (W(), G("span", Nm, "!")) : Y("", !0)
+				], 8, jm)
 			])]), K("main", {
 				id: "studio-content",
 				ref_key: "content",
@@ -7398,19 +7393,19 @@ var Kp = ["aria-pressed"], qp = /* @__PURE__ */ cr({
 				class: "studio-content",
 				tabindex: "-1"
 			}, [
-				z(l) ? (W(), G("p", Fm, F(z(l)), 1)) : Y("", !0),
-				z(c) ? (W(), G("div", Im, F(z(c)), 1)) : Y("", !0),
-				z(s) ? (W(), G("p", Lm, "Loading workspaces…")) : Y("", !0),
+				z(l) ? (W(), G("p", Pm, F(z(l)), 1)) : Y("", !0),
+				z(c) ? (W(), G("div", Fm, F(z(c)), 1)) : Y("", !0),
+				z(s) ? (W(), G("p", Im, "Loading workspaces…")) : Y("", !0),
 				m.value.id === "wakewords" ? (W(), ia(Hs, { key: 3 })) : m.value.id === "classify" ? (W(), ia(vl, { key: 4 })) : m.value.id === "samples" ? (W(), ia(pu, { key: 5 })) : m.value.id === "kiosks" ? (W(), ia(Ju, { key: 6 })) : m.value.id === "automate" ? (W(), ia(kd, { key: 7 })) : m.value.id === "deploy" ? (W(), ia(df, { key: 8 })) : m.value.id === "negative-datasets" ? (W(), ia(kf, { key: 9 })) : m.value.id === "artificial" ? (W(), ia(yp, { key: 10 })) : m.value.id === "train" ? (W(), ia(Wp, { key: 11 })) : Y("", !0)
 			], 512)])
-		], 8, _m), q(gm)], 2));
+		], 8, gm), q(hm)], 2));
 	}
-}), zm = /* @__PURE__ */ cr({
+}), Rm = /* @__PURE__ */ cr({
 	__name: "TrainerApp",
 	setup(e) {
-		return (e, t) => (W(), ia(Rm));
+		return (e, t) => (W(), ia(Lm));
 	}
-}), Bm = document.getElementById("trainer-app");
-if (!Bm) throw Error("Missing #trainer-app mount point");
-Yo(zm).mount(Bm);
+}), zm = document.getElementById("trainer-app");
+if (!zm) throw Error("Missing #trainer-app mount point");
+Yo(Rm).mount(zm);
 //#endregion

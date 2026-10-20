@@ -43,7 +43,6 @@ onBeforeUnmount(() => { if (queue.open.value) cleanup(); });
       <header class="studio-queue-header"><div class="flex items-center justify-between gap-3"><h2>Job queue <span class="studio-queue-badge">{{ queue.activeCount.value }} active</span></h2><button ref="closeButton" type="button" data-action="close-job-queue" aria-label="Close job queue" @click="close">✕</button></div><p class="studio-muted text-xs">All kiosks · All followers · All wakewords</p></header>
       <div class="studio-queue-content">
         <p v-if="queue.error.value" class="studio-note" role="alert">{{ queue.error.value }} <button type="button" @click="queue.refresh">Retry</button></p>
-        <p v-if="queue.loading.value" class="studio-muted text-xs" role="status">Refreshing jobs…</p>
         <template v-if="selected"><h3 class="studio-queue-group">Selected job</h3><JobQueueCard :job="selected" /></template>
         <template v-if="running.length"><h3 class="studio-queue-group">Running · {{ running.length }}</h3><JobQueueCard v-for="job in running" :key="job.id" :job="job" /></template>
         <template v-if="queued.length"><h3 class="studio-queue-group">Queued · {{ queued.length }}</h3><JobQueueCard v-for="job in queued" :key="job.id" :job="job" /></template>
