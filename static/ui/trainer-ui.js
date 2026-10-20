@@ -6325,7 +6325,7 @@ var Dl = { class: "legacy-scope" }, Ol = {
 }), Af = { class: "studio-card" }, jf = {
 	"data-generation-phrase": "",
 	class: "studio-muted"
-}, Mf = { class: "grid gap-3 sm:grid-cols-2 lg:grid-cols-4" }, Nf = ["value"], Pf = ["value"], Ff = ["disabled"], If = ["value"], Lf = {
+}, Mf = { class: "grid gap-3 sm:grid-cols-2 lg:grid-cols-3" }, Nf = ["value"], Pf = ["value"], Ff = ["disabled"], If = ["value"], Lf = {
 	key: 1,
 	value: "mixed"
 }, Rf = { class: "grid gap-3 sm:grid-cols-2" }, zf = { class: "flex items-center justify-between gap-3" }, Bf = { class: "studio-checkbox-label" }, Vf = [
@@ -6448,7 +6448,7 @@ var Dl = { class: "legacy-scope" }, Ol = {
 			t ? n.add(e) : n.delete(e), s.value.engines = [...n];
 		}
 		function ie() {
-			return !Number.isInteger(s.value.samples) || s.value.samples < 1 || !Number.isInteger(s.value.batch_size) || s.value.batch_size < 1 ? (d.value = "Sample count and batch size must be positive integers.", !1) : s.value.engines?.length ? !0 : (d.value = "Select at least one generation model.", !1);
+			return !Number.isInteger(s.value.samples) || s.value.samples < 1 ? (d.value = "Sample count must be a positive integer.", !1) : s.value.engines?.length ? !0 : (d.value = "Select at least one generation model.", !1);
 		}
 		async function ae() {
 			let e = w.value;
@@ -6563,16 +6563,16 @@ var Dl = { class: "legacy-scope" }, Ol = {
 		}), Er(() => {
 			y?.abort(), j();
 		}), (e, t) => (U(), W("section", null, [
-			t[19] ||= G("div", { class: "mb-4" }, [G("h1", null, "Artificial"), G("p", { class: "studio-muted" }, "Generate wakeword audio, then choose which datasets to use for training.")], -1),
+			t[17] ||= G("div", { class: "mb-4" }, [G("h1", null, "Artificial"), G("p", { class: "studio-muted" }, "Generate wakeword audio, then choose which datasets to use for training.")], -1),
 			G("div", Af, [
-				t[15] ||= G("h2", null, "Generate data", -1),
-				G("p", jf, [t[8] ||= q("Wake phrase: ", -1), G("strong", null, F(T.value?.phrase ?? "No workspace selected"), 1)]),
+				t[13] ||= G("h2", null, "Generate data", -1),
+				G("p", jf, [t[7] ||= q("Wake phrase: ", -1), G("strong", null, F(T.value?.phrase ?? "No workspace selected"), 1)]),
 				G("form", {
 					class: "grid gap-4 mt-3",
 					onSubmit: Wo(ae, ["prevent"])
 				}, [
 					G("div", Mf, [
-						G("label", null, [t[9] ||= q("Language", -1), G("select", {
+						G("label", null, [t[8] ||= q("Language", -1), G("select", {
 							name: "language",
 							value: s.value.language,
 							onChange: t[0] ||= (e) => M(e.target.value)
@@ -6580,7 +6580,7 @@ var Dl = { class: "legacy-scope" }, Ol = {
 							key: e.language,
 							value: e.language
 						}, F(e.name), 9, Pf))), 128))], 40, Nf)]),
-						G("label", null, [t[10] ||= q("English accent", -1), B(G("select", {
+						G("label", null, [t[9] ||= q("English accent", -1), B(G("select", {
 							name: "english-accent",
 							"onUpdate:modelValue": t[1] ||= (e) => s.value.english_accent = e,
 							disabled: !k.value
@@ -6588,7 +6588,7 @@ var Dl = { class: "legacy-scope" }, Ol = {
 							key: e.code,
 							value: e.code
 						}, F(e.label), 9, If))), 128)) : (U(), W("option", Lf, "Not applicable"))], 8, Ff), [[Lo, s.value.english_accent]])]),
-						G("label", null, [t[11] ||= q("Total samples", -1), B(G("input", {
+						G("label", null, [t[10] ||= q("Total samples", -1), B(G("input", {
 							"onUpdate:modelValue": t[2] ||= (e) => s.value.samples = e,
 							name: "samples",
 							type: "number",
@@ -6599,21 +6599,9 @@ var Dl = { class: "legacy-scope" }, Ol = {
 							s.value.samples,
 							void 0,
 							{ number: !0 }
-						]])]),
-						G("label", null, [t[12] ||= q("Batch size", -1), B(G("input", {
-							"onUpdate:modelValue": t[3] ||= (e) => s.value.batch_size = e,
-							name: "batch-size",
-							type: "number",
-							min: "1",
-							required: ""
-						}, null, 512), [[
-							Po,
-							s.value.batch_size,
-							void 0,
-							{ number: !0 }
 						]])])
 					]),
-					G("fieldset", null, [t[13] ||= G("legend", { class: "mb-2 font-semibold" }, "Generation models", -1), G("div", Rf, [(U(!0), W(H, null, Nr(O.value, (e) => (U(), W("article", {
+					G("fieldset", null, [t[11] ||= G("legend", { class: "mb-2 font-semibold" }, "Generation models", -1), G("div", Rf, [(U(!0), W(H, null, Nr(O.value, (e) => (U(), W("article", {
 						key: e.engine,
 						class: "studio-history"
 					}, [
@@ -6650,7 +6638,7 @@ var Dl = { class: "legacy-scope" }, Ol = {
 							"aria-label": `${v[e.engine] ?? e.engine} wakeword preview`
 						}, null, 8, Kf)) : J("", !0)
 					]))), 128))])]),
-					t[14] ||= G("p", { class: "studio-muted text-xs" }, "Samples are shared across the selected models. Preview generates one sample without adding it to your training data. Higher batch sizes use more memory; effective limits and accent support vary by model.", -1),
+					t[12] ||= G("p", { class: "studio-muted text-xs" }, "Samples are shared across the selected models. Preview generates one sample without adding it to your training data. Accent support varies by model.", -1),
 					G("button", {
 						type: "submit",
 						"data-action": "generate",
@@ -6663,17 +6651,17 @@ var Dl = { class: "legacy-scope" }, Ol = {
 					key: 1,
 					type: "button",
 					class: "mt-3",
-					onClick: t[4] ||= (e) => z(n).show(f.value.id)
+					onClick: t[3] ||= (e) => z(n).show(f.value.id)
 				}, "View generation in queue")) : J("", !0)
 			]),
 			G("div", Yf, [
-				G("div", Xf, [t[16] ||= G("h2", null, "Generated datasets", -1), G("button", {
+				G("div", Xf, [t[14] ||= G("h2", null, "Generated datasets", -1), G("button", {
 					type: "button",
 					"data-action": "save-batches",
 					disabled: u.value || l.value || !w.value,
 					onClick: P
 				}, "Save selection", 8, Zf)]),
-				t[18] ||= G("p", { class: "studio-muted text-xs" }, "Select completed datasets to include in this wakeword’s training.", -1),
+				t[16] ||= G("p", { class: "studio-muted text-xs" }, "Select completed datasets to include in this wakeword’s training.", -1),
 				l.value ? (U(), W("p", Qf, "Loading datasets…")) : J("", !0),
 				(U(!0), W(H, null, Nr(i.value, (e) => (U(), W("article", {
 					key: e.id,
@@ -6709,15 +6697,15 @@ var Dl = { class: "legacy-scope" }, Ol = {
 						role: "alertdialog",
 						"aria-label": "Delete generated dataset?",
 						class: "studio-note mt-3",
-						onKeydown: t[6] ||= Ko((e) => !u.value && (g.value = null), ["esc"])
+						onKeydown: t[5] ||= Ko((e) => !u.value && (g.value = null), ["esc"])
 					}, [
 						G("h3", null, "Delete " + F(e.phrase) + " dataset permanently?", 1),
-						t[17] ||= G("p", null, "This removes the generated dataset and its training selection. Historical training inputs and shared audio are kept.", -1),
+						t[15] ||= G("p", null, "This removes the generated dataset and its training selection. Historical training inputs and shared audio are kept.", -1),
 						G("div", ap, [G("button", {
 							type: "button",
 							"data-action": "cancel-batch-delete",
 							disabled: u.value,
-							onClick: t[5] ||= (e) => g.value = null
+							onClick: t[4] ||= (e) => g.value = null
 						}, "Cancel", 8, op), G("button", {
 							type: "button",
 							"data-action": "confirm-batch-delete",
@@ -6732,7 +6720,7 @@ var Dl = { class: "legacy-scope" }, Ol = {
 					offset: o.value,
 					limit: 50,
 					loading: l.value,
-					onPage: t[7] ||= (e) => o.value = e
+					onPage: t[6] ||= (e) => o.value = e
 				}, null, 8, [
 					"total",
 					"offset",

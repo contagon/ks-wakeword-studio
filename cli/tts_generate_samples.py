@@ -48,7 +48,7 @@ from tts_config import (  # noqa: E402
 )
 
 
-GENERATOR_VERSION = "modern-tts-v17-four-provider-direct-corpus-safe-limits-english-accent-emphasis"
+GENERATOR_VERSION = "modern-tts-v19-four-provider-direct-corpus-safe-limits-english-accent-emphasis-ordered-token-sampling-skip-unity-tempo"
 VOICE_BANK_VERSION = "modern-tts-voice-bank-v1-native-random-qualified-single-utterance"
 COMPATIBLE_VOICE_BANK_VERSIONS = {
     VOICE_BANK_VERSION,
@@ -273,15 +273,16 @@ def qwen_descriptions(
     return descriptions
 
 
-def omnivoice_stability_args() -> list[str]:
-    # A zero temperature can deterministically lock a difficult voice condition
-    # into decoder collapse. Retain upstream sampling and qualify each native
-    # carrier through a short reference clone before it can enter the bank.
+def omnivoice_stability_args(*, direct: bool = False) -> list[str]:
+    # Short reference-free takes collapse frequently with random unmask order
+    # and greedy token classes. Unmask by confidence instead, retaining native
+    # voice/prosody randomness through token sampling (not two greedy stages).
+    # Keep upstream defaults for the separate carrier/voice-cloning paths.
     return [
         "--position_temperature",
-        str(OMNIVOICE_POSITION_TEMPERATURE),
+        str(0.0 if direct else OMNIVOICE_POSITION_TEMPERATURE),
         "--class_temperature",
-        str(OMNIVOICE_CLASS_TEMPERATURE),
+        str(1.0 if direct else OMNIVOICE_CLASS_TEMPERATURE),
     ]
 
 
@@ -1281,7 +1282,7 @@ class Generator:
                 "True",
                 "--postprocess_output",
                 "True",
-            ] + omnivoice_stability_args()
+            ] + omnivoice_stability_args(direct=self.args.language == "en")
             run_with_batch_retry(command, "--batch_size", env=self.env)
         elif engine == ENGINE_QWEN3:
             command = [
@@ -1388,6 +1389,8 @@ class Generator:
             final_path = self.final_dir / f"{start_index + len(accepted)}.wav"
             speed = self.speed_by_path.get(path.resolve(), 1.0)
             temp_path = final_path.with_suffix(".tmp.wav")
+            # FFmpeg 6.1.1 can stall draining atempo=1.0 followed by resampling.
+            # Unchanged speed needs no tempo filter; retain actual speed changes.
             command = [
                 self.args.ffmpeg,
                 "-hide_banner",
@@ -1398,8 +1401,7 @@ class Generator:
                 "-i",
                 str(path),
                 "-vn",
-                "-af",
-                f"atempo={speed}",
+                *(["-af", f"atempo={speed}"] if speed != 1.0 else []),
                 "-ac",
                 "1",
                 "-ar",

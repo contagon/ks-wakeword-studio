@@ -53,6 +53,16 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ArtificialPage", () => {
+  it('hides batch size while preserving the saved internal value when generating', async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    expect(ui.find('input[name="batch-size"]').exists()).toBe(false);
+    expect(ui.text()).not.toContain('Higher batch sizes');
+    await ui.get('form').trigger('submit'); await flushPromises();
+    const submitted = vi.mocked(fetch).mock.calls.find(([input, init]) => String(input).endsWith('/generation/jobs') && init?.method === 'POST');
+    expect(JSON.parse(String(submitted?.[1]?.body))).toMatchObject({ samples: 20, batch_size: 5 });
+    ui.unmount();
+  });
+
   it('confirms deletion, removes the dataset, and drops its training selection', async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     await ui.get('[data-delete-batch="ready"]').trigger('click');
@@ -98,7 +108,13 @@ describe("ArtificialPage", () => {
     newWorkspace = true;
     const ui = mount(host()); await flushPromises(); await flushPromises();
     expect((ui.get('[name="samples"]').element as HTMLInputElement).value).toBe('50000');
-    expect((ui.get('[name="batch-size"]').element as HTMLInputElement).value).toBe('100');
+    expect(ui.find('[name="batch-size"]').exists()).toBe(false);
+    await ui.get('[data-preview="qwen3"]').trigger('click'); await flushPromises();
+    const preview = vi.mocked(fetch).mock.calls.find(([input]) => String(input).endsWith('/generation/previews'));
+    expect(JSON.parse(String(preview?.[1]?.body))).toMatchObject({ samples: 1, batch_size: 1 });
+    await ui.get('form').trigger('submit'); await flushPromises();
+    const submitted = vi.mocked(fetch).mock.calls.find(([input, init]) => String(input).endsWith('/generation/jobs') && init?.method === 'POST');
+    expect(JSON.parse(String(submitted?.[1]?.body))).toMatchObject({ samples: 50000, batch_size: 100 });
     ui.unmount();
   });
   it('uses the workspace language before overview requests finish for a new workspace', async () => {
@@ -145,7 +161,7 @@ describe("ArtificialPage", () => {
     expect(JSON.parse(String(save?.[1]?.body)).batch_ids).toEqual([]);
     ui.unmount();
   });
-  it("uses individual engines, gates accent for Piper and non-English, and validates counts", async () => {
+  it("uses individual engines, gates accent for Piper and non-English, and validates sample counts", async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     expect(ui.get('[data-generation-phrase]').text()).toContain("Hey Cedar"); expect(ui.find('input[name="phrase"]').exists()).toBe(false);
     expect(ui.find('select[name="tts-mode"]').exists()).toBe(false);
@@ -154,8 +170,9 @@ describe("ArtificialPage", () => {
     expect((ui.get('select[name="english-accent"]').element as HTMLSelectElement).disabled).toBe(true);
     await ui.get('input[name="samples"]').setValue("0"); await ui.get("form").trigger("submit");
     expect(ui.get('[role="alert"]').text()).toContain("positive");
-    await ui.get('input[name="samples"]').setValue("20"); await ui.get('input[name="batch-size"]').setValue("0"); await ui.get("form").trigger("submit");
-    expect(ui.get('[role="alert"]').text()).toContain("positive");
+    expect(ui.get('[role="alert"]').text()).not.toContain('batch size');
+    await ui.get('input[name="samples"]').setValue("20"); await ui.get("form").trigger("submit"); await flushPromises();
+    expect(ui.find('[role="alert"]').exists()).toBe(false);
     workspace.selectedId.value = "b"; await flushPromises(); await flushPromises();
     expect(ui.get('[data-generation-phrase]').text()).toContain("Okay Maple"); expect((ui.get('select[name="english-accent"]').element as HTMLSelectElement).disabled).toBe(true);
     expect(ui.find('[data-engine="piper"]').exists()).toBe(false);

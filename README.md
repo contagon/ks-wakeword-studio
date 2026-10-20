@@ -157,8 +157,8 @@ browser request inspection can see a submitted password.
 5. Select installed negative datasets and completed artificial batches per word;
    save training settings and run manually or configure schedules in **Automate**,
    immediately below Deploy. New unsaved artificial recipes use 50,000 total
-   samples / batch size 100; saved recipes are preserved. Preview always uses one
-   sample. Higher batches require more memory and engines may impose lower limits.
+   samples; batching remains internal and saved recipes are preserved. Preview
+   always uses one sample.
    Piper stays visible with availability guidance when local voice files are missing;
    viewing the catalog never downloads models.
 
@@ -558,6 +558,12 @@ Where a Piper voice is unavailable, the default route automatically continues wi
 Qwen, OmniVoice, and Piper now generate final corpus candidates directly instead of cloning a 128-profile bank. Qwen provides 18,750 balanced voice conditions before an instruction repeats, and Piper uses every speaker in its installed model. MOSS Nano is clone-only, so each MOSS take uses a different already-accepted direct take as its carrier rather than cycling a small bank.
 
 Every generated file is normalized to `16 kHz / mono / 16-bit PCM WAV` and rejected if it contains static, broadband/high-frequency noise, silence, clipping, excessive duration/rambling, or an exact duplicate. A generation manifest records the planned and accepted provider counts and the applied safety limits.
+
+English direct OmniVoice takes use confidence-ordered mask selection with
+stochastic token sampling to reduce short-phrase decoder collapse without
+repeating a deterministic voice bank. Other languages and carrier/cloning paths
+retain upstream sampling defaults. QA limits are unchanged; see the
+[decoder investigation and measured yield](docs/omnivoice-decoder-investigation.md).
 
 ---
 

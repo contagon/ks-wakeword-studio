@@ -49,7 +49,7 @@ async function load(): Promise<void> {
 }
 function updateLanguage(value: string): void { recipe.value.language = value; normalizeRecipe(); }
 function toggleEngine(engine: string, checked: boolean): void { const next = new Set(recipe.value.engines); checked ? next.add(engine) : next.delete(engine); recipe.value.engines = [...next]; }
-function valid(): boolean { if (!Number.isInteger(recipe.value.samples) || recipe.value.samples < 1 || !Number.isInteger(recipe.value.batch_size) || recipe.value.batch_size < 1) { error.value = "Sample count and batch size must be positive integers."; return false; } if (!recipe.value.engines?.length) { error.value = 'Select at least one generation model.'; return false; } return true; }
+function valid(): boolean { if (!Number.isInteger(recipe.value.samples) || recipe.value.samples < 1) { error.value = "Sample count must be a positive integer."; return false; } if (!recipe.value.engines?.length) { error.value = 'Select at least one generation model.'; return false; } return true; }
 async function save(): Promise<void> {
   const id = activeId.value; if (!id || !valid()) return;
   mutationRequest?.abort(); const controller = new AbortController(); mutationRequest = controller; const token = ++mutationGeneration; const recipeToSave = { ...recipe.value, engines: [...recipe.value.engines!], english_accent: accentEnabled.value ? recipe.value.english_accent : 'mixed', tts_mode: 'hybrid' as const }; saving.value = true; error.value = "";
@@ -106,11 +106,10 @@ onBeforeUnmount(() => { loadRequest?.abort(); abortWorkspaceMutations(); });
       <h2>Generate data</h2>
       <p data-generation-phrase class="studio-muted">Wake phrase: <strong>{{ word?.phrase ?? 'No workspace selected' }}</strong></p>
       <form class="grid gap-4 mt-3" @submit.prevent="save">
-        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <label>Language<select name="language" :value="recipe.language" @change="updateLanguage(($event.target as HTMLSelectElement).value)"><option v-for="entry in capabilities" :key="entry.language" :value="entry.language">{{ entry.name }}</option></select></label>
           <label>English accent<select name="english-accent" v-model="recipe.english_accent" :disabled="!accentEnabled"><template v-if="accentEnabled"><option v-for="accent in capability?.english_accents ?? []" :key="accent.code" :value="accent.code">{{ accent.label }}</option></template><option v-else value="mixed">Not applicable</option></select></label>
           <label>Total samples<input v-model.number="recipe.samples" name="samples" type="number" min="1" required></label>
-          <label>Batch size<input v-model.number="recipe.batch_size" name="batch-size" type="number" min="1" required></label>
         </div>
         <fieldset><legend class="mb-2 font-semibold">Generation models</legend>
           <div class="grid gap-3 sm:grid-cols-2">
@@ -126,7 +125,7 @@ onBeforeUnmount(() => { loadRequest?.abort(); abortWorkspaceMutations(); });
             </article>
           </div>
         </fieldset>
-        <p class="studio-muted text-xs">Samples are shared across the selected models. Preview generates one sample without adding it to your training data. Higher batch sizes use more memory; effective limits and accent support vary by model.</p>
+        <p class="studio-muted text-xs">Samples are shared across the selected models. Preview generates one sample without adding it to your training data. Accent support varies by model.</p>
         <button type="submit" data-action="generate" class="studio-primary justify-self-start" :disabled="saving || loading || !activeId">{{ saving ? 'Starting…' : 'Generate dataset' }}</button>
       </form>
       <p v-if="error" class="studio-note mt-3" role="alert">{{ error }}</p>

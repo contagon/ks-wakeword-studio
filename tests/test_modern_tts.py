@@ -59,6 +59,24 @@ def write_tone(
 
 
 class ModernTtsTests(unittest.TestCase):
+    def test_direct_omnivoice_uses_random_tokens_not_random_unmask_order(self):
+        # Regression: random mask positions with greedy token classes cause
+        # short, reference-free wake phrases to collapse into non-speech.
+        for prefix in ('', 'fallback0_'):
+            with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                args = argparse.Namespace(phrase='hey tater', language='en', tts_mode='modern',
+                                          samples=2, batch_size=8, data_dir=root,
+                                          output_dir=root / 'samples', ffmpeg='ffmpeg', dry_run=False)
+                instance = generator_module.Generator(args)
+                with patch.object(instance, 'ensure_environment', return_value=Path('/unused/python')), \
+                     patch.object(generator_module.subprocess, 'run') as process:
+                    instance._generate_direct_engine('omnivoice', 2, [], prefix=prefix)
+                command = process.call_args.args[0]
+                self.assertEqual(command[command.index('--position_temperature') + 1], '0.0')
+                self.assertEqual(command[command.index('--class_temperature') + 1], '1.0')
+                self.assertEqual(command[command.index('--num_step') + 1], '32')
+
     def test_direct_generation_progress_counts_candidates_and_announces_qualification(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -93,6 +111,20 @@ class ModernTtsTests(unittest.TestCase):
             self.assertIn({'stage': 'qualifying', 'engine': 'omnivoice', 'completed': 0, 'total': 3}, events)
             self.assertIn({'stage': 'qualified', 'engine': 'omnivoice', 'completed': 3, 'total': 3}, events)
             self.assertEqual(len(qualified), 3)
+
+    def test_direct_omnivoice_keeps_upstream_sampling_for_unvalidated_languages(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            args = argparse.Namespace(phrase='hallo tater', language='de', tts_mode='modern',
+                                      samples=2, batch_size=8, data_dir=root,
+                                      output_dir=root / 'samples', ffmpeg='ffmpeg', dry_run=False)
+            instance = generator_module.Generator(args)
+            with patch.object(instance, 'ensure_environment', return_value=Path('/unused/python')), \
+                 patch.object(generator_module.subprocess, 'run') as process:
+                instance._generate_direct_engine('omnivoice', 2, [])
+            command = process.call_args.args[0]
+            self.assertEqual(command[command.index('--position_temperature') + 1], '5.0')
+            self.assertEqual(command[command.index('--class_temperature') + 1], '0.0')
 
     def test_direct_generator_uses_one_wake_phrase(self) -> None:
         self.assertEqual(generator_module.reference_text("hey tater"), "hey tater.")
@@ -739,6 +771,42 @@ class ModernTtsTests(unittest.TestCase):
             self.assertEqual(recovery_calls, [(generator_module.ENGINE_QWEN3, "recovery0_", 1)])
             self.assertEqual(len(list(output_dir.glob("*.wav"))), 8)
             self.assertTrue((output_dir / ".generation_manifest.json").is_file())
+
+    def test_normalization_skips_only_unity_tempo_filter(self) -> None:
+        for speed, expected_filter in (
+            (None, None),  # Missing per-file speed defaults to unchanged speed.
+            (1.0, None),
+            (0.85, 'atempo=0.85'),
+            (1.15, 'atempo=1.15'),
+            (1.0001, 'atempo=1.0001'),  # Do not approximate real speed changes.
+        ):
+            with self.subTest(speed=speed), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                args = argparse.Namespace(phrase='hey tater', language='en', tts_mode='modern',
+                                          samples=1, batch_size=1, data_dir=root,
+                                          output_dir=root / 'samples', ffmpeg='ffmpeg', dry_run=False)
+                instance = generator_module.Generator(args)
+                source = root / 'source.wav'
+                write_tone(source)
+                if speed is not None:
+                    instance.speed_by_path[source.resolve()] = speed
+
+                def convert(command, *, timeout):
+                    write_tone(Path(command[-1]))
+                    return 0
+
+                with patch.object(generator_module, 'run_normalization_ffmpeg', side_effect=convert) as process:
+                    accepted = instance.normalize([source], 0, 1)
+                command = process.call_args.args[0]
+                if expected_filter is None:
+                    self.assertNotIn('-af', command)
+                else:
+                    self.assertEqual(command[command.index('-af') + 1], expected_filter)
+                self.assertEqual(command[command.index('-ac') + 1], '1')
+                self.assertEqual(command[command.index('-ar') + 1], '16000')
+                self.assertEqual(command[command.index('-c:a') + 1], 'pcm_s16le')
+                self.assertEqual(process.call_args.kwargs['timeout'], 30.0)
+                self.assertEqual(accepted, [instance.final_dir / '0.wav'])
 
     def test_normalization_times_out_bad_clip_and_continues(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
