@@ -1,6 +1,14 @@
 @import "tailwindcss";
 @source "./**/*.vue";
 
+.studio-capture-area { text-align: center; border: 1px dashed var(--studio-border); border-radius: 8px; padding: 28px 12px; margin-top: 16px; background: var(--studio-bg); }
+.studio-capture-timer { font-size: 30px; font-weight: 650; font-variant-numeric: tabular-nums; margin: 8px 0 16px; }
+.studio-capture-label { display: flex; gap: 5px; }
+.studio-app button.studio-record-stop { background: #a52e38; border-color: #a52e38; color: white; }
+.studio-capture-review { border-top: 1px solid var(--studio-border); padding-top: 18px; }
+.studio-capture-wave { width: 100%; height: 90px; color: var(--studio-selected); background: var(--studio-bg); border-radius: 6px; margin: 12px 0; }
+.studio-capture-bounds { border: 0; padding: 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-bottom: 12px; }
+
 .studio-layout { display: contents; }
 .studio-app .studio-device-dialog { width: min(440px, calc(100% - 40px)); margin: auto; }
 .studio-device-dialog::backdrop { background: rgb(20 35 48 / .48); }

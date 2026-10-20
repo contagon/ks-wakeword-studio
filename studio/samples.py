@@ -17,16 +17,18 @@ from typing import BinaryIO
 from uuid import uuid4
 
 from studio.db import Store
-from studio.models import (Conflict, DiagnosticClip, NotFound, Page, Recording, Sample,
+from studio.models import (CaptureMetadata, Conflict, DiagnosticClip, NotFound, Page, Recording, Sample,
                            SampleQuery, ValidationError)
 from studio.storage import BlobStore, normalize_audio
 from studio.workspaces import WorkspaceService, utc_now
 
 
-SAMPLE_SELECT = """SELECT s.*, COALESCE(mp.source, s.source) AS migration_source,
+SAMPLE_SELECT = """SELECT s.*, CASE WHEN cm.sample_id IS NOT NULL THEN 'microphone'
+    ELSE COALESCE(mp.source, s.source) END AS migration_source,
     a.original_hash, a.normalized_hash, a.family_id
     FROM samples s JOIN audio_records a ON a.id=s.audio_id
     LEFT JOIN migration_sample_provenance mp ON mp.sample_id=s.id
+    LEFT JOIN sample_capture_metadata cm ON cm.sample_id=s.id
     LEFT JOIN recordings r ON r.id=s.recording_id"""
 RECORDING_SELECT = """SELECT r.*, a.original_hash, a.normalized_hash, a.family_id
     FROM recordings r JOIN audio_records a ON a.id=r.audio_id"""
@@ -50,12 +52,13 @@ def _public_metadata(raw: object) -> dict[str, object]:
 
 
 def _sample(db: sqlite3.Connection, row: sqlite3.Row) -> Sample:
-    values = {f.name: row[f.name] for f in fields(Sample) if f.name != "recording"}
+    values = {f.name: row[f.name] for f in fields(Sample) if f.name not in ("recording", "capture")}
     values["source"] = row["migration_source"]
     recording = None
     if row["recording_id"]:
         recording = _recording(db.execute(RECORDING_SELECT + " WHERE r.id=?", (row["recording_id"],)).fetchone())
-    return Sample(**values, recording=recording)
+    capture = db.execute('SELECT trim_method,start_s,end_s,duration_s FROM sample_capture_metadata WHERE sample_id=?', (row['id'],)).fetchone()
+    return Sample(**values, recording=recording, capture=CaptureMetadata(**dict(capture)) if capture else None)
 
 
 def _recording(row: sqlite3.Row) -> Recording:
@@ -105,11 +108,11 @@ class SampleService:
         except (TypeError, ValueError) as exc:
             raise ValidationError("Invalid timestamp") from exc
 
-    def _prepare(self, audio: BinaryIO) -> tuple[str, str]:
+    def _prepare(self, audio: BinaryIO, *, truncate: bool = False) -> tuple[str, str]:
         data = audio.read(self.blobs.max_bytes + 1)
         if not isinstance(data, bytes):
             raise ValidationError("Invalid audio stream")
-        normalized = normalize_audio(data, self.blobs.max_bytes)
+        normalized = normalize_audio(data, self.blobs.max_bytes, truncate=truncate)
         original = self.blobs.put(io.BytesIO(data))
         training = self.blobs.put(io.BytesIO(normalized))
         return original.sha256, training.sha256
@@ -210,6 +213,27 @@ class SampleService:
             original, normalized = self._prepare(audio)
             return self._new_sample(db, word_id, None, self._audio(db, original, normalized), label, "import")
 
+    def capture_audio(self, word_id: str, label: str, audio: BinaryIO,
+                      start_s: float, end_s: float, trim_method: str) -> Sample:
+        if label not in ('positive', 'negative') or trim_method not in ('silero', 'manual', 'none'):
+            raise ValidationError('Invalid capture metadata')
+        if any(type(v) not in (int, float) or not math.isfinite(v) for v in (start_s, end_s)) or not 0 <= start_s < end_s:
+            raise ValidationError('Invalid trim interval')
+        WorkspaceService(self.store).get(word_id)
+        with self.store.transaction() as db:
+            self._word(db, word_id)
+            original, normalized = self._prepare(audio, truncate=True)
+            with wave.open(io.BytesIO(self.blobs.read(normalized)), 'rb') as source:
+                duration = source.getnframes() / 16000
+            if end_s > duration or int(end_s * 16000) <= int(start_s * 16000):
+                raise ValidationError('Invalid trim interval')
+            sample = self._new_sample(db, word_id, None, self._audio(db, original, normalized), label, 'import')
+            db.execute('INSERT INTO sample_capture_metadata VALUES (?,?,?,?,?)',
+                       (sample.id, trim_method, start_s, end_s, duration))
+            if start_s > 0 or end_s < duration:
+                return self._trim(db, self._get(db, sample.id), start_s, end_s)
+            return _sample(db, self._get(db, sample.id))
+
     @staticmethod
     def _get(db: sqlite3.Connection, sample_id: str, word_id: str | None = None) -> sqlite3.Row:
         row = db.execute(SAMPLE_SELECT + " WHERE s.id=? AND s.deleted=0", (sample_id,)).fetchone()
@@ -274,23 +298,26 @@ class SampleService:
         with self.store.transaction() as db:
             row = self._get(db, sample_id)
             self._revision(row, expected_revision)
-            with wave.open(io.BytesIO(self.blobs.read(row["normalized_hash"])), "rb") as source:
-                if end_s > source.getnframes() / 16000 or int(end_s * 16000) <= int(start_s * 16000):
-                    raise ValidationError("Invalid trim interval")
-                source.setpos(int(start_s * 16000))
-                pcm = source.readframes(int(end_s * 16000) - int(start_s * 16000))
-            output = io.BytesIO()
-            with wave.open(output, "wb") as target:
-                target.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
-                target.writeframes(pcm)
-            normalized = self.blobs.put(io.BytesIO(output.getvalue())).sha256
-            audio_id = self._audio(db, row["original_hash"], normalized, row, start_s, end_s)
-            return self._change(db, row, row["label"], audio_id, "trim")
+            return self._trim(db, row, start_s, end_s)
+
+    def _trim(self, db: sqlite3.Connection, row: sqlite3.Row, start_s: float, end_s: float) -> Sample:
+        with wave.open(io.BytesIO(self.blobs.read(row["normalized_hash"])), "rb") as source:
+            if end_s > source.getnframes() / 16000 or int(end_s * 16000) <= int(start_s * 16000):
+                raise ValidationError("Invalid trim interval")
+            source.setpos(int(start_s * 16000))
+            pcm = source.readframes(int(end_s * 16000) - int(start_s * 16000))
+        output = io.BytesIO()
+        with wave.open(output, "wb") as target:
+            target.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+            target.writeframes(pcm)
+        normalized = self.blobs.put(io.BytesIO(output.getvalue())).sha256
+        audio_id = self._audio(db, row["original_hash"], normalized, row, start_s, end_s)
+        return self._change(db, row, row["label"], audio_id, "trim")
 
     def _query(self, query: SampleQuery) -> tuple[list[str], list[object]]:
         if type(query.offset) is not int or query.offset < 0 or type(query.limit) is not int or not 1 <= query.limit <= 100:
             raise ValidationError("Invalid pagination")
-        if query.label not in (None, "pending", "positive", "negative", "discarded") or query.source not in (None, "diagnostic", "import", "legacy"):
+        if query.label not in (None, "pending", "positive", "negative", "discarded") or query.source not in (None, "diagnostic", "import", "legacy", "microphone"):
             raise ValidationError("Invalid filter")
         if not isinstance(query.search, str) or len(query.search) > 200 or query.near_miss not in (None, True, False):
             raise ValidationError("Invalid filter")
@@ -317,8 +344,11 @@ class SampleService:
             clauses.append("s.label=?")
             params.append(query.label)
         if query.source is not None:
-            clauses.append("mp.source=?" if query.source == "legacy" else "s.source=?")
-            params.append(query.source)
+            if query.source == 'microphone':
+                clauses.append('cm.sample_id IS NOT NULL')
+            else:
+                clauses.append('mp.source=?' if query.source == 'legacy' else 's.source=? AND cm.sample_id IS NULL')
+                params.append(query.source)
         where = " WHERE " + " AND ".join(clauses)
         with self.store.transaction() as db:
             self._word(db, word_id)

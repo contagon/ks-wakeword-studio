@@ -5,6 +5,7 @@ export const pages = [
   { id: "kiosks", name: "Kiosks", group: "Fleet" },
   { id: "negative-datasets", name: "Negative Datasets", group: "Data" },
   { id: "artificial", name: "Artificial", group: "Data" },
+  { id: "record", name: "Record", group: "Data" },
   { id: "classify", name: "Classify", group: "Data" },
   { id: "samples", name: "Samples", group: "Data" },
   { id: "train", name: "Train", group: "Models" },

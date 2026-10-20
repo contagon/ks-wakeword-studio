@@ -66,7 +66,7 @@ async function open() { wrapper = mount(TrainerApp, { attachTo: document.body })
 describe("compact studio workspace", () => {
   it("groups the approved navigation pages with Automate immediately after Deploy", async () => {
     const ui = await open();
-    expect(ui.get('nav').findAll('a').map(a => a.text())).toEqual(["Wakewords", "Kiosks", "Negative Datasets", "Artificial", "Classify", "Samples", "Train", "Deploy", "Automate"]);
+    expect(ui.get('nav').findAll('a').map(a => a.text())).toEqual(["Wakewords", "Kiosks", "Negative Datasets", "Artificial", "Record", "Classify", "Samples", "Train", "Deploy", "Automate"]);
     expect(ui.get('nav').text()).toContain("Data");
     expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
     await ui.get('[data-page="train"]').trigger('click'); await flushPromises();
@@ -81,7 +81,7 @@ describe("compact studio workspace", () => {
       expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
       expect(ui.find('[data-studio-placeholder]').exists()).toBe(false);
     }
-    expect(ui.get('nav').findAll('a')).toHaveLength(9);
+    expect(ui.get('nav').findAll('a')).toHaveLength(10);
     expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
   });
   it("preserves selection across navigation, reload, and direct links", async () => {

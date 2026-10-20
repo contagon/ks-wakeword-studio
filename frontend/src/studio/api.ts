@@ -3,6 +3,7 @@ import type { EnqueueScrapeJob, ModelMetrics, ScrapeJob, Page, Wakeword, CreateW
 import type { LegacyRun } from './types';
 import type { GenerationSubmission, GenerationSource } from './types';
 import type { AutomationSettings, AutomationStatus } from './types';
+import type { CapturePreview, CaptureSelection } from './types';
 
 const base = "/api/studio";
 const segment = encodeURIComponent;
@@ -64,6 +65,8 @@ export const studioApi = {
   unmapped: (params?: SampleQuery, signal?: AbortSignal) => get<Page<Recording>>("/recordings/unmapped", params, signal),
   assign: (id: string, word: string, signal?: AbortSignal) => post<Sample>(`/recordings/${segment(id)}/assign`, { word_id: word }, signal),
   importAudio: (word: string, audio: File, label: "positive" | "negative", signal?: AbortSignal) => { const body = new FormData(); body.set("audio", audio); body.set("label", label); return post<Sample>(`${wordPath(word)}/samples/import`, body, signal); },
+  previewCapture: (word: string, audio: File, signal?: AbortSignal) => { const body = new FormData(); body.set('audio', audio); return post<CapturePreview>(`${wordPath(word)}/samples/capture/preview`, body, signal); },
+  saveCapture: (word: string, audio: File, label: 'positive' | 'negative', selection: CaptureSelection, signal?: AbortSignal) => { const body = new FormData(); body.set('audio', audio); body.set('label', label); body.set('start_s', String(selection.start_s)); body.set('end_s', String(selection.end_s)); body.set('trim_method', selection.trim_method); return post<Sample>(`${wordPath(word)}/samples/capture`, body, signal); },
   label: (word: string, id: string, label: "positive" | "negative" | "discarded", revision: number, signal?: AbortSignal) => post<Sample>(`${samplePath(word, id)}/label`, { label, expected_revision: revision }, signal),
   undo: (word: string, id: string, revision: number, signal?: AbortSignal) => post<Sample>(`${samplePath(word, id)}/undo`, { expected_revision: revision }, signal),
   trim: (word: string, id: string, start: number, end: number, revision: number, signal?: AbortSignal) => post<Sample>(`${samplePath(word, id)}/trim`, { start_s: start, end_s: end, expected_revision: revision }, signal),

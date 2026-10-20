@@ -405,6 +405,24 @@ class Recording:
 
 
 @dataclass(frozen=True)
+class CapturePreview:
+    duration_s: float
+    start_s: float
+    end_s: float
+    trim_method: str
+    warning: str | None
+    duration_limited: bool = False
+
+
+@dataclass(frozen=True)
+class CaptureMetadata:
+    trim_method: str
+    start_s: float
+    end_s: float
+    duration_s: float
+
+
+@dataclass(frozen=True)
 class Sample:
     id: str
     word_id: str
@@ -419,6 +437,7 @@ class Sample:
     created_at: str
     updated_at: str
     recording: Recording | None = None
+    capture: CaptureMetadata | None = None
 
 
 @dataclass(frozen=True)

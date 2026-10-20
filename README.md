@@ -13,6 +13,29 @@ Kiosk Wakeword Studio manages independent wakeword workspaces, collects rolling 
 
 Real samples come from device-captured wake audio, close misses, or manual uploads. Every saved sample is normalized to `16 kHz / mono / 16-bit PCM WAV` before training.
 
+### Record or upload samples
+
+Open **Data → Record**, select a wakeword and choose **Positive** or **Negative**.
+Click **Start recording** / **Stop recording**, or press **Space** when focus is
+outside another control. Recording uses your browser's current microphone and
+does not stop on silence (a 10-minute safety limit applies).
+If a delayed browser timer overshoots that limit, the training preview is capped
+at ten minutes while saving still retains the complete original recording.
+
+After stopping, VAD suggests a trim around all detected speech, retaining interior
+pauses. Play the selection, adjust its bounds, then **Save sample**, or **Retake**.
+If speech detection is unavailable or finds no speech, the full clip stays selected;
+negative background-noise recordings can still be saved. Originals are retained,
+and saved recordings appear alongside scraped data in **Samples**, with a
+**Microphone** source filter and capture metadata.
+
+The upload form is now on **Record**, with its own positive/negative label. Uploads
+are not automatically trimmed and retain their **Import** provenance.
+
+Browser microphone access requires **HTTPS** or **localhost**. For remote use,
+use a trusted HTTPS connection or forward Studio to your local machine and open
+it through localhost; a plain HTTP VPN/LAN address will normally block recording.
+
 ---
 
 ## Docker Image

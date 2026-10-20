@@ -97,6 +97,13 @@ export function fakeStudio() {
     if ((m = p.match(/^\/wakewords\/([^/]+)\/models$/))) return json(page([], 0, 1));
     if ((m = p.match(/^\/wakewords\/([^/]+)\/queue$/))) { q.set("label", "pending"); return json(page(filtered(m[1], q), off, lim)); }
     if ((m = p.match(/^\/wakewords\/([^/]+)\/samples$/))) return json(page(filtered(m[1], q), off, lim));
+    if ((m = p.match(/^\/wakewords\/([^/]+)\/samples\/capture(?:\/(preview))?$/))) {
+      if (m[2]) return json({ duration_s: 3, start_s: 0.2, end_s: 2.8, trim_method: 'silero', warning: null });
+      const form = r.body as FormData;
+      const s = sample(`capture-${++created}`, m[1], String(form.get('label')), { source: 'microphone', recording_id: null, recording: null });
+      db.samples.push(s);
+      return json(s, 201);
+    }
     if ((m = p.match(/^\/wakewords\/([^/]+)\/samples\/import$/))) {
       const form = r.body as FormData;
       const s = sample(`import-${++created}`, m[1], String(form.get("label")), { source: "import", recording_id: null, recording: null });

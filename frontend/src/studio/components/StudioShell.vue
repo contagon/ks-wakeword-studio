@@ -5,6 +5,7 @@ import { createWorkspace, workspaceKey } from "../workspace";
 import WakewordsPage from "../pages/WakewordsPage.vue";
 import ClassifyPage from "../pages/ClassifyPage.vue";
 import SamplesPage from "../pages/SamplesPage.vue";
+import RecordPage from '../pages/RecordPage.vue';
 import KiosksPage from "../pages/KiosksPage.vue";
 import AutomatePage from "../pages/AutomatePage.vue";
 import DeployPage from "../pages/DeployPage.vue";
@@ -89,6 +90,7 @@ onBeforeUnmount(() => {
         <WakewordsPage v-if="current.id === 'wakewords'" />
         <ClassifyPage v-else-if="current.id === 'classify'" />
         <SamplesPage v-else-if="current.id === 'samples'" />
+        <RecordPage v-else-if="current.id === 'record'" />
         <KiosksPage v-else-if="current.id === 'kiosks'" />
         <AutomatePage v-else-if="current.id === 'automate'" />
         <DeployPage v-else-if="current.id === 'deploy'" />

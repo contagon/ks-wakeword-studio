@@ -24,18 +24,20 @@ AUDIO_MIMES = frozenset({"audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wa
                          "audio/mp4", "video/mp4", "audio/aac", "application/octet-stream"})
 
 
-def canonical_wav(data: bytes) -> bytes:
+def canonical_wav(data: bytes, *, truncate: bool = False) -> bytes:
     """Validate decoded PCM and strip container metadata for stable content identity."""
     try:
         with wave.open(io.BytesIO(data), "rb") as source:
             channels, width, rate, frames, compression, _ = source.getparams()
             if (channels, width, rate, compression) != (1, 2, 16000, "NONE"):
                 raise ValidationError("Audio needs conversion")
-            if not 0 < frames <= rate * MAX_AUDIO_SECONDS:
+            if frames <= 0 or (frames > rate * MAX_AUDIO_SECONDS and not truncate):
                 raise ValidationError("Invalid audio duration")
             pcm = source.readframes(frames)
             if len(pcm) != frames * width:
                 raise ValidationError("Truncated audio")
+            if truncate:
+                pcm = pcm[:rate * MAX_AUDIO_SECONDS * width]
     except (wave.Error, EOFError, ValueError) as exc:
         raise ValidationError("Invalid WAV audio") from exc
     output = io.BytesIO()
@@ -45,11 +47,13 @@ def canonical_wav(data: bytes) -> bytes:
     return output.getvalue()
 
 
-def normalize_audio(data: bytes, max_bytes: int) -> bytes:
+def normalize_audio(data: bytes, max_bytes: int, *, truncate: bool = False) -> bytes:
     """Same ffmpeg PCM target as legacy uploads, without importing legacy workers.
 
     Inputs are sniffed, never interpreted as filenames/playlists. Conversion is
     bounded and local-only; neither uploaded names nor decoder diagnostics escape.
+    Capture may truncate timer overshoot to MAX_AUDIO_SECONDS while retaining the
+    original blob separately. Ordinary imports keep strict duration validation.
     """
     if not data or len(data) > max_bytes:
         raise ValidationError("Invalid audio size")
@@ -59,12 +63,12 @@ def normalize_audio(data: bytes, max_bytes: int) -> bytes:
                 channels, width, rate, frames, compression, _ = source.getparams()
                 if not 0 < rate <= 192000 or not 1 <= channels <= 8 or not 1 <= width <= 4:
                     raise ValidationError("Invalid WAV parameters")
-                if not 0 < frames <= rate * MAX_AUDIO_SECONDS:
+                if frames <= 0 or (frames > rate * MAX_AUDIO_SECONDS and not truncate):
                     raise ValidationError("Invalid audio duration")
                 if len(source.readframes(frames)) != frames * channels * width:
                     raise ValidationError("Truncated audio")
             if (channels, width, rate, compression) == (1, 2, 16000, "NONE"):
-                return canonical_wav(data)
+                return canonical_wav(data, truncate=truncate)
         except (wave.Error, EOFError, ValueError) as exc:
             raise ValidationError("Invalid WAV audio") from exc
         container = "wav"
@@ -98,7 +102,7 @@ def normalize_audio(data: bytes, max_bytes: int) -> bytes:
             raise ValidationError("Audio conversion failed") from exc
         if result.returncode or not target.exists() or target.stat().st_size > max_bytes:
             raise ValidationError("Audio conversion failed")
-        return canonical_wav(target.read_bytes())
+        return canonical_wav(target.read_bytes(), truncate=truncate)
 
 
 @contextmanager

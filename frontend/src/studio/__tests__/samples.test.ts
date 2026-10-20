@@ -88,21 +88,10 @@ describe("provenance-aware sample library", () => {
     expect(row(ui, "s4").text()).toContain("rev 9");
   });
 
-  it("imports audio into the active workspace with an explicit label", async () => {
+  it("links to Record instead of duplicating the upload form", async () => {
     const ui = await open();
-    const input = ui.get("input[name=import-file]");
-    const file = new File([wav(0.2).buffer as ArrayBuffer], "clip.wav", { type: "audio/wav" });
-    Object.defineProperty(input.element, "files", { value: [file] });
-    await input.trigger("change");
-    await ui.get("select[name=import-label]").setValue("negative");
-    await ui.get("[data-form=import]").trigger("submit"); await settle();
-    const request = server.mutations().at(-1)!;
-    expect(request.url.pathname).toBe("/api/studio/wakewords/a/samples/import");
-    const form = request.body as FormData;
-    expect(form.get("label")).toBe("negative");
-    expect((form.get("audio") as File).name).toBe("clip.wav");
-    expect(server.db.samples.filter(s => s.source === "import" && s.word_id === "a")).toHaveLength(2);
-    expect(ui.get("[data-samples-status]").text()).toContain("Imported");
+    expect(ui.find('[data-form=import]').exists()).toBe(false);
+    expect(ui.get('a[href="#/record?word=a"]').text()).toBeTruthy();
   });
 
   it("trims non-destructively through the server with the current revision", async () => {

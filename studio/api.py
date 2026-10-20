@@ -18,6 +18,8 @@ from studio.runtime import StudioRuntime
 from studio.automation import settings_from_dict
 from studio.models import AutomationStatus
 from studio.storage import AUDIO_MIMES
+from studio.capture import analyze_capture
+from studio.models import CapturePreview
 
 
 class StudioRoute(APIRoute):
@@ -487,6 +489,21 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
         if audio.content_type not in AUDIO_MIMES:
             raise ValidationError("Unsupported audio MIME")
         return runtime.samples.import_audio(word_id, label, audio.file)
+
+    @router.post('/wakewords/{word_id}/samples/capture/preview', response_model=CapturePreview)
+    def preview_capture(word_id: str, audio: UploadFile = File(...)) -> CapturePreview:
+        runtime.workspaces.get(word_id)
+        if (audio.content_type or '').split(';', 1)[0].strip().lower() not in AUDIO_MIMES:
+            raise ValidationError('Unsupported audio MIME')
+        return analyze_capture(audio.file.read(runtime.blobs.max_bytes + 1), runtime.blobs.max_bytes)
+
+    @router.post('/wakewords/{word_id}/samples/capture', response_model=Sample, status_code=201)
+    def save_capture(word_id: str, label: str = Form(...), start_s: float = Form(...),
+                     end_s: float = Form(...), trim_method: str = Form(...),
+                     audio: UploadFile = File(...)) -> Sample:
+        if (audio.content_type or '').split(';', 1)[0].strip().lower() not in AUDIO_MIMES:
+            raise ValidationError('Unsupported audio MIME')
+        return runtime.samples.capture_audio(word_id, label, audio.file, start_s, end_s, trim_method)
 
     @router.get("/wakewords/{word_id}/samples/{sample_id}", response_model=Sample)
     def get_sample(word_id: str, sample_id: str) -> Sample:
