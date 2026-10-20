@@ -156,6 +156,9 @@ class GenerationRecipeBody(BaseModel):
     samples: int
     batch_size: int
     engines: list[str] | None = None
+    moss_source_batch_ids: list[str] = []
+    moss_after_current: bool = False
+    moss_samples: int | None = None
 
 
 class MigrationImportBody(BaseModel):

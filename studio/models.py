@@ -132,6 +132,26 @@ class GenerationRecipe:
     samples: int
     batch_size: int
     engines: list[str] | None = None
+    moss_source_batch_ids: list[str] = field(default_factory=list)
+    moss_after_current: bool = False
+    moss_samples: int | None = None
+
+
+@dataclass(frozen=True)
+class GenerationSubmission:
+    id: str
+    jobs: list[Job]
+    batch_ids: list[str]
+
+
+@dataclass(frozen=True)
+class GenerationSource:
+    id: str
+    phrase: str
+    language: str
+    providers: list[str]
+    sample_count: int
+    created_at: str
 
 
 @dataclass(frozen=True)

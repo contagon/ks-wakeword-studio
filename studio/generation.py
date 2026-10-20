@@ -181,6 +181,14 @@ class GenerationService:
                        (job.id, word_id, word['phrase'], encoded))
             return job
 
+    def submit(self, word_id, recipe):
+        from studio.generation_submissions import submit
+        return submit(self, word_id, recipe)
+
+    def sources(self, word_id, language, offset=0, limit=50):
+        from studio.generation_references import list_sources
+        return list_sources(self, word_id, language, offset, limit)
+
     def _batch(self, db, word_id, batch_id):
         row = db.execute('SELECT b.*,j.status,j.created_at,j.finished_at FROM generation_batches b '
                          'JOIN studio_jobs j ON j.id=b.id WHERE b.id=? AND b.word_id=?', (batch_id, word_id)).fetchone()
