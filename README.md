@@ -351,11 +351,26 @@ build; global collection and each word's training schedule are independent.
 
 The Artificial page has generation settings above a list of generated datasets.
 Choose individual models (OmniVoice, Qwen3-TTS, MOSS-TTS, and installed Piper voices)
-using checkboxes. **Generate dataset** remembers the settings and splits the total
-sample count across the selected models. Each model's **Preview** generates one
+using checkboxes. **Generate dataset** remembers the settings and creates a separate
+dataset for each provider. **Samples per provider** is not divided: selecting Qwen
+and OmniVoice at 20,000 requests two 20,000-sample datasets. Each completed dataset
+has an independent training checkbox; new datasets are not selected automatically.
+Each model's **Preview** generates one
 sample of the workspace phrase using the current language/accent, with playback
 controls; previews never enter the training datasets or change saved settings.
 Both generation and previews use the GPU queue and report real job progress.
+MOSS has its own sample count and requires direct-provider reference audio. Select
+multiple completed source datasets, or enable **Generate after current selection**
+to queue MOSS after this submission's direct providers with one click. This mode
+uses only those new datasets, not older jobs. If any producer fails or is cancelled,
+MOSS stops before inference; successful direct datasets remain available.
+MOSS needs at least as many distinct reference clips as requested outputs (clips
+duplicated across datasets count once). Choose more sources or lower its count
+if necessary. Reference selection is separate from training selection. MOSS output
+is another independent dataset and retains source family identities for train/eval
+splits. MOSS previews require completed sources; after-current mode cannot preview
+references that do not exist yet. Historical mixed-provider datasets remain intact
+and cannot serve as MOSS sources; completed direct-only historical datasets can.
 Piper availability depends on installed voices; English accent
 emphasis applies only where supported. Completed selected synthetic batches join
 explicitly reviewed real audio; generation is not silently rerun by training.
