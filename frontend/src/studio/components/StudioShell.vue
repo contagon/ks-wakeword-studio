@@ -12,6 +12,7 @@ import DeployPage from "../pages/DeployPage.vue";
 import NegativeDatasetsPage from "../pages/NegativeDatasetsPage.vue";
 import ArtificialPage from "../pages/ArtificialPage.vue";
 import TrainPage from "../pages/TrainPage.vue";
+import TestingPage from "../pages/TestingPage.vue";
 import ThemeToggle from './ThemeToggle.vue';
 import { createJobQueue, jobQueueKey } from '../jobs';
 import JobQueueDrawer from './JobQueueDrawer.vue';
@@ -97,6 +98,7 @@ onBeforeUnmount(() => {
         <NegativeDatasetsPage v-else-if="current.id === 'negative-datasets'" />
         <ArtificialPage v-else-if="current.id === 'artificial'" />
         <TrainPage v-else-if="current.id === 'train'" />
+        <TestingPage v-else-if="current.id === 'testing'" />
       </main>
     </div>
     </div>

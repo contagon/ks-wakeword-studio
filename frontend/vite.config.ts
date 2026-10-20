@@ -4,6 +4,8 @@ import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "node:path";
 
 export default defineConfig({
+  // The production server mounts this library and its worker under /static/ui/.
+  base: './',
   plugins: [vue(), tailwindcss()],
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),

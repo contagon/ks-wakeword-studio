@@ -11,6 +11,7 @@ export const pages = [
   { id: "train", name: "Train", group: "Models" },
   { id: "deploy", name: "Deploy", group: "Models" },
   { id: "automate", name: "Automate", group: "Models" },
+  { id: "testing", name: "Testing", group: "Models" },
 ] as const;
 export type PageId = typeof pages[number]["id"];
 export type ClassifyTab = 'review' | 'collect' | 'unmapped';

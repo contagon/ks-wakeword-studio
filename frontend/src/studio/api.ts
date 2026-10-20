@@ -52,6 +52,8 @@ const put = <T>(path: string, body: unknown, signal?: AbortSignal) => request<T>
 
 export const studioApi = {
   capabilities: (signal?: AbortSignal) => get<StudioCapabilities>("/capabilities", undefined, signal),
+  testingManifest: (word: string, version: string, model: string, signal?: AbortSignal) => get<unknown>(`${wordPath(word)}/models/${segment(version)}/archive/${segment(model + '.json')}`, undefined, signal),
+  testingModelUrl: (word: string, version: string, model: string) => `${base}${wordPath(word)}/models/${segment(version)}/archive/${segment(model + '.tflite')}`,
   migration: (signal?: AbortSignal) => get<LegacyInventory>("/migration", undefined, signal),
   importLegacy: (body: LegacyImportSelection, signal?: AbortSignal) => post<MigrationReport>("/migration/import", body, signal),
   wakewords: (params?: Pagination, signal?: AbortSignal) => get<Page<Wakeword>>("/wakewords", params, signal),
