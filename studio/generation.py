@@ -105,6 +105,11 @@ class GenerationService:
         recipe = replace(recipe, samples=1, batch_size=1)
         with self.store.transaction() as db:
             word = self._word(db, word_id)
+            if recipe.engines == ['moss']:
+                from studio.generation_references import reference_pool
+                if recipe.moss_after_current:
+                    raise ValidationError('Select completed sources to preview MOSS')
+                reference_pool(self, db, word_id, word['phrase'], recipe, 1)
             return self.jobs._enqueue(db, 'preview', word_id,
                                       {'phrase': word['phrase'], 'recipe': asdict(recipe)}, None, None, self.clock())
 
@@ -114,7 +119,12 @@ class GenerationService:
             raise Conflict('Owned preview context required')
         recipe = GenerationRecipe(**job.payload['recipe'])
         self._validate(recipe)
-        output = self._run_generator(job, context, job.payload['phrase'], recipe)
+        references = self._references(job, context, job.payload['phrase'], recipe)
+        output = self._run_generator(job, context, job.payload['phrase'], recipe,
+                                     reference_manifest=references[0] if references else None)
+        if references:
+            from studio.generation_references import output_parents
+            output_parents(output, references[1], recipe.samples)
         audio = list(self._read_audio(output, recipe.samples))
         if len(audio) != 1 or context.cancelled():
             raise Conflict('Preview incomplete or cancelled')
@@ -253,7 +263,13 @@ class GenerationService:
         # GPU work occurs outside SQL. Blob publication and reference admission
         # share the GC write lock, so another workspace cannot collect a blob
         # between these two operations, even if its content is identical.
-        output = self._run_generator(job, context, phrase, recipe)
+        references = self._references(job, context, phrase, recipe)
+        output = self._run_generator(job, context, phrase, recipe,
+                                     reference_manifest=references[0] if references else None)
+        parents = None
+        if references:
+            from studio.generation_references import output_parents
+            parents = output_parents(output, references[1], recipe.samples)
         context.log(f'Validating and saving {recipe.samples} samples')
         with self.store.transaction() as db:
             if db.execute('SELECT status FROM studio_jobs WHERE id=?', (job.id,)).fetchone()[0] != 'running' or context.stop_event.is_set():
@@ -264,17 +280,30 @@ class GenerationService:
                 original = self.blobs.put(io.BytesIO(data)).sha256
                 canonical = self.blobs.put(io.BytesIO(normalized)).sha256
                 known = db.execute('SELECT family_id FROM audio_families WHERE content_hash=?', (canonical,)).fetchone()
-                family = known[0] if known else canonical
+                parent = parents[index] if parents else None
+                if parent and known and known[0] != parent['family_id']:
+                    raise ValidationError('MOSS output conflicts with an existing audio family')
+                family = parent['family_id'] if parent else (known[0] if known else canonical)
                 db.execute('INSERT OR IGNORE INTO audio_families VALUES (?,?)', (canonical, family))
                 audio_id = uuid4().hex
-                db.execute('INSERT INTO audio_records VALUES (?,?,?,?,NULL,NULL,NULL,?)',
-                           (audio_id, original, canonical, family, self._now()))
+                db.execute('INSERT INTO audio_records VALUES (?,?,?,?,?,NULL,NULL,?)',
+                           (audio_id, original, canonical, family, parent['id'] if parent else None, self._now()))
                 db.execute('INSERT INTO generation_batch_audio VALUES (?,?,?)', (job.id, index, audio_id))
             db.execute('UPDATE generation_batches SET committed_at=? WHERE id=?', (self._now(), job.id))
         context.log(f'Synthetic batch validated and saved: {recipe.samples}/{recipe.samples}')
         return self.get_batch(job.word_id, job.id)
 
-    def _run_generator(self, job, context, phrase, recipe):
+    def _references(self, job, context, phrase, recipe):
+        if recipe.engines != ['moss'] or not (recipe.moss_source_batch_ids or job.payload.get('provider_dataset')):
+            return None
+        from studio.generation_references import materialize_references
+        try:
+            return materialize_references(self, job, recipe, phrase, recipe.samples, cancelled=context.cancelled)
+        except ValidationError:
+            context.log('MOSS sources are unavailable: all selected source datasets must complete successfully with enough distinct clips')
+            raise
+
+    def _run_generator(self, job, context, phrase, recipe, *, reference_manifest=None):
         root = self.store.scoped_directory('jobs', job.id)
         output = root / 'generation' / 'samples'
         with open_directory(output.parent):
@@ -285,7 +314,8 @@ class GenerationService:
                    f'--data-dir={self.store.root.parent}', f'--output-dir={output}',
                    f'--language={recipe.language}', f'--english-accent={recipe.english_accent}',
                    f'--tts-mode={recipe.tts_mode}', f'--samples={recipe.samples}', f'--batch-size={recipe.batch_size}',
-                   *([f'--engines={",".join(recipe.engines)}'] if recipe.engines is not None else []),
+                    *([f'--engines={",".join(recipe.engines)}'] if recipe.engines is not None else []),
+                    *([f'--reference-manifest={reference_manifest}'] if reference_manifest is not None else []),
                    '--', phrase]
         context.log(f'Generating synthetic batch: {recipe.samples} samples, batch size {recipe.batch_size}')
         context.run(command, cwd=str(root))

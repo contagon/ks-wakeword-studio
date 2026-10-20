@@ -1,12 +1,33 @@
 import json
+import io
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from studio.models import GenerationRecipe, ValidationError
+from studio.models import Conflict, GenerationRecipe, ValidationError
 from studio.runtime import StudioRuntime
-from tests.test_studio_generation import FixtureRunner
+from tests.test_studio_generation import FixtureRunner, wav
+
+
+class ReferenceRunner(FixtureRunner):
+    bad_parent = False
+    family_conflict = False
+
+    def run(self, context, argv, *, cwd=None):
+        options = dict(part.split('=', 1) for part in argv if part.startswith('--') and '=' in part)
+        if '--reference-manifest' not in options:
+            return super().run(context, argv, cwd=cwd)
+        self.calls.append((context.job.id, argv, cwd))
+        rows = [json.loads(line) for line in Path(options['--reference-manifest']).read_text().splitlines()]
+        self.references = rows
+        output = Path(options['--output-dir']); output.mkdir(parents=True)
+        parents = {}
+        for index in range(int(options['--samples'])):
+            (output / f'{index}.wav').write_bytes(wav(2 if self.family_conflict else index + 100))
+            parents[f'{index}.wav'] = '0' * 32 if self.bad_parent else rows[index % len(rows)]['audio_id']
+        (output / '.generation_manifest.json').write_text(json.dumps({'source_audio_ids': parents}))
+        return 0
 
 
 class SubmissionTests(unittest.TestCase):
@@ -130,3 +151,115 @@ class SubmissionTests(unittest.TestCase):
         moss = self.source('moss')  # Legacy fixture permits mixed/clone-only historical output.
         with self.assertRaises(ValidationError):
             self.service.submit(self.word.id, replace(self.recipe, engines=['moss'], moss_source_batch_ids=[moss]))
+
+    def use_reference_runner(self):
+        self.runner = ReferenceRunner()
+        self.runtime.workers.runner = self.runner
+
+    def test_moss_executes_with_approved_sources_and_inherits_parent_families(self):
+        sources = [self.source('qwen3'), self.source('omnivoice')]
+        self.use_reference_runner()
+        result = self.service.submit(self.word.id, replace(self.recipe, engines=['moss'], moss_source_batch_ids=sources))
+        job = result.jobs[0]
+        self.runtime.workers.run_once('gpu')
+        self.assertEqual(self.runtime.jobs.get(job.id).status, 'complete')
+        batch = self.service.get_batch(self.word.id, job.id)
+        self.assertEqual(len(self.runner.references), 2)  # Canonical duplicates across sources removed.
+        with self.service.store.transaction() as db:
+            rows = [db.execute('SELECT * FROM audio_records WHERE id=?', (a.audio_id,)).fetchone() for a in batch.audio]
+            for index, row in enumerate(rows):
+                self.assertEqual(row['parent_id'], self.runner.references[index]['audio_id'])
+                self.assertEqual(row['family_id'], self.runner.references[index]['family_id'])
+        self.assertEqual(self.service.selection(self.word.id), [])
+        from tests.studio_harness import augmentation_fixture
+        augmentation_fixture(self.root)
+        self.service.select_batches(self.word.id, [sources[0], job.id])
+        from uuid import uuid4
+        manifest = self.runtime.training.snapshot(self.word.id, uuid4().hex)
+        splits = {}
+        for audio in manifest.audio:
+            self.assertEqual(splits.setdefault(audio.family_id, audio.split), audio.split)
+
+    def test_unapproved_parent_or_family_conflict_rolls_back_publication(self):
+        source = self.source()
+        self.use_reference_runner()
+        for field in ('bad_parent', 'family_conflict'):
+            setattr(self.runner, field, True)
+            result = self.service.submit(self.word.id, replace(self.recipe, engines=['moss'], moss_source_batch_ids=[source]))
+            self.runtime.workers.run_once('gpu')
+            job = result.jobs[0]
+            self.assertEqual(self.runtime.jobs.get(job.id).status, 'failed')
+            with self.service.store.transaction() as db:
+                self.assertEqual(db.execute('SELECT count(*) FROM generation_batch_audio WHERE batch_id=?', (job.id,)).fetchone()[0], 0)
+            setattr(self.runner, field, False)
+
+    def test_cancelled_failed_or_interrupted_producer_prevents_moss_inference(self):
+        for state in ('cancelled', 'failed', 'interrupted'):
+            result = self.service.submit(self.word.id, replace(self.recipe, engines=['qwen3', 'moss'], moss_after_current=True))
+            producer, moss = result.jobs
+            if state == 'cancelled':
+                self.runtime.jobs.cancel(producer.id)
+            elif state == 'failed':
+                self.runner.mode = 'invalid'
+                self.runtime.workers.run_once('gpu')
+                self.runner.mode = 'valid'
+            else:
+                self.runtime.jobs.claim('gpu', self.runtime.clock())
+                self.runtime.jobs.abandon()
+                self.runtime.jobs.recover()
+            before = len(self.runner.calls)
+            self.runtime.workers.run_once('gpu')
+            self.assertEqual(self.runtime.jobs.get(moss.id).status, 'failed')
+            self.assertEqual(len(self.runner.calls), before)
+            self.assertIn('MOSS sources', self.runtime.jobs.log_tail(moss.id))
+
+    def test_after_current_runs_after_runtime_reconstruction(self):
+        result = self.service.submit(self.word.id, replace(self.recipe, engines=['qwen3', 'moss'], moss_after_current=True))
+        self.runtime.shutdown()
+        self.runner = ReferenceRunner()
+        self.runtime = StudioRuntime(self.root, runner=self.runner)
+        self.service = self.runtime.generation
+        self.runtime.workers.run_once('gpu')
+        self.runtime.workers.run_once('gpu')
+        self.assertEqual([self.runtime.jobs.get(j.id).status for j in result.jobs], ['complete', 'complete'])
+        self.assertEqual(self.service.get_batch(self.word.id, result.jobs[-1].id).recipe.moss_source_batch_ids, result.batch_ids[:-1])
+
+    def test_source_deletion_blocks_active_moss_and_retains_completed_derivative_ancestors(self):
+        source = self.source()
+        original = self.service.get_batch(self.word.id, source)
+        self.use_reference_runner()
+        result = self.service.submit(self.word.id, replace(self.recipe, engines=['moss'], moss_source_batch_ids=[source]))
+        with self.assertRaises(Conflict):
+            self.service.delete_batch(self.word.id, source)
+        self.runtime.workers.run_once('gpu')
+        self.service.delete_batch(self.word.id, source)
+        for audio in original.audio:
+            self.assertEqual(self.runtime.blobs.read(audio.normalized_hash), wav(original.audio.index(audio) + 1))
+        self.service.delete_batch(self.word.id, result.jobs[0].id)
+        with self.service.store.transaction() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM audio_records').fetchone()[0], 0)
+
+    def test_moss_preview_uses_one_reference_without_publishing_training_audio(self):
+        source = self.source()
+        self.use_reference_runner()
+        recipe = replace(self.recipe, engines=['moss'], moss_source_batch_ids=[source])
+        preview = self.service.enqueue_preview(self.word.id, recipe)
+        self.runtime.workers.run_once('gpu')
+        self.assertEqual(self.runtime.jobs.get(preview.id).status, 'complete')
+        self.assertEqual(self.service.preview_audio(self.word.id, preview.id), wav(100))
+        self.assertEqual(self.service.list(self.word.id).total, 1)
+        with self.service.store.transaction() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM audio_records').fetchone()[0], 2)
+        for invalid in (replace(recipe, moss_source_batch_ids=[]), replace(recipe, moss_after_current=True)):
+            with self.assertRaises(ValidationError):
+                self.service.enqueue_preview(self.word.id, invalid)
+
+    def test_sources_with_wrong_language_or_changed_phrase_are_rejected(self):
+        source = self.source()
+        recipe = replace(self.recipe, engines=['moss'], moss_source_batch_ids=[source])
+        with self.assertRaises(ValidationError):
+            self.service.submit(self.word.id, replace(recipe, language='fr', english_accent='mixed'))
+        with self.service.store.transaction() as db:
+            db.execute('UPDATE wakewords SET phrase=? WHERE id=?', ('Changed phrase', self.word.id))
+        with self.assertRaises(ValidationError):
+            self.service.submit(self.word.id, recipe)

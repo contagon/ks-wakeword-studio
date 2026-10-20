@@ -1,10 +1,13 @@
 """Workspace-scoped, canonical-deduplicated direct-provider cloning sources."""
 import json
 import math
+import os
 import re
 from itertools import zip_longest
+from pathlib import Path
 
-from studio.models import GenerationSource, Page, ValidationError
+from studio.models import Conflict, GenerationSource, Page, ValidationError
+from studio.storage import open_directory
 
 DIRECT_PROVIDERS = frozenset(('omnivoice', 'qwen3', 'piper'))
 
@@ -70,3 +73,54 @@ def list_sources(service, word_id, language, offset=0, limit=50):
                                     r['sample_count'], r['created_at'])
                    for r in rows if eligible(r, word['phrase'], language) and r['sample_count'] > 0]
         return Page(sources[offset:offset + limit], len(sources), offset, limit)
+
+
+def materialize_references(service, job, recipe, phrase, required, *, cancelled=lambda: False):
+    with service.store.transaction() as db:
+        pool = reference_pool(service, db, job.word_id, phrase, recipe, required)
+    root = service.store.scoped_directory('jobs', job.id) / 'generation' / 'references'
+    manifest = root / 'references.jsonl'
+    entries = []
+    with open_directory(root) as directory:
+        for index, row in enumerate(pool):
+            if index % 100 == 0 and cancelled():
+                raise Conflict('Generation cancelled')
+            name = f'{index:08d}.wav'
+            data = service.blobs.read(row['normalized_hash'])
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+            with os.fdopen(fd, 'wb') as output:
+                output.write(data)
+            entries.append({'audio_id': row['id'], 'path': str(root / name),
+                            'normalized_hash': row['normalized_hash'], 'family_id': row['family_id']})
+        fd = os.open('references.jsonl', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=directory)
+        with os.fdopen(fd, 'w') as output:
+            for entry in entries:
+                output.write(json.dumps(entry) + '\n')
+    return manifest, pool
+
+
+def output_parents(output, approved, count):
+    try:
+        with open_directory(output) as directory:
+            fd = os.open('.generation_manifest.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                         dir_fd=directory)
+            with os.fdopen(fd, 'rb') as source:
+                import stat
+                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                    raise ValidationError('Unsafe MOSS output manifest')
+                limit = min(64 * 1024 * 1024, count * 512 + 65536)
+                encoded = source.read(limit + 1)
+            if len(encoded) > limit:
+                raise ValidationError('MOSS output manifest too large')
+            manifest = json.loads(encoded)
+            names = {name for name in os.listdir(directory) if name.lower().endswith('.wav')}
+        mapping = manifest.get('source_audio_ids') if isinstance(manifest, dict) else None
+        expected = {f'{index}.wav' for index in range(count)}
+        by_id = {row['id']: row for row in approved}
+        if (not isinstance(mapping, dict) or set(mapping) != expected or names != expected
+                or any(not isinstance(identity, str) or identity not in by_id for identity in mapping.values())):
+            raise ValidationError('Invalid MOSS output source mapping')
+        return [by_id[mapping[name]] for name in sorted(expected)]
+    except (OSError, ValueError, UnicodeError, RecursionError) as error:
+        raise ValidationError('Invalid MOSS output provenance') from error

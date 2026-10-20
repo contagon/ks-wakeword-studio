@@ -196,7 +196,7 @@ class GenerationTests(unittest.TestCase):
             self.service.save_recipe(self.word.id, replace(self.recipe, language='fi', english_accent='mixed', engines=['qwen3']))
 
     def test_preview_is_one_engine_one_sample_without_recipe_or_batch_side_effects(self):
-        job = self.service.enqueue_preview(self.word.id, replace(self.recipe, engines=['moss']))
+        job = self.service.enqueue_preview(self.word.id, replace(self.recipe, engines=['qwen3']))
         self.assertEqual(job.kind, 'preview')
         self.assertTrue(self.runtime.workers.run_once('gpu'))
         self.assertEqual(self.runtime.jobs.get(job.id).status, 'complete')
@@ -204,7 +204,7 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(self.service.list(self.word.id).total, 0)
         self.assertEqual(self.service.get_recipe(self.word.id), self.recipe)
         self.assertIn('--samples=1', self.runner.calls[-1][1])
-        self.assertIn('--engines=moss', self.runner.calls[-1][1])
+        self.assertIn('--engines=qwen3', self.runner.calls[-1][1])
         with self.service.store.transaction() as db:
             self.assertEqual(db.execute('SELECT count(*) FROM audio_records').fetchone()[0], 0)
         with self.assertRaises(NotFound):
@@ -213,7 +213,7 @@ class GenerationTests(unittest.TestCase):
     def test_preview_must_choose_exactly_one_engine_and_audio_waits_for_completion(self):
         with self.assertRaises(ValidationError):
             self.service.enqueue_preview(self.word.id, replace(self.recipe, engines=['moss', 'qwen3']))
-        job = self.service.enqueue_preview(self.word.id, replace(self.recipe, engines=['moss']))
+        job = self.service.enqueue_preview(self.word.id, replace(self.recipe, engines=['qwen3']))
         with self.assertRaises(NotFound):
             self.service.preview_audio(self.word.id, job.id)
 
