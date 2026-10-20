@@ -19,10 +19,14 @@ let delayPage = false;
 let resolvePage: ((response: Response) => void) | undefined;
 let newWorkspace = false;
 let deleted = false;
+let manySources = false;
+let delaySources = false;
+let resolveSources: ((response: Response) => void) | undefined;
 function host() { return { components: { ArtificialPage }, setup() { workspace = createWorkspace(useStudioRoutes()); provide(workspaceKey, workspace); queue = createJobQueue(); provide(jobQueueKey, queue); onMounted(() => { void workspace.load(); }); }, template: "<ArtificialPage />" }; }
 
 beforeEach(() => {
   delayRecipeSave = false; resolveRecipeSave = undefined; manyBatches = false; delayPage = false; resolvePage = undefined; newWorkspace = false; deleted = false;
+  manySources = false; delaySources = false; resolveSources = undefined;
   history.replaceState(null, "", "#/artificial?word=a");
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://localhost"); const path = url.pathname;
@@ -34,6 +38,20 @@ beforeEach(() => {
     if (path.match(/\/wakewords\/[ab]$/)) return json(words.find(word => path.endsWith(word.id)));
     if (path.endsWith("/queue")) return newWorkspace ? new Promise<Response>(() => {}) : json({ items: [], total: 0, offset: 0, limit: 1 }); if (path.endsWith("/models")) return json({ items: [], total: 0, offset: 0, limit: 1 }); if (path === "/api/studio/schedules") return json([]);
     if (path === "/api/studio/generation/catalog") return json([{ language: "en", name: "English", accent_applies: true, english_accents: [{ code: "us", label: "US" }], engines: { hybrid: ["omnivoice", "qwen3", "moss", "piper"], modern: ["omnivoice", "qwen3", "moss"], piper: ["piper"] } }, { language: "fr", name: "French", accent_applies: false, english_accents: [], engines: { hybrid: ["omnivoice", "qwen3", "moss"], modern: ["omnivoice", "qwen3", "moss"], piper: [] } }]);
+    if (path.endsWith('/generation/sources')) {
+      if (delaySources && path.includes('/a/')) return new Promise<Response>(resolve => { resolveSources = resolve; });
+      const offset = Number(url.searchParams.get('offset') ?? 0);
+      const sources = manySources ? Array.from({ length: 60 }, (_, i) => ({ id: `source-${i}`, phrase: 'Hey Cedar', language: 'en', providers: ['qwen3'], sample_count: 20, created_at: '' }))
+        : [{ id: 'ready', phrase: 'Hey Cedar', language: 'en', providers: ['qwen3'], sample_count: 20, created_at: '' }, { id: 'source-omni', phrase: 'Hey Cedar', language: 'en', providers: ['omnivoice'], sample_count: 20, created_at: '' }];
+      return json({ items: path.includes('/a/') ? sources.slice(offset, offset + 50) : [], total: path.includes('/a/') ? sources.length : 0, offset, limit: 50 });
+    }
+    if (path.endsWith('/generation/submissions')) {
+      const body = JSON.parse(String(init?.body));
+      const jobs = body.engines.map((engine: string, i: number) => ({ ...job(i ? `generation-${engine}` : 'generation-queued', 'queued'),
+        payload: { phrase: 'Hey Cedar', recipe: { ...body, engines: [engine], samples: engine === 'moss' ? body.moss_samples : body.samples } } }));
+      const response = json({ id: 'submission', jobs, batch_ids: jobs.map((item: { id: string }) => item.id) }, 201);
+      return delayRecipeSave ? new Promise<Response>(resolve => { resolveRecipeSave = resolve; }) : response;
+    }
     if (path.endsWith('/generation/previews')) return json({ ...job('preview-ready', 'queued'), kind: 'preview' }, 201);
     if (path.endsWith('/jobs/preview-ready')) return json({ ...job('preview-ready', 'queued'), kind: 'preview', status: 'complete', result: { preview: true } });
     if (path.endsWith('/jobs/preview-ready/logs')) return json({ text: '' });
@@ -58,7 +76,7 @@ describe("ArtificialPage", () => {
     expect(ui.find('input[name="batch-size"]').exists()).toBe(false);
     expect(ui.text()).not.toContain('Higher batch sizes');
     await ui.get('form').trigger('submit'); await flushPromises();
-    const submitted = vi.mocked(fetch).mock.calls.find(([input, init]) => String(input).endsWith('/generation/jobs') && init?.method === 'POST');
+    const submitted = vi.mocked(fetch).mock.calls.find(([input, init]) => String(input).endsWith('/generation/submissions') && init?.method === 'POST');
     expect(JSON.parse(String(submitted?.[1]?.body))).toMatchObject({ samples: 20, batch_size: 5 });
     ui.unmount();
   });
@@ -113,8 +131,53 @@ describe("ArtificialPage", () => {
     const preview = vi.mocked(fetch).mock.calls.find(([input]) => String(input).endsWith('/generation/previews'));
     expect(JSON.parse(String(preview?.[1]?.body))).toMatchObject({ samples: 1, batch_size: 1 });
     await ui.get('form').trigger('submit'); await flushPromises();
-    const submitted = vi.mocked(fetch).mock.calls.find(([input, init]) => String(input).endsWith('/generation/jobs') && init?.method === 'POST');
+    const submitted = vi.mocked(fetch).mock.calls.find(([input, init]) => String(input).endsWith('/generation/submissions') && init?.method === 'POST');
     expect(JSON.parse(String(submitted?.[1]?.body))).toMatchObject({ samples: 50000, batch_size: 100 });
+    ui.unmount();
+  });
+  it('submits full per-provider counts and tracks all children with after-current MOSS', async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    await ui.get('[name="samples"]').setValue(20);
+    await ui.get('[name="moss-samples"]').setValue(10);
+    await ui.get('[name="moss-after-current"]').setValue(true);
+    expect(ui.text()).toContain('per provider');
+    expect((ui.get('[data-preview="moss"]').element as HTMLButtonElement).disabled).toBe(true);
+    await ui.get('form').trigger('submit'); await flushPromises();
+    const call = vi.mocked(fetch).mock.calls.find(([input]) => String(input).endsWith('/generation/submissions'));
+    expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ samples: 20, moss_samples: 10, moss_after_current: true, moss_source_batch_ids: [] });
+    expect(queue.jobs.value['generation-qwen3']).toBeDefined();
+    expect(queue.jobs.value['generation-moss']).toBeDefined();
+    const before = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/a/generation/batches')).length;
+    queue.track({ ...job('generation-qwen3', 'queued'), kind: 'generation', resource: 'gpu', status: 'complete' }); await flushPromises();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes('/a/generation/batches')).length).toBeGreaterThan(before);
+    ui.unmount();
+  });
+  it('selects multiple existing MOSS sources independently of training selection', async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    await ui.get('[name="moss-after-current"]').setValue(false); await flushPromises();
+    await ui.get('[data-source="ready"]').setValue(true);
+    await ui.get('[data-source="source-omni"]').setValue(true);
+    await ui.get('[name="moss-samples"]').setValue(2);
+    await ui.get('[data-preview="moss"]').trigger('click'); await flushPromises();
+    const call = vi.mocked(fetch).mock.calls.find(([input]) => String(input).endsWith('/generation/previews'));
+    expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ engines: ['moss'], samples: 1, moss_source_batch_ids: ['ready', 'source-omni'] });
+    expect((ui.get('[data-batch-id="ready"]').element as HTMLInputElement).checked).toBe(true);
+    ui.unmount();
+  });
+  it('preserves MOSS source selections across pages and ignores stale workspace loads', async () => {
+    manySources = true;
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    await ui.get('[name="moss-after-current"]').setValue(false); await flushPromises();
+    await ui.get('[data-source="source-0"]').setValue(true);
+    await ui.get('[data-source-picker] [data-action="next-page"]').trigger('click'); await flushPromises();
+    await ui.get('[data-source="source-55"]').setValue(true);
+    await ui.get('[data-source-picker] [data-action="previous-page"]').trigger('click'); await flushPromises();
+    expect((ui.get('[data-source="source-0"]').element as HTMLInputElement).checked).toBe(true);
+    delaySources = true;
+    await ui.get('[data-source-picker] [data-action="next-page"]').trigger('click'); await flushPromises();
+    workspace.selectedId.value = 'b'; await flushPromises();
+    resolveSources?.(json({ items: [{ id: 'stale', providers: ['qwen3'], sample_count: 20 }], total: 1, offset: 0, limit: 50 })); await flushPromises();
+    expect(ui.find('[data-source="stale"]').exists()).toBe(false);
     ui.unmount();
   });
   it('uses the workspace language before overview requests finish for a new workspace', async () => {
@@ -197,7 +260,7 @@ describe("ArtificialPage", () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     for (const engine of ['omnivoice', 'moss', 'piper']) await ui.get(`[data-engine="${engine}"]`).setValue(false);
     await ui.get('form').trigger('submit'); await flushPromises();
-    const save = vi.mocked(fetch).mock.calls.find(([input, init]) => String(input).endsWith('/generation/jobs') && init?.method === 'POST');
+    const save = vi.mocked(fetch).mock.calls.find(([input, init]) => String(input).endsWith('/generation/submissions') && init?.method === 'POST');
     expect(JSON.parse(String(save?.[1]?.body)).engines).toEqual(['qwen3']);
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
     await ui.get('[data-engine="qwen3"]').setValue(false);
@@ -227,7 +290,7 @@ describe("ArtificialPage", () => {
     await ui.get('form').trigger('submit'); await flushPromises();
     workspace.selectedId.value = "b"; await flushPromises();
     expect(resolveRecipeSave).toBeTypeOf("function"); resolveRecipeSave?.(json(recipe)); await flushPromises(); await flushPromises();
-    const generatedForB = vi.mocked(fetch).mock.calls.some(([input, init]) => String(input).endsWith("/wakewords/b/generation/jobs") && init?.method === "POST");
+    const generatedForB = vi.mocked(fetch).mock.calls.some(([input, init]) => String(input).endsWith("/wakewords/b/generation/submissions") && init?.method === "POST");
     expect(generatedForB).toBe(false);
     expect((ui.get('[data-action="generate"]').element as HTMLButtonElement).disabled).toBe(false);
     ui.unmount();
