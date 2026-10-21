@@ -8,7 +8,6 @@ build:
 
 # Start in the background, preserving the existing named data volume.
 start:
-    docker volume create ks-wakeword-studio-data > /dev/null
     docker compose up -d
 
 # Stop the Compose service without deleting containers or data.
