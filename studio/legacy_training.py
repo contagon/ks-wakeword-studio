@@ -221,9 +221,10 @@ def main(argv=None):
     dataset_path = root / 'datasets.json'
     dataset_path.write_text(json.dumps({'schema_version': 1, 'datasets': mww_datasets}))
     _run([python, cli / 'wake_word_sample_augmenter', f'--data-dir={root}', f'--split-manifest={split_path}', f'--seed={manifest["seed"]}',
+          f'--augmentation-ids={",".join(augmentation)}',
           f'--personal-dir={root / "work/personal_samples"}', f'--negative-dir={root / "work/reviewed_negatives"}',
           *[f'--{flag}={augmentation[name]}' for flag, name in
-            (('mit-rirs-16k-dir', 'mit_rirs_16k'), ('audioset-16k-dir', 'audioset_16k'), ('fma-16k-dir', 'fma_16k'), ('chime-16k-dir', 'chime_16k'))]], cwd=root, env=env)
+            (('mit-rirs-16k-dir', 'mit_rirs_16k'), ('audioset-16k-dir', 'audioset_16k'), ('fma-16k-dir', 'fma_16k'), ('chime-16k-dir', 'chime_16k')) if name in augmentation]], cwd=root, env=env)
     _run([cli / 'wake_word_sample_trainer', f'--data-dir={root}', f'--tool-data-dir={shared}', f'--dataset-manifest={dataset_path}',
           f'--artifact-slug={manifest["model_id"]}', f'--language={manifest["language"]}',
           f'--stable-model-id={manifest["model_id"]}',

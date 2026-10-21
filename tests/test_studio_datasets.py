@@ -50,6 +50,33 @@ class DatasetTests(unittest.TestCase):
         self.assertTrue(all(row.purpose == 'classifier_negative' for row in rows.values()))
         self.assertNotIn('wham', json.dumps([asdict(row) for row in rows.values()]).lower())
 
+    def test_default_selection_and_explicit_empty_survive_restart(self):
+        self.assertEqual(self.service.list(self.a, status='selected').total, 4)
+        self.service.select(self.a, [])
+        self.assertEqual(self.service.snapshot(self.a), [])
+        self.assertEqual(DatasetService(self.store, self.jobs).list(self.a, status='selected').total, 0)
+        self.assertEqual(self.service.list(self.b, status='selected').total, 4)
+        self.store.close()
+        self.store = Store.open(self.root)
+        self.jobs = JobQueue(self.store)
+        self.service = DatasetService(self.store, self.jobs)
+        self.assertEqual(self.service.list(self.a, status='selected').total, 0)
+        self.assertEqual(self.service.list(self.b, status='selected').total, 4)
+
+    def test_installed_sample_count_uses_ragged_metadata_not_shard_files(self):
+        import struct
+        archive = self.root / 'features.zip'
+        with zipfile.ZipFile(archive, 'w') as handle:
+            for split, count in [('training', 123), ('validation', 7)]:
+                handle.writestr(f'speech/{split}/type.ninja', 'ragged')
+                handle.writestr(f'speech/{split}/starts/shape.ninja', struct.pack('<Q', count))
+                handle.writestr(f'speech/{split}/starts/data.ninja', b'\0' * count * 8)
+        self.service.install_archive('speech', archive)
+        self.assertEqual(self.service.list(self.a, search='speech').items[-1].sample_count, 130)
+        self.install('no_speech')
+        row = next(row for row in self.service.list(self.a).items if row.id == 'no_speech')
+        self.assertIsNone(row.sample_count)
+
     def test_registry_scales_searches_and_paginates_200_entries(self):
         base = json.loads(Path('studio/dataset_catalog.json').read_text())[0]
         catalog = [dict(base, id=f'dataset_{i:03}', name=f'Corpus {i:03}') for i in range(200)]
@@ -63,6 +90,7 @@ class DatasetTests(unittest.TestCase):
     def test_shared_install_per_word_selection_restart_and_pinned_snapshots(self):
         self.install()
         self.service.select(self.a, ['speech'])
+        self.service.select(self.b, [])
         old = self.service.snapshot(self.a)
         self.assertEqual(self.service.snapshot(self.b), [])
         self.assertEqual(self.service.list(self.b, status='installed').total, 1)
@@ -285,7 +313,7 @@ class DatasetTests(unittest.TestCase):
                 self.assertEqual(WorkspaceService(store).get('word').phrase, 'Hello')
                 self.assertEqual(DatasetService(store, JobQueue(store)).list('word').total, 4)
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 16)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 17)
             finally:
                 store.close()
 

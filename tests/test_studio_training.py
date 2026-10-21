@@ -49,6 +49,8 @@ class TrainingTests(unittest.TestCase):
         self.runtime = StudioRuntime(self.root, runner=self.runner)
         self.word = self.runtime.workspaces.create('Hello robot', 'en', 'hello_robot')
         self.other = self.runtime.workspaces.create('Other robot', 'en', 'other_robot')
+        self.runtime.datasets.select(self.word.id, [])
+        self.runtime.datasets.select(self.other.id, [])
         self.service = self.runtime.training
 
     def tearDown(self):
@@ -259,7 +261,7 @@ class TrainingTests(unittest.TestCase):
             store = Store.open(root)
             try:
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 16)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 17)
                     self.assertEqual(db.execute('SELECT phrase FROM wakewords').fetchone()[0], 'Old')
             finally:
                 store.close()

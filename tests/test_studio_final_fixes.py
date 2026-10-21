@@ -27,13 +27,14 @@ class AugmentationTests(unittest.TestCase):
             runtime = StudioRuntime(root)
             self.addCleanup(runtime.shutdown)
             word = runtime.workspaces.create('Robot', 'en', 'robot')
+            runtime.datasets.select(word.id, [])
             observer = Store.open(root)
             self.addCleanup(observer.close)
             original = augmentation.snapshot
-            def retain(store):
+            def retain(store, selected_ids=None):
                 with observer.transaction() as db:
                     db.execute('SELECT 1')
-                return original(store)
+                return original(store, selected_ids)
             with patch.object(augmentation, 'snapshot', side_effect=retain):
                 self.assertEqual(len(runtime.training.snapshot(word.id, 'a' * 32).augmentation), 4)
 
@@ -44,6 +45,7 @@ class AugmentationTests(unittest.TestCase):
             runtime = StudioRuntime(root)
             self.addCleanup(runtime.shutdown)
             word = runtime.workspaces.create('Robot', 'en', 'robot')
+            runtime.datasets.select(word.id, [])
             first = runtime.training.snapshot(word.id, 'a' * 32)
             self.assertEqual(len(first.augmentation), 4)
             self.assertEqual(first.datasets, ())

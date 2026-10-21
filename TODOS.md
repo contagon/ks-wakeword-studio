@@ -7,18 +7,17 @@
 - [x] remove "register a fleet leader or standalone kiosks"
 
 # online datasets
-- [ ] rename to Downloaded
-- [ ] remove search bar in negative datasets
-- [ ] make all of them selected by default
-- [ ] add selectors to the augmentation datasets as well to enable/disable usage of any of them. Make them all enabled by default.
-- [ ] move low disk space warning to just under online datasets at the top.
-- [ ] Match teh negative datasets to look more like augmentation datasets in detail. one line info, next line license, final line size in gb and number of data samples
+- [x] rename to Downloaded
+- [x] remove search bar in negative datasets
+- [x] make all of them selected by default
+- [x] add selectors to the augmentation datasets as well to enable/disable usage of any of them. Make them all enabled by default.
+- [x] move low disk space warning to just under online datasets at the top.
+- [x] Match teh negative datasets to look more like augmentation datasets in detail. one line info, next line license, final line size in gb and number of data samples
 
 # artificial
 - [ ] make omnivoie / qwen be on by default
 - [ ] don't add failed datasets to the bottom.
 - [ ] move delete dataset button to the far right
-- [ ] don't include cancelled/failed datasets in the dataset list below
 
 # record
 - [ ] rename tab to Manual
@@ -50,3 +49,4 @@
 - [ ] Make all timestamps pretty and relative to browser timestamps throughout.
 - [ ] when adding somethign to the queue, don't open teh queue. Do convert the button into grayed out with a spinner on it
 - [ ] make all failed tags more prominent throughout. maybe red
+- [ ] move all save selection buttons to the far right.

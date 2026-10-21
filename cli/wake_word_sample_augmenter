@@ -25,6 +25,7 @@ parser.add_argument("--negative-dir", type=str, help="Reviewed negative WAV dir.
 parser.add_argument("--negative-output-dir", type=str, help="Reviewed negative features output dir. Default: <data-dir>/work/reviewed_negative_features", required=False)
 
 # Dataset dirs
+parser.add_argument("--augmentation-ids", type=str, default=None, help="Comma-separated enabled corpus IDs; empty disables corpus augmentation. Omit for legacy defaults.")
 parser.add_argument("--mit-rirs-16k-dir", type=str, help="MIT RIR input directory. Default: <data-dir>/training_datasets/mit_rirs_16k", required=False)
 parser.add_argument("--fma-16k-dir", type=str, help="FMA input directory. Default: <data-dir>/training_datasets/fma_16k", required=False)
 parser.add_argument("--audioset-16k-dir", type=str, help="Audioset input directory. Default: <data-dir>/training_datasets/audioset_16k", required=False)
@@ -103,14 +104,12 @@ def validate_directories(paths):
             return False
     return True
 
-required = [
-    work_dir,
-    args.input_dir,
-    args.mit_rirs_16k_dir,
-    args.chime_16k_dir,
-    args.fma_16k_dir,
-    args.audioset_16k_dir,
-]
+corpus_paths = {'mit_rirs_16k': args.mit_rirs_16k_dir, 'chime_16k': args.chime_16k_dir,
+                'fma_16k': args.fma_16k_dir, 'audioset_16k': args.audioset_16k_dir}
+selected_ids = list(corpus_paths) if args.augmentation_ids is None else (args.augmentation_ids.split(',') if args.augmentation_ids else [])
+if any(name not in corpus_paths for name in selected_ids) or len(set(selected_ids)) != len(selected_ids):
+    parser.error('Invalid augmentation corpus selection')
+required = [work_dir, args.input_dir, *[corpus_paths[name] for name in selected_ids]]
 if not validate_directories(required):
     parser.print_help()
     sys.exit(1)
@@ -151,12 +150,8 @@ from microwakeword.audio.spectrograms import SpectrogramGeneration
 
 START_TIME = datetime.now(timezone.utc).replace(microsecond=0)
 
-impulse_paths = [args.mit_rirs_16k_dir]
-background_paths = [
-    args.chime_16k_dir,
-    args.fma_16k_dir,
-    args.audioset_16k_dir,
-]
+impulse_paths = [corpus_paths['mit_rirs_16k']] if 'mit_rirs_16k' in selected_ids else []
+background_paths = [corpus_paths[name] for name in ('chime_16k', 'fma_16k', 'audioset_16k') if name in selected_ids]
 
 augmenter = Augmentation(
     augmentation_duration_s=3.2,
@@ -166,9 +161,9 @@ augmenter = Augmentation(
         "PitchShift": 0.15,
         "BandStopFilter": 0.1,
         "AddColorNoise": 0.1,
-        "AddBackgroundNoise": 0.7,
+        "AddBackgroundNoise": 0.7 if background_paths else 0,
         "Gain": 0.8,
-        "RIR": 0.7,
+        "RIR": 0.7 if impulse_paths else 0,
     },
     impulse_paths=impulse_paths,
     background_paths=background_paths,

@@ -83,7 +83,9 @@ class TrainingService:
             if db.execute('SELECT 1 FROM wakewords WHERE id=?', (word_id,)).fetchone() is None:
                 raise NotFound('Workspace not found')
         from studio.augmentation import snapshot
-        augmentation = snapshot(self.store)
+        from studio.augmentation_datasets import AugmentationDatasetService
+        selected_augmentation = AugmentationDatasetService(self.store, self.jobs).selection(word_id)
+        augmentation = snapshot(self.store, selected_augmentation)
         # Hold the Store lock across the dataset-service snapshot and transaction;
         # use one SQLite transaction so other processes cannot edit selections.
         with self.store.transaction() as db:
@@ -183,7 +185,8 @@ class TrainingService:
                 or self.jobs.get(job.id).status != 'running' or job.kind != 'train'):
             raise Conflict('Owned job context required')
         from studio.augmentation_datasets import AugmentationDatasetService
-        AugmentationDatasetService(self.store, self.jobs).require_ready()
+        AugmentationDatasetService(self.store, self.jobs).require_ready(job.word_id)
+        self.datasets.require_installed(job.word_id)
         manifest = self.snapshot(job.word_id, job.id)
         root = self.store.scoped_directory('jobs', job.id) / 'training'
         with open_directory(root):

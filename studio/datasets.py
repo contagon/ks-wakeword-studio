@@ -11,6 +11,7 @@ import json
 import os
 import re
 import stat
+import struct
 import tempfile
 import zipfile
 from dataclasses import asdict
@@ -24,6 +25,37 @@ from studio.workspaces import WorkspaceService
 
 MAX_EXTRACTED_BYTES = 500 * 1024**3
 MAX_ARCHIVE_MEMBERS = 2_000_000
+
+
+def sample_count(root: Path, adapter: str) -> int | None:
+    """Read mmap-ninja's sample-index shape, never count feature shard files."""
+    try:
+        if adapter == 'wav':
+            return sum(1 for path in root.rglob('*.wav') if path.is_file())
+        if adapter != 'mww_mmap':
+            return None
+        roots = set()
+        for path in root.rglob('type.ninja'):
+            with path.open('rb') as handle:
+                if handle.read(7) == b'ragged':
+                    roots.add(path.parent)
+        # Ragged shapes can themselves be ragged: only count top-level corpora.
+        corpora = [path for path in roots if not any(parent in roots for parent in path.parents)]
+        if not corpora:
+            return None
+        total = 0
+        for path in corpora:
+            with (path / 'starts/shape.ninja').open('rb') as handle:
+                shape = handle.read(9)
+            if len(shape) != 8:
+                return None
+            count = struct.unpack('<Q', shape)[0]
+            if (path / 'starts/data.ninja').stat().st_size != count * 8:
+                return None
+            total += count
+        return total
+    except (OSError, ValueError, struct.error):
+        return None
 
 
 def read_dataset_manifest(path: Path) -> list[DatasetInput]:
@@ -87,6 +119,12 @@ class DatasetService:
             raise NotFound('Dataset not found')
         return self.catalog[dataset_id]
 
+    def _selected(self, db, word_id):
+        row = db.execute("SELECT dataset_ids FROM studio_dataset_preferences WHERE word_id=? AND kind='negative'", (word_id,)).fetchone()
+        if row:
+            return set(json.loads(row[0]))
+        return set(self.catalog)
+
     def list(self, word_id: str, search: str = '', status: str | None = None,
              offset: int = 0, limit: int = 50) -> Page[Dataset]:
         WorkspaceService(self.store).get(word_id)
@@ -95,7 +133,7 @@ class DatasetService:
                 status not in (None, 'available', 'installed', 'queued', 'running', 'failed', 'selected')):
             raise ValidationError('Invalid dataset query')
         with self.store.transaction() as db:
-            selected = {r[0] for r in db.execute('SELECT dataset_id FROM studio_dataset_selections WHERE word_id=?', (word_id,))}
+            selected = self._selected(db, word_id)
             installs = {r['dataset_id']: json.loads(r['manifest_json']) for r in db.execute('SELECT * FROM studio_dataset_installations')}
             latest = {}
             for job in db.execute("SELECT id,payload,status FROM studio_jobs WHERE kind='download' ORDER BY created_at,rowid"):
@@ -114,7 +152,8 @@ class DatasetService:
                                   installed_bytes=install['installed_bytes'] if install else None,
                                   fingerprint=install['input']['fingerprint'] if install else None,
                                   selected=key in selected, status=state, job_id=job['id'] if job else None,
-                                  error_code='download_failed' if state == 'failed' else None))
+                                  error_code='download_failed' if state == 'failed' else None,
+                                  sample_count=(install.get('sample_count') if 'sample_count' in install else sample_count(Path(install['input']['path']), entry['adapter'])) if install else None))
         return Page(result[offset:offset + limit], len(result), offset, limit)
 
     def select(self, word_id: str, dataset_ids: list[str]) -> None:
@@ -126,6 +165,8 @@ class DatasetService:
         with self.store.transaction() as db:
             db.execute('DELETE FROM studio_dataset_selections WHERE word_id=?', (word_id,))
             db.executemany('INSERT INTO studio_dataset_selections VALUES (?,?)', [(word_id, key) for key in dataset_ids])
+            db.execute("INSERT INTO studio_dataset_preferences VALUES (?, 'negative', ?) ON CONFLICT(word_id,kind) DO UPDATE SET dataset_ids=excluded.dataset_ids",
+                       (word_id, json.dumps(dataset_ids)))
 
     def download(self, dataset_id: str) -> Job:
         self._entry(dataset_id)
@@ -220,7 +261,8 @@ class DatasetService:
                 destination = root / 'versions' / dataset_id / fingerprint
                 relative = content.relative_to(stage)
                 value = DatasetInput(dataset_id, str(destination / relative), entry['representation'], entry['split'], entry['adapter'], fingerprint)
-                manifest = json.dumps({'input': asdict(value), 'installed_bytes': size, 'catalog': entry}, sort_keys=True)
+                manifest = json.dumps({'input': asdict(value), 'installed_bytes': size, 'catalog': entry,
+                                       'sample_count': sample_count(content, entry['adapter'])}, sort_keys=True)
                 with (stage / '.studio-installation.json').open('x') as handle:
                     handle.write(manifest + '\n')
                     handle.flush()
@@ -246,18 +288,28 @@ class DatasetService:
             except (zipfile.BadZipFile, OSError, RuntimeError) as exc:
                 raise ValidationError('Invalid dataset archive') from exc
 
+    def require_installed(self, word_id: str) -> None:
+        WorkspaceService(self.store).get(word_id)
+        with self.store.transaction() as db:
+            installed = {row[0] for row in db.execute('SELECT dataset_id FROM studio_dataset_installations')}
+            missing = self._selected(db, word_id) - installed
+        if missing:
+            from studio.errors import OperationError
+            raise OperationError('negative_datasets_missing')
+
     def snapshot(self, word_id: str, *, _db=None) -> list[DatasetInput]:
         from contextlib import nullcontext
         if _db is None:
             WorkspaceService(self.store).get(word_id)
         with (self.store.transaction() if _db is None else nullcontext(_db)) as db:
-            rows = db.execute('SELECT s.dataset_id,i.manifest_json FROM studio_dataset_selections s LEFT JOIN studio_dataset_installations i ON i.dataset_id=s.dataset_id WHERE s.word_id=? ORDER BY s.dataset_id', (word_id,)).fetchall()
+            selected = self._selected(db, word_id)
+            installs = {row['dataset_id']: row['manifest_json'] for row in db.execute('SELECT dataset_id,manifest_json FROM studio_dataset_installations')}
             result = []
-            for row in rows:
-                self._entry(row['dataset_id'])
-                if row['manifest_json'] is None:
+            for key in sorted(selected):
+                self._entry(key)
+                if key not in installs:
                     raise Conflict('Selected dataset is not installed')
-                value = DatasetInput(**json.loads(row['manifest_json'])['input'])
+                value = DatasetInput(**json.loads(installs[key])['input'])
                 mww_dataset_features([value])
                 if not Path(value.path).exists():
                     raise Conflict('Selected dataset installation is missing')

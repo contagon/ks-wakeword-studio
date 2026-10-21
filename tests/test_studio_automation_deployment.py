@@ -13,6 +13,7 @@ def prepared(tmp_path):
     augmentation_fixture(tmp_path)
     runtime = StudioRuntime(tmp_path, runner=VersionedTrainingRunner())
     word = runtime.workspaces.create('Hello robot', 'en', 'hello_robot')
+    runtime.datasets.select(word.id, [])
     runtime.samples.import_audio(word.id, 'positive', io.BytesIO(wav(1)))
     yield runtime, word
     runtime.shutdown()

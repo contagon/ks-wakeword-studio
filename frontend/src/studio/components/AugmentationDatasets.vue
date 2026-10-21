@@ -1,24 +1,44 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { studioApi } from '../api';
 import { isActiveJob, useJobQueue } from '../jobs';
 import { publicError } from '../errors';
 import type { AugmentationCatalog, AugmentationDataset, DownloadJob } from '../types';
+import { useWorkspace } from '../workspace';
+import { datasetBytes, datasetSamples } from '../datasetFormat';
 
+const emit = defineEmits<{ catalog: [value: AugmentationCatalog] }>();
+const workspace = useWorkspace();
+const activeId = computed(() => workspace.selectedId.value);
 const queue = useJobQueue();
 const catalog = ref<AugmentationCatalog | null>(null);
+const selected = ref(new Set<string>());
+const saving = ref(false);
 const error = ref('');
 const loading = ref(false);
 const starting = ref(new Set<string>());
 let request: AbortController | undefined;
+let saveRequest: AbortController | undefined;
 const mutations = new Set<AbortController>();
 let disposed = false;
 
-async function load(): Promise<void> {
+function updateCatalog(next: AugmentationCatalog): void { catalog.value = next; emit('catalog', next); }
+async function load(preserveSelection = true): Promise<void> {
   request?.abort(); const controller = new AbortController(); request = controller; loading.value = true;
-  try { const next = await studioApi.augmentationDatasets(controller.signal); if (!controller.signal.aborted) { catalog.value = next; error.value = ''; } }
+  const id = activeId.value;
+  try { const next = await (id ? studioApi.wakewordAugmentationDatasets(id, controller.signal) : studioApi.augmentationDatasets(controller.signal)); if (!controller.signal.aborted && id === activeId.value) { updateCatalog(next); if (!preserveSelection) selected.value = new Set(next.items.filter(row => row.selected).map(row => row.id)); error.value = ''; } }
   catch (cause) { if (!controller.signal.aborted) error.value = cause instanceof Error ? cause.message : 'Unable to load augmentation datasets.'; }
   finally { if (!controller.signal.aborted) loading.value = false; }
+}
+function toggle(id: string, checked: boolean): void { const next = new Set(selected.value); checked ? next.add(id) : next.delete(id); selected.value = next; }
+async function save(): Promise<void> {
+  const id = activeId.value; if (!id || saving.value) return;
+  saveRequest?.abort(); const controller = new AbortController(); saveRequest = controller; saving.value = true; error.value = '';
+  try {
+    const next = await studioApi.selectAugmentationDatasets(id, [...selected.value].sort(), controller.signal);
+    if (!controller.signal.aborted && id === activeId.value) updateCatalog(next);
+  } catch (cause) { if (!controller.signal.aborted) error.value = cause instanceof Error ? cause.message : 'Augmentation selection was not saved.'; }
+  finally { if (!controller.signal.aborted) saving.value = false; }
 }
 function latest(row: AugmentationDataset): DownloadJob | undefined {
   const newest = Object.values(queue.jobs.value).filter((job): job is DownloadJob => job.kind === 'download' && job.payload.augmentation_id === row.id)
@@ -41,7 +61,6 @@ function failure(row: AugmentationDataset): string {
 }
 function jobId(row: AugmentationDataset): string | null { return latest(row)?.id ?? row.job_id; }
 function busy(row: AugmentationDataset): boolean { return starting.value.has(row.id) || ['queued', 'running', 'cancelling'].includes(state(row)); }
-function bytes(value: number): string { return value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(1).replace(/\.0$/, '')} GiB` : `${Math.ceil(value / 1024 ** 2)} MiB`; }
 async function download(row: AugmentationDataset): Promise<void> {
   if (busy(row)) return;
   const controller = new AbortController(); mutations.add(controller); starting.value = new Set([...starting.value, row.id]); error.value = '';
@@ -57,20 +76,18 @@ async function download(row: AugmentationDataset): Promise<void> {
 watch(() => Object.values(queue.jobs.value).filter(job => job.kind === 'download' && job.payload.augmentation_id).map(job => ({ id: job.id, active: isActiveJob(job) })), (next, previous) => {
   if (next.some(job => !job.active && previous.some(old => old.id === job.id && old.active))) void load();
 });
-onMounted(() => void load());
-onBeforeUnmount(() => { disposed = true; request?.abort(); mutations.forEach(controller => controller.abort()); });
+watch(activeId, () => { saveRequest?.abort(); saving.value = false; selected.value = new Set(); catalog.value = null; error.value = ''; void load(false); }, { immediate: true });
+onBeforeUnmount(() => { disposed = true; request?.abort(); saveRequest?.abort(); mutations.forEach(controller => controller.abort()); });
 </script>
 
 <template>
   <section data-augmentation-datasets class="studio-card mt-4">
-    <div class="studio-toolbar"><h2>Augmentation datasets</h2><button type="button" :disabled="loading" @click="load">Refresh status</button></div>
-    <p class="studio-muted mt-3">Shared across all wakewords. Download once; training automatically mixes these backgrounds and room echoes into your samples before creating model features. No per-wakeword selection is needed.</p>
-    <p v-if="catalog" class="studio-muted text-xs mt-3">{{ bytes(catalog.storage_free_bytes) }} free of {{ bytes(catalog.storage_total_bytes) }} on the data volume. Download sizes are not published; downloads, conversion, and retained training snapshots need additional space.</p>
-    <p v-if="catalog && catalog.storage_free_bytes / catalog.storage_total_bytes < 0.1" class="studio-note mt-3" role="status">Disk space is low. Free space before downloading large datasets or starting training.</p>
+    <div class="studio-toolbar"><h2>Augmentation datasets</h2><button type="button" :disabled="loading" @click="load()">Refresh status</button><button type="button" data-action="save-augmentation" class="studio-primary" :disabled="saving || loading || !activeId || !catalog" @click="save">{{ saving ? 'Saving…' : 'Save selection' }}</button></div>
+    <p class="studio-muted mt-3">Downloads are shared; select usage per wakeword. All are enabled by default. Training mixes selected backgrounds and room echoes into your samples before creating model features.</p>
     <p v-if="loading && !catalog" class="studio-muted mt-3">Checking augmentation datasets…</p>
     <p v-if="error" class="studio-note mt-3" role="alert">{{ error }}</p>
     <article v-for="row in catalog?.items ?? []" :key="row.id" :data-augmentation-id="row.id" class="studio-history mt-3">
-      <div class="studio-dataset-row"><div class="studio-dataset-copy"><strong>{{ row.name }}</strong><p class="studio-muted text-xs">{{ row.description }} · {{ row.source }}</p><p class="studio-muted text-xs">{{ row.license }}</p><p v-if="row.installed_bytes !== null" class="studio-muted text-xs">{{ bytes(row.installed_bytes) }} installed · {{ row.file_count }} WAV files</p></div>
+      <div class="studio-dataset-row"><label class="studio-checkbox-label"><input type="checkbox" :disabled="!activeId || saving" :checked="selected.has(row.id)" @change="toggle(row.id, ($event.target as HTMLInputElement).checked)"><div class="studio-dataset-copy"><strong>{{ row.name }}</strong><p class="studio-muted text-xs">{{ row.description }} · {{ row.source }}</p><p class="studio-muted text-xs">{{ datasetBytes(row.installed_bytes ?? row.download_bytes) }}{{ row.installed_bytes !== null ? ' installed' : '' }} · {{ datasetSamples(row.file_count) }}</p></div></label>
         <div class="studio-dataset-actions"><span class="studio-status" :class="`studio-status-${state(row)}`">{{ state(row) }}</span><button v-if="state(row) !== 'installed'" type="button" :disabled="busy(row)" @click="download(row)">{{ busy(row) ? 'Preparing…' : ['failed', 'cancelled', 'interrupted'].includes(state(row)) ? 'Retry download' : 'Download & prepare' }}</button><button v-if="jobId(row)" type="button" @click="queue.show(jobId(row)!)">View in queue</button></div>
       </div>
       <p v-if="failure(row)" class="studio-note text-xs mt-3" role="alert">{{ failure(row) }}</p>

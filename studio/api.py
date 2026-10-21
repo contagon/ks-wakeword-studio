@@ -247,7 +247,8 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.post('/wakewords/{word_id}/training/jobs', response_model=Job, status_code=201)
     def train(word_id: str):
         runtime.workspaces.get(word_id)
-        runtime.augmentation.require_ready()
+        runtime.augmentation.require_ready(word_id)
+        runtime.datasets.require_installed(word_id)
         return runtime.training.enqueue(word_id, 'manual')
 
     @router.get('/wakewords/{word_id}/training/runs', response_model=Page[Job])
@@ -360,6 +361,15 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.get('/augmentation/datasets')
     def augmentation_datasets():
         return runtime.augmentation.catalog()
+
+    @router.get('/wakewords/{word_id}/augmentation/datasets')
+    def wakeword_augmentation_datasets(word_id: str):
+        return runtime.augmentation.catalog(word_id)
+
+    @router.put('/wakewords/{word_id}/augmentation/datasets')
+    def select_augmentation_datasets(word_id: str, body: DatasetSelectionBody):
+        runtime.augmentation.select(word_id, body.dataset_ids)
+        return runtime.augmentation.catalog(word_id)
 
     @router.post('/augmentation/datasets/{dataset_id}/download', response_model=Job, status_code=201)
     def download_augmentation(dataset_id: str):

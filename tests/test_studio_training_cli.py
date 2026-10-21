@@ -13,6 +13,46 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class TrainingCLITests(unittest.TestCase):
+    def test_pinned_augmentation_accepts_explicit_subsets_not_missing_or_duplicate_ids(self):
+        from studio.augmentation import pinned_paths
+        from studio.models import ValidationError
+        from studio_harness import pinned_augmentation_fixture
+        with tempfile.TemporaryDirectory() as directory:
+            inputs = pinned_augmentation_fixture(Path(directory))
+            self.assertEqual(set(pinned_paths({'augmentation': inputs[1:2]})), {'audioset_16k'})
+            self.assertEqual(pinned_paths({'augmentation': []}), {})
+            for manifest in ({}, {'augmentation': [inputs[0], inputs[0]]},
+                             {'augmentation': [dict(inputs[0], id='unknown')]}):
+                with self.assertRaises(ValidationError):
+                    pinned_paths(manifest)
+
+    def test_augmenter_uses_only_explicitly_selected_paths_and_disables_empty_transforms(self):
+        import ast
+        from types import SimpleNamespace
+        source = ast.parse((REPO / 'cli/wake_word_sample_augmenter').read_text())
+        # Execute real argument/configuration code; ML imports are intentionally excluded.
+        body = source.body[:next(i for i, node in enumerate(source.body)
+                                if isinstance(node, ast.Import) and any(a.name == 'tensorflow' for a in node.names))]
+        config = source.body[next(i for i, node in enumerate(source.body)
+                                  if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'impulse_paths' for t in node.targets)):]
+        config = config[:next(i for i, node in enumerate(config)
+                             if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'split_cfg' for t in node.targets))]
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'work/wake_word_samples').mkdir(parents=True)
+            (root / 'training_datasets/chime_16k').mkdir(parents=True)
+            for selection, backgrounds in [('chime_16k', [str(root / 'training_datasets/chime_16k')]), ('', [])]:
+                with self.subTest(selection=selection), patch.object(sys, 'argv', ['augmenter', f'--data-dir={root}', f'--augmentation-ids={selection}']):
+                    namespace = {'Augmentation': lambda **kwargs: SimpleNamespace(**kwargs)}
+                    exec(compile(ast.Module(body=body, type_ignores=[]), 'augmenter-arguments', 'exec'), namespace)
+                    exec(compile(ast.Module(body=config, type_ignores=[]), 'augmenter-config', 'exec'), namespace)
+                    augmenter = namespace['augmenter']
+                    self.assertEqual(augmenter.impulse_paths, [])
+                    self.assertEqual(augmenter.background_paths, backgrounds)
+                    self.assertEqual(augmenter.augmentation_probabilities['RIR'], 0)
+                    self.assertEqual(augmenter.augmentation_probabilities['AddBackgroundNoise'], .7 if backgrounds else 0)
+
     def test_staging_separates_real_and_synthetic_positives_without_changing_splits(self):
         from studio.legacy_training import stage_inputs
         cases = (

@@ -14,18 +14,30 @@ test.beforeEach(async ({ page }) => {
 });
 test.afterEach(async ({ page }) => { expect(browserErrors.get(page)).toEqual([]); });
 
-test('Online Datasets preserves old links and shows shared augmentation readiness on Train', async ({ page, request }) => {
+test('Downloaded preserves old links and saves per-wakeword augmentation selections', async ({ page, request }) => {
   const a = await word(request, 'browser_online_datasets');
   await page.goto(`/#/negative-datasets?word=${a.id}`);
-  await expect(page.getByRole('heading', { name: 'Online Datasets', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Downloaded', exact: true })).toBeVisible();
   await expect(page.locator('nav [data-page="online-datasets"]')).toHaveAttribute('aria-current', 'page');
   const augmentation = page.locator('[data-augmentation-datasets]');
   await expect(augmentation.locator('article')).toHaveCount(4);
-  await expect(augmentation).toContainText('automatically');
-  await expect(augmentation.locator('input[type="checkbox"]')).toHaveCount(0);
+  await expect(page.locator('input[type="search"]')).toHaveCount(0);
+  await expect(augmentation).toContainText('per wakeword');
+  await expect(augmentation.locator('input[type="checkbox"]')).toHaveCount(4);
+  for (const checkbox of await page.locator('[data-dataset-id], [data-augmentation-id] input[type="checkbox"]').all()) await expect(checkbox).toBeChecked();
+  await augmentation.locator('[data-augmentation-id="fma_16k"] input').uncheck();
+  await augmentation.locator('[data-action="save-augmentation"]').click();
+  await expect(augmentation.locator('[data-action="save-augmentation"]')).toBeEnabled();
+  await page.reload();
+  await expect(augmentation.locator('[data-augmentation-id="fma_16k"] input')).not.toBeChecked();
   await expect(augmentation.locator('.studio-status')).toHaveText(['installed', 'installed', 'installed', 'installed']);
   await page.goto(`/#/train?word=${a.id}`);
-  await expect(page.locator('[data-training-prerequisites]')).toContainText('All four augmentation datasets are installed');
+  await expect(page.locator('[data-training-prerequisites]')).toContainText('All selected augmentation datasets are installed');
+  await expect(page.locator('[data-missing-negative-datasets]')).toBeVisible();
+  await expect(page.locator('[data-action="start-training"]')).toBeDisabled();
+  expect((await request.put(`/api/studio/wakewords/${a.id}/datasets`, { data: { dataset_ids: [] } })).ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.locator('[data-missing-negative-datasets]')).toHaveCount(0);
   await expect(page.locator('[data-action="start-training"]')).toBeEnabled();
   await page.locator('[data-training-prerequisites] a').click();
   await expect(page).toHaveURL(new RegExp(`online-datasets\\?word=${a.id}`));
@@ -104,7 +116,7 @@ test('real kiosk collection, keyboard labels, focus suppression and workspace is
   await expect(page.locator('[data-progress]')).toContainText('1 pending');
 });
 
-test('200-entry real catalog pagination, search, selection and server error', async ({ page, request }) => {
+test('200-entry real catalog pagination, filtering, selection and server error', async ({ page, request }) => {
   const a = await word(request, 'catalog_a');
   await page.goto(`/#/negative-datasets?word=${a.id}`);
   await expect(page.locator('[data-dataset-id]')).toHaveCount(50);
@@ -114,13 +126,12 @@ test('200-entry real catalog pagination, search, selection and server error', as
     if (offset < 150) await page.getByRole('button', { name: 'Next', exact: true }).click();
   }
   await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
-  await page.getByRole('searchbox').fill('Corpus 199');
-  await expect(page.locator('[data-dataset-id]')).toHaveCount(1);
-  await page.locator('[data-dataset-id="dataset_199"]').check();
-  await page.getByRole('button', { name: 'Save selection' }).click();
-  await expect.poll(async () => (await (await request.get(`/api/studio/wakewords/${a.id}/datasets?status=selected`)).json()).total).toBe(1);
-  await page.getByRole('searchbox').fill('no such corpus');
-  await expect(page.getByText('No catalog datasets match these filters.')).toBeVisible();
+  await expect(page.getByRole('searchbox')).toHaveCount(0);
+  await page.locator('[data-dataset-id="dataset_199"]').uncheck();
+  await page.locator('[data-action="save-datasets"]').click();
+  await expect.poll(async () => (await (await request.get(`/api/studio/wakewords/${a.id}/datasets?status=selected`)).json()).total).toBe(199);
+  await expect(page.locator('[name="dataset-status"]')).toHaveCount(0);
+  await expect(page.getByText('CC-BY')).toHaveCount(0);
   // Exercise a genuine FastAPI validation response, not a mocked UI endpoint.
   await page.locator('[data-page="wakewords"]').click();
   await page.locator('[data-form="create"] input[name="phrase"]').fill('Duplicate');
@@ -152,6 +163,7 @@ test('compact responsive navigation is keyboard usable without horizontal overfl
 
 test('browser generates and selects a batch, queues real training and downloads its archive', async ({ page, request }) => {
   const a = await word(request, 'browser_training');
+  expect((await request.put(`/api/studio/wakewords/${a.id}/datasets`, { data: { dataset_ids: [] } })).ok()).toBeTruthy();
   await page.goto(`/#/artificial?word=${a.id}`);
   await page.locator('[name="samples"]').fill('3');
   // Batching is internal; use the current explicit-provider submission workflow.
@@ -296,6 +308,7 @@ test('workspace creation hides identity and permanent deletion blocks active job
 
 test('workspace Automate controls scoped collection and explicitly opted-in publication', async ({ page, request }) => {
   const a = await word(request, 'automate_a');
+  expect((await request.put(`/api/studio/wakewords/${a.id}/datasets`, { data: { dataset_ids: [] } })).ok()).toBeTruthy();
   const b = await word(request, 'automate_b');
   const fixtures = await (await request.get('/__test/fixtures')).json();
   const enrolled = await request.post('/api/studio/devices', { data: { url: fixtures.leader, password: fixtures.password, role: 'leader' } });

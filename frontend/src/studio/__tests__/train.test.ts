@@ -26,7 +26,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://localhost"); const path = url.pathname;
     if (path === '/api/studio/jobs') return json({ items: [], total: 0, offset: 0, limit: 100 });
-    if (path === '/api/studio/augmentation/datasets') return json(augmentationCatalog());
+    if (path.endsWith('/augmentation/datasets')) return json(augmentationCatalog());
     if (path === "/api/studio/wakewords") return json({ items: words, total: 2, offset: 0, limit: 100 }); if (path.match(/\/wakewords\/[ab]$/)) return json(words.find(word => path.endsWith(word.id)));
     if (path.endsWith("/queue")) return json({ items: [], total: 0, offset: 0, limit: 1 }); if (path.endsWith("/models") && !path.includes("training")) return json({ items: [], total: 0, offset: 0, limit: 50 });
     if (path === "/api/studio/schedules") return json([{ scope: "train:a", cron: "0 2 * * *", timezone: "UTC", enabled: true, next_run_at: "2026-11-01T02:00:00Z" }]);
@@ -57,7 +57,7 @@ describe("TrainPage", () => {
     const transport = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation((input, init) => {
       const url = new URL(String(input), 'http://localhost');
-      if (url.pathname.endsWith('/datasets')) {
+      if (url.pathname.endsWith('/datasets') && !url.pathname.includes('/augmentation/')) {
         const items = Array.from({ length: count + 1 }, (_, i) => ({ id: `negative-${i}`, name: `Negative ${i}`, selected: true, purpose: 'classifier_negative', split: i === count ? 'evaluation' : 'train', representation: 'features', adapter: 'mww_mmap' }));
         const offset = Number(url.searchParams.get('offset') ?? 0);
         return Promise.resolve(json({ items: items.slice(offset, offset + 100), total: items.length, offset, limit: 100 }));

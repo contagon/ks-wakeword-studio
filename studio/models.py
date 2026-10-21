@@ -36,6 +36,7 @@ class Dataset:
     status: str
     job_id: str | None
     error_code: str | None
+    sample_count: int | None = None
 
 
 class Conflict(Exception):

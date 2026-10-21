@@ -2,10 +2,11 @@ import type { Job } from './types';
 
 /** Never display arbitrary exception strings, remote error bodies, or result prose. */
 const messages: Record<string, string> = {
-  augmentation_missing: 'Required augmentation datasets are missing. Open Online Datasets and download all four augmentation datasets before training.',
+  augmentation_missing: 'Selected augmentation datasets are missing. Open Downloaded and download the selected augmentation datasets before training.',
   augmentation_busy: 'Augmentation datasets are still being prepared. Wait for their downloads to complete before training.',
-  augmentation_invalid: 'Augmentation audio is empty, incomplete, or unsafe. Retry the download in Online Datasets; inspect private diagnostics if it persists.',
-  augmentation_repair_required: 'An existing augmentation corpus folder is incomplete or unsafe. Move that corpus folder out of training_datasets, then retry in Online Datasets. No existing files were removed.',
+  negative_datasets_missing: 'Selected negative datasets are not installed. Open Downloaded and download them, or deselect them and save, before training.',
+  augmentation_invalid: 'Augmentation audio is empty, incomplete, or unsafe. Retry the download in Downloaded; inspect private diagnostics if it persists.',
+  augmentation_repair_required: 'An existing augmentation corpus folder is incomplete or unsafe. Move that corpus folder out of training_datasets, then retry in Downloaded. No existing files were removed.',
   gpu_memory: 'Not enough GPU memory. Stop other GPU workloads or reduce the generation batch size, then retry.',
   disk_full: 'Not enough disk space. Free space on the data volume before retrying; downloads and training snapshots need extra space.',
   permission_denied: 'The server cannot access a required file or directory. Check ownership and permissions on the data volume before retrying.',

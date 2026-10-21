@@ -75,6 +75,7 @@ class SubmissionTests(unittest.TestCase):
         self.runner = FixtureRunner()
         self.runtime = StudioRuntime(self.root, runner=self.runner)
         self.word = self.runtime.workspaces.create('Hello robot', 'en', 'hello_robot')
+        self.runtime.datasets.select(self.word.id, [])
         self.other = self.runtime.workspaces.create('Other robot', 'en', 'other_robot')
         self.service = self.runtime.generation
         self.recipe = GenerationRecipe('en', 'british', 'modern', 2, 1, ['qwen3', 'omnivoice'])

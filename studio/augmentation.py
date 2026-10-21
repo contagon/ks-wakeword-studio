@@ -38,22 +38,27 @@ def tree_fingerprint(root):
     return hashlib.sha256(json.dumps(files, separators=(',', ':')).encode()).hexdigest()
 
 
-def snapshot(store):
+def snapshot(store, selected_ids=None):
+    selected = list(RESOURCES) if selected_ids is None else list(selected_ids)
+    if any(name not in RESOURCES for name in selected) or len(set(selected)) != len(selected):
+        raise ValidationError('Invalid augmentation selection')
     with open_directory(store.root) as directory:
         fd = os.open('augmentation.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600, dir_fd=directory)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
-        return _snapshot(store)
+        return _snapshot(store, selected)
     finally:
         os.close(fd)
 
 
-def _snapshot(store):
+def _snapshot(store, selected):
     result = []
     parent = store.root / 'augmentation'
     with open_directory(parent):
         pass
     for name, setup in RESOURCES.items():
+        if name not in selected:
+            continue
         source = store.root.parent / 'training_datasets' / name
         if not source.is_dir() or source.is_symlink():
             raise ValidationError(f'Missing augmentation corpus {name}; run bash cli/{setup} --data-dir={store.root.parent} before training')
@@ -86,8 +91,9 @@ def _snapshot(store):
 
 
 def pinned_paths(manifest):
-    inputs = manifest.get('augmentation', [])
-    if {item['id'] for item in inputs} != set(RESOURCES) or len(inputs) != len(RESOURCES):
+    inputs = manifest.get('augmentation')
+    if (not isinstance(inputs, list) or any(not isinstance(item, dict) or item.get('id') not in RESOURCES for item in inputs)
+            or len({item['id'] for item in inputs}) != len(inputs)):
         raise ValidationError('Missing pinned augmentation inputs; create a new execution snapshot after corpus setup')
     paths = {}
     for item in inputs:

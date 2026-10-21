@@ -12,6 +12,7 @@ from studio.augmentation import RESOURCES, tree_fingerprint
 from studio.errors import OperationError
 from studio.models import Conflict, NotFound, ValidationError
 from studio.storage import open_directory
+from studio.workspaces import WorkspaceService
 
 CATALOG = {
     'mit_rirs_16k': ('MIT room impulse responses', 'Room echoes and reverberation.', 'MIT environmental impulse responses (Hugging Face mirror)'),
@@ -74,7 +75,25 @@ class AugmentationDatasetService:
         return [row for row in db.execute("SELECT id,payload,status,result,created_at FROM studio_jobs WHERE kind='download' ORDER BY rowid")
                 if json.loads(row['payload']).get('augmentation_id') == key]
 
-    def catalog(self):
+    def selection(self, word_id):
+        WorkspaceService(self.store).get(word_id)
+        with self.store.transaction() as db:
+            row = db.execute("SELECT dataset_ids FROM studio_dataset_preferences WHERE word_id=? AND kind='augmentation'", (word_id,)).fetchone()
+        return json.loads(row[0]) if row else list(CATALOG)
+
+    def select(self, word_id, dataset_ids):
+        WorkspaceService(self.store).get(word_id)
+        if (not isinstance(dataset_ids, list) or any(not isinstance(key, str) for key in dataset_ids)
+                or len(set(dataset_ids)) != len(dataset_ids)):
+            raise ValidationError('Invalid augmentation selection')
+        for key in dataset_ids:
+            self._entry(key)
+        with self.store.transaction() as db:
+            db.execute("INSERT INTO studio_dataset_preferences VALUES (?, 'augmentation', ?) ON CONFLICT(word_id,kind) DO UPDATE SET dataset_ids=excluded.dataset_ids",
+                       (word_id, json.dumps(dataset_ids)))
+
+    def catalog(self, word_id=None):
+        selected = set(self.selection(word_id)) if word_id is not None else set(CATALOG)
         items = []
         with self.store.transaction() as db:
             latest = {key: self._attempts(db, key) for key in CATALOG}
@@ -95,21 +114,22 @@ class AugmentationDatasetService:
             elif job and job['status'] in ('failed', 'cancelled', 'interrupted') and status != 'installed':
                 status = 'failed'
             result = json.loads(job['result']) if job else {}
-            items.append(dict(id=key, name=name, description=description, source=source,
+            items.append(dict(id=key, name=name, description=description, source=source, selected=key in selected,
                               license='See source terms; individual recordings may have different licenses.',
                               status=status, installed_bytes=size, file_count=count, download_bytes=None,
                               job_id=job['id'] if job else None, job_created_at=job['created_at'] if job else None,
                               error_code=(error_code or result.get('error_code')) if status == 'failed' else None))
         storage = shutil.disk_usage(self.store.root.parent)
-        return dict(items=items, ready=all(row['status'] == 'installed' for row in items),
+        return dict(items=items, ready=all(row['status'] == 'installed' for row in items if row['selected']),
                     storage_free_bytes=storage.free, storage_total_bytes=storage.total)
 
-    def require_ready(self):
-        catalog = self.catalog()
+    def require_ready(self, word_id=None):
+        catalog = self.catalog(word_id)
         if not catalog['ready']:
-            if any(row['error_code'] == 'augmentation_repair_required' for row in catalog['items']):
+            selected = [row for row in catalog['items'] if row['selected']]
+            if any(row['error_code'] == 'augmentation_repair_required' for row in selected):
                 raise OperationError('augmentation_repair_required')
-            active = any(row['status'] in ('queued', 'running', 'cancelling') for row in catalog['items'])
+            active = any(row['status'] in ('queued', 'running', 'cancelling') for row in selected)
             raise OperationError('augmentation_busy' if active else 'augmentation_missing')
 
     def download(self, key):

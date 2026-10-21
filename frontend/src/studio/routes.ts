@@ -3,7 +3,7 @@ import { onScopeDispose, ref, watch } from "vue";
 export const pages = [
   { id: "wakewords", name: "Wakewords", group: "Workspace" },
   { id: "kiosks", name: "Kiosks", group: "Fleet" },
-  { id: "online-datasets", name: "Online Datasets", group: "Data" },
+  { id: "online-datasets", name: "Downloaded", group: "Data" },
   { id: "artificial", name: "Artificial", group: "Data" },
   { id: "record", name: "Record", group: "Data" },
   { id: "classify", name: "Classify", group: "Data" },

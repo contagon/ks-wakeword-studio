@@ -59,6 +59,8 @@ const put = <T>(path: string, body: unknown, signal?: AbortSignal) => request<T>
 
 export const studioApi = {
   augmentationDatasets: (signal?: AbortSignal) => get<AugmentationCatalog>('/augmentation/datasets', undefined, signal),
+  wakewordAugmentationDatasets: (word: string, signal?: AbortSignal) => get<AugmentationCatalog>(`${wordPath(word)}/augmentation/datasets`, undefined, signal),
+  selectAugmentationDatasets: (word: string, dataset_ids: string[], signal?: AbortSignal) => put<AugmentationCatalog>(`${wordPath(word)}/augmentation/datasets`, { dataset_ids }, signal),
   downloadAugmentation: (id: string, signal?: AbortSignal) => post<Job>(`/augmentation/datasets/${segment(id)}/download`, undefined, signal),
   capabilities: (signal?: AbortSignal) => get<StudioCapabilities>("/capabilities", undefined, signal),
   testingManifest: (word: string, version: string, model: string, signal?: AbortSignal) => get<unknown>(`${wordPath(word)}/models/${segment(version)}/archive/${segment(model + '.json')}`, undefined, signal),

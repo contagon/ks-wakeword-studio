@@ -65,6 +65,7 @@ def test_upgrade_preserves_training_disables_global_scrape(tmp_path):
     with runtime.jobs.store.transaction() as db:
         db.execute("UPDATE studio_jobs SET schedule_scope='scrape' WHERE id=?", (queued.id,))
         # Simulate the prior schema while retaining its existing tables.
+        db.execute('DROP TABLE studio_dataset_preferences')
         db.execute('DROP TABLE sample_capture_metadata')
         db.execute('DROP TABLE IF EXISTS automation_events')
         db.execute('DROP TABLE IF EXISTS automation_reviews')

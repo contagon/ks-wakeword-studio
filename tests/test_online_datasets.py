@@ -76,6 +76,61 @@ class OnlineDatasetTests(unittest.TestCase):
         self.assertIn('--cleanup-archives', calls[-1][0])
         self.assertEqual(json.loads((stage / 'augmentation-complete.json').read_text())['corpus'], 'chime_16k')
 
+    def test_augmentation_selection_defaults_and_empty_are_per_wakeword(self):
+        path = f'/api/studio/wakewords/{self.word.id}/augmentation/datasets'
+        response = self.client.get(path)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(all(row['selected'] for row in response.json()['items']))
+        response = self.client.put(path, json={'dataset_ids': []})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['ready'])
+        self.assertFalse(any(row['selected'] for row in self.client.get(path).json()['items']))
+        other = self.runtime.workspaces.create('Other', 'en', 'other')
+        self.assertEqual(len(self.runtime.augmentation.selection(other.id)), 4)
+        self.runtime.shutdown()
+        self.runtime = StudioRuntime(self.root, runner=self.runner)
+        self.assertEqual(self.runtime.augmentation.selection(self.word.id), [])
+
+    def test_augmentation_selection_validates_atomically(self):
+        path = f'/api/studio/wakewords/{self.word.id}/augmentation/datasets'
+        self.assertEqual(self.client.put(path, json={'dataset_ids': ['fma_16k']}).status_code, 200)
+        for ids in (['unknown'], ['fma_16k', 'fma_16k']):
+            self.assertGreaterEqual(self.client.put(path, json={'dataset_ids': ids}).status_code, 400)
+            self.assertEqual(self.runtime.augmentation.selection(self.word.id), ['fma_16k'])
+        self.assertEqual(self.client.get('/api/studio/wakewords/missing/augmentation/datasets').status_code, 404)
+
+    def test_training_ignores_disabled_missing_or_corrupt_corpora(self):
+        augmentation_fixture(self.root)
+        (self.root / 'training_datasets/fma_16k/fixture.wav').write_bytes(b'corrupt')
+        self.runtime.augmentation.select(self.word.id, ['chime_16k'])
+        self.runtime.datasets.select(self.word.id, [])
+        response = self.client.post(f'/api/studio/wakewords/{self.word.id}/training/jobs')
+        self.assertEqual(response.status_code, 201)
+        self.runtime.workers.run_once('gpu')
+        manifest = self.runtime.training.get_manifest(self.word.id, response.json()['id'])
+        self.assertEqual([item.id for item in manifest.augmentation], ['chime_16k'])
+        self.runtime.augmentation.select(self.word.id, [])
+        self.assertEqual([item.id for item in self.runtime.training.get_manifest(self.word.id, manifest.run_id).augmentation], ['chime_16k'])
+
+    def test_scheduled_training_with_no_augmentation_pins_empty_selection(self):
+        self.runtime.augmentation.select(self.word.id, [])
+        self.runtime.datasets.select(self.word.id, [])
+        job = self.runtime.training.enqueue(self.word.id, 'scheduled')
+        self.runtime.workers.run_once('gpu')
+        self.assertEqual(self.runtime.training.get_manifest(self.word.id, job.id).augmentation, ())
+
+    def test_enabled_missing_augmentation_still_blocks_training(self):
+        self.runtime.augmentation.select(self.word.id, ['chime_16k'])
+        response = self.client.post(f'/api/studio/wakewords/{self.word.id}/training/jobs')
+        self.assertEqual(response.json()['code'], 'augmentation_missing')
+
+    def test_default_selected_uninstalled_negatives_block_before_queueing(self):
+        self.runtime.augmentation.select(self.word.id, [])
+        response = self.client.post(f'/api/studio/wakewords/{self.word.id}/training/jobs')
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'negative_datasets_missing')
+        self.assertFalse(any(job.kind == 'train' for job in self.runtime.jobs.list().items))
+
     def test_mit_metadata_cannot_escape_the_download_directory(self):
         import urllib.request
         script = Path('cli/setup_mit_audio').read_text()
@@ -156,7 +211,7 @@ if [[ "$out" == "downloads/bal_train00.tar" ]]; then cp "$FIXTURE_TAR" "$out"; e
         response = self.client.post(f'/api/studio/wakewords/{self.word.id}/training/jobs')
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()['code'], 'augmentation_missing')
-        self.assertIn('Online Datasets', response.json()['detail'])
+        self.assertIn('Downloaded', response.json()['detail'])
         self.assertEqual(self.runtime.jobs.list().total, 0)
 
     def test_shared_owned_download_deduplicates_and_publishes_only_complete_audio(self):
@@ -175,7 +230,7 @@ if [[ "$out" == "downloads/bal_train00.tar" ]]; then cp "$FIXTURE_TAR" "$out"; e
         self.assertEqual(row['file_count'], 1)
         self.assertIn('fingerprint', self.runtime.jobs.get(first.id).result)
         self.assertEqual(self.runtime.datasets.list(self.word.id).total, 4)
-        self.assertEqual(self.runtime.datasets.snapshot(self.word.id), [])
+        self.assertEqual(self.runtime.datasets.list(self.word.id, status='selected').total, 4)
 
     def test_failed_partial_install_can_retry_without_exposing_raw_error(self):
         self.runner.mode = 'crash'
@@ -205,6 +260,7 @@ if [[ "$out" == "downloads/bal_train00.tar" ]]; then cp "$FIXTURE_TAR" "$out"; e
         augmentation_fixture(self.root)
         response = self.client.get('/api/studio/augmentation/datasets')
         self.assertTrue(response.json()['ready'])
+        self.runtime.datasets.select(self.word.id, [])
         self.assertEqual(self.client.post(f'/api/studio/wakewords/{self.word.id}/training/jobs').status_code, 201)
 
     def test_installed_corpora_cannot_be_reinstalled_during_training(self):
@@ -217,7 +273,7 @@ if [[ "$out" == "downloads/bal_train00.tar" ]]; then cp "$FIXTURE_TAR" "$out"; e
         job = self.runtime.training.enqueue(self.word.id, 'scheduled')
         self.runtime.workers.run_once('gpu')
         self.assertEqual(self.runtime.jobs.get(job.id).result['error_code'], 'augmentation_missing')
-        self.assertIn('Online Datasets', self.runtime.jobs.log_tail(job.id))
+        self.assertIn('Downloaded', self.runtime.jobs.log_tail(job.id))
         self.assertFalse((self.root / f'studio/jobs/{job.id}/training/run-manifest.json').exists())
 
     def test_parent_disk_and_permission_failures_have_safe_actionable_codes(self):

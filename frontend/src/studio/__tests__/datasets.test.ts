@@ -14,6 +14,7 @@ const catalog = Array.from({ length: 200 }, (_, index) => dataset(index));
 let workspace: Workspace;
 let queue: JobQueue;
 let selectedByWord: Record<string, Set<string>>;
+let augmentationByWord: Record<string, string[]>;
 let delayDatasetSave = false;
 let resolveDatasetSave: ((response: Response) => void) | undefined;
 let delayDownload = false;
@@ -23,12 +24,20 @@ function host() { return { components: { NegativeDatasetsPage }, setup() { works
 
 beforeEach(() => {
   selectedByWord = { a: new Set(["set-0"]), b: new Set(["set-1"]) };
+  augmentationByWord = { a: ['mit_rirs_16k', 'audioset_16k', 'fma_16k', 'chime_16k'], b: ['mit_rirs_16k', 'audioset_16k', 'fma_16k', 'chime_16k'] };
   delayDatasetSave = false; resolveDatasetSave = undefined; delayDownload = false; resolveDownload = undefined;
   history.replaceState(null, "", "#/negative-datasets?word=a");
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://localhost"); const path = url.pathname;
     if (path === '/api/studio/jobs') return json({ items: [], total: 0, offset: 0, limit: 100 });
     if (path === '/api/studio/augmentation/datasets') return json(augmentationCatalog(false));
+    const augmentationMatch = path.match(/^\/api\/studio\/wakewords\/([ab])\/augmentation\/datasets$/);
+    if (augmentationMatch) {
+      const id = augmentationMatch[1];
+      if (init?.method === 'PUT') augmentationByWord[id] = JSON.parse(String(init.body)).dataset_ids;
+      const catalog = augmentationCatalog(false);
+      return json({ ...catalog, items: catalog.items.map(row => ({ ...row, selected: augmentationByWord[id].includes(row.id) })) });
+    }
     if (path === '/api/studio/augmentation/datasets/mit_rirs_16k/download') return json({ id: 'aug-1', kind: 'download', word_id: null, resource: 'download', payload: { augmentation_id: 'mit_rirs_16k' }, status: 'queued', created_at: '', started_at: null, finished_at: null, result: {} }, 201);
     if (path === "/api/studio/wakewords") return json({ items: words, total: 2, offset: 0, limit: 100 });
     if (path.match(/\/wakewords\/[ab]$/)) return json(words.find(word => path.endsWith(word.id)));
@@ -82,11 +91,13 @@ describe("NegativeDatasetsPage", () => {
   });
   it('offers shared augmentation downloads separately from per-word classifier selection', async () => {
     const ui = mount(host()); await flushPromises();
-    expect(ui.get('h1').text()).toBe('Online Datasets');
+    expect(ui.get('h1').text()).toBe('Downloaded');
     const augmentation = ui.get('[data-augmentation-datasets]');
-    expect(augmentation.text()).toContain('automatically');
-    expect(augmentation.text()).toContain('100 GiB');
-    expect(augmentation.find('input[type="checkbox"]').exists()).toBe(false);
+    expect(augmentation.text()).toContain('per wakeword');
+    expect(augmentation.text()).not.toContain('free of');
+    expect(augmentation.text()).not.toContain('See source terms');
+    expect(augmentation.findAll('input[type="checkbox"]')).toHaveLength(4);
+    expect(augmentation.findAll('input[type="checkbox"]').every(input => (input.element as HTMLInputElement).checked)).toBe(true);
     await augmentation.get('[data-augmentation-id="mit_rirs_16k"] button').trigger('click'); await flushPromises();
     expect(queue.jobs.value['aug-1']?.word_id).toBeNull();
     expect(augmentation.get('[data-augmentation-id="mit_rirs_16k"]').text()).toContain('queued');
@@ -107,19 +118,78 @@ describe("NegativeDatasetsPage", () => {
     expect((ui.get('[data-dataset-id="set-4"]').element as HTMLInputElement).checked).toBe(true);
     ui.unmount();
   });
-  it("searches, filters, paginates a 200-entry real catalog, and exposes install state/progress and provenance", async () => {
+  it("paginates all datasets without search, state filter, or license lines", async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
-    expect(ui.text()).toContain("1–50 of 200"); expect(ui.text()).toContain("Corpus 0"); expect(ui.text()).toContain("Example source"); expect(ui.text()).toContain("CC-BY");
+    expect(ui.text()).toContain("1–50 of 200"); expect(ui.text()).toContain("Corpus 0"); expect(ui.text()).toContain("Example source"); expect(ui.text()).not.toContain("CC-BY");
     expect(ui.find('[data-oww-compatibility]').exists()).toBe(false);
     expect(ui.get('input[data-dataset-id="set-0"]').element.closest('label')?.classList.contains('studio-checkbox-label')).toBe(true);
+    expect(ui.find('select[name=dataset-status]').exists()).toBe(false);
+    expect(ui.get('[data-action="view-dataset-job"]').text()).toContain('View in queue');
     await ui.get('[data-action="next-page"]').trigger("click"); await flushPromises();
     expect(ui.text()).toContain("51–100 of 200"); expect(ui.text()).toContain("Corpus 50");
-    await ui.get("input[name=dataset-search]").setValue("speech"); await flushPromises();
-    expect(ui.text()).toContain("Corpus 150"); expect(ui.find('.studio-pagination').exists()).toBe(false);
-    await ui.get("input[name=dataset-search]").setValue(""); await flushPromises();
-    await ui.get("select[name=dataset-status]").setValue("running"); await flushPromises();
-    expect(ui.text()).not.toContain("Corpus 150"); expect(ui.text()).toContain("Corpus 2"); expect(ui.find('[data-job-id]').exists()).toBe(false);
-    expect(ui.get('[data-action="view-dataset-job"]').text()).toContain('View in queue');
+    expect(ui.find('input[type="search"]').exists()).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.some(([input]) => /\/a\/datasets\?(?!.*status=selected).*status=/.test(String(input)))).toBe(false);
+    ui.unmount();
+  });
+
+  it('saves augmentation selections per wakeword, including an explicit empty selection', async () => {
+    const ui = mount(host()); await flushPromises();
+    const inputs = () => ui.get('[data-augmentation-datasets]').findAll('input[type="checkbox"]');
+    for (const input of inputs()) await input.setValue(false);
+    await ui.get('[data-action="save-augmentation"]').trigger('click'); await flushPromises();
+    expect(inputs().every(input => !(input.element as HTMLInputElement).checked)).toBe(true);
+    workspace.selectedId.value = 'b'; await flushPromises();
+    expect(inputs().every(input => (input.element as HTMLInputElement).checked)).toBe(true);
+    workspace.selectedId.value = 'a'; await flushPromises();
+    expect(inputs().every(input => !(input.element as HTMLInputElement).checked)).toBe(true);
+    ui.unmount();
+  });
+
+  it('ignores delayed augmentation load and save responses from the previous wakeword', async () => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    let finishLoad!: (response: Response) => void;
+    let finishSave!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (String(input).endsWith('/a/augmentation/datasets')) return new Promise<Response>(resolve => {
+        if (init?.method === 'PUT') finishSave = resolve; else finishLoad = resolve;
+      });
+      return transport(input, init);
+    });
+    const ui = mount(host()); await flushPromises();
+    workspace.selectedId.value = 'b'; await flushPromises();
+    const empty = { ...augmentationCatalog(false), items: augmentationCatalog(false).items.map(row => ({ ...row, selected: false })) };
+    finishLoad(json(empty)); await flushPromises();
+    expect(ui.get('[data-augmentation-datasets] input').element).toHaveProperty('checked', true);
+    workspace.selectedId.value = 'a'; await flushPromises(); finishLoad(json(augmentationCatalog(false))); await flushPromises();
+    await ui.get('[data-augmentation-datasets] input').setValue(false);
+    await ui.get('[data-action="save-augmentation"]').trigger('click'); await flushPromises();
+    workspace.selectedId.value = 'b'; await flushPromises(); finishSave(json(empty)); await flushPromises();
+    expect(ui.get('[data-augmentation-datasets] input').element).toHaveProperty('checked', true);
+    expect(ui.get('[data-action="save-augmentation"]').element).toHaveProperty('disabled', false);
+    ui.unmount();
+  });
+
+  it('places low disk space directly below the heading, before either catalog', async () => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) => String(input).endsWith('/augmentation/datasets')
+      ? Promise.resolve(json({ ...augmentationCatalog(false), storage_free_bytes: 12_345_678_901 })) : transport(input, init));
+    const ui = mount(host()); await flushPromises();
+    const warning = ui.get('[data-disk-warning]');
+    expect(warning.text()).toContain('Disk space is low: 12.35 GB free of 536.9 GB');
+    expect(ui.get('h1').element.parentElement?.nextElementSibling).toBe(warning.element);
+    expect(warning.element.nextElementSibling?.querySelector('h2')?.textContent).toContain('Negative');
+    ui.unmount();
+  });
+
+  it('shows negative dataset details as description, then GB and sample count', async () => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/a/datasets')
+      ? Promise.resolve(json({ items: [{ ...dataset(0, true), installed_bytes: 2_000_000_000, sample_count: 1234 }], total: 1, offset: 0, limit: 50 })) : transport(input, init));
+    const ui = mount(host()); await flushPromises();
+    const row = ui.get('[data-dataset-id="set-0"]').element.closest('article')!;
+    expect([...row.querySelectorAll('.studio-dataset-copy p')].map(p => p.textContent)).toEqual([
+      'negative classifier corpus · Example source', '2 GB installed · 1,234 samples',
+    ]);
     ui.unmount();
   });
 

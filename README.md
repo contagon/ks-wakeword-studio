@@ -185,15 +185,23 @@ browser request inspection can see a submitted password.
    Piper stays visible with availability guidance when local voice files are missing;
    viewing the catalog never downloads models.
 
-### Online Datasets and training prerequisites
+### Downloaded datasets and training prerequisites
 
-**Data → Online Datasets** contains two separate resource types:
+**Data → Downloaded** contains two separate resource types:
 
 - **Negative & evaluation datasets:** downloaded once and selected independently
   for each wakeword. Evaluation-only inputs are not sampled during training.
 - **Augmentation datasets:** MIT room impulse responses, AudioSet, Free Music
-  Archive, and CHiME-Home. Download and prepare all four once; every wakeword uses
-  them automatically, without a separate selection checkbox.
+  Archive, and CHiME-Home. Download and prepare once, then select which backgrounds
+  and room echoes each wakeword uses.
+
+Both resource types default to all enabled. Use each section's **Save selection**
+button to save changes for the current wakeword, including disabling all datasets.
+Existing saved negative selections are preserved; legacy empty selections receive
+the new all-enabled default. Downloads remain shared across wakewords. Training
+requires every selected dataset to be installed: download them or deselect and save.
+Cards show source information, installed size in GB, and sample counts
+when available; unknown metadata is labeled rather than estimated.
 
 Augmentation downloads run in the global queue. Preparation initializes the shared
 training Python environment if needed, downloads the source audio, converts it to
@@ -206,13 +214,15 @@ If an existing corpus folder contains corrupt/partial audio, Studio reports
 `<data-dir>/training_datasets/`, retaining it for inspection, then retry. Studio
 does not delete or overwrite existing operator-managed corpora.
 
-Check the displayed free disk space first: source archives, conversion, and
+Check free disk space first (Studio shows the exact free space when it is low):
+source archives, conversion, and
 retained augmentation snapshots need additional space beyond the final installed
 size. Source download sizes are not published. Review each source's licensing
 terms before using its recordings.
 
-**Train** shows missing augmentation prerequisites and links back to Online
-Datasets. Once ready, starting training automatically snapshots the inputs,
+**Train** shows missing selected augmentation prerequisites and links back to
+Downloaded. Disabled augmentation corpora are neither required nor used.
+Once ready, starting training automatically snapshots the selected inputs,
 augments your real/synthetic samples with noise and reverberation, extracts audio
 features, then trains and validates the model. Original samples stay unchanged;
 augmentation datasets are not deployed to kiosks.
