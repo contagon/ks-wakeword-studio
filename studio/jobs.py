@@ -15,12 +15,15 @@ import sys
 import threading
 import time
 import uuid
+import traceback
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
 from studio.models import Conflict, Job, LoopHealth, NotFound, Page, ValidationError, WorkerHealth
 from studio.storage import open_directory
+from studio.errors import MESSAGES, child_error, failure_code
+from studio.diagnostics import ChildDiagnostics, retain
 
 RESOURCES = {'train': 'gpu', 'generation': 'gpu', 'preview': 'gpu', 'classify': 'gpu',
              'deploy': 'collection', 'scrape': 'collection', 'download': 'download'}
@@ -387,6 +390,7 @@ class ProcessRunner:
         progress_read, progress_write = os.pipe()
         os.set_blocking(progress_read, False)
         process = None
+        diagnostics = None
         opened = False
         token = uuid.uuid4().hex
         gate = ('import os,sys; fd=int(sys.argv[1]); ready=os.read(fd,1); os.close(fd); '
@@ -396,7 +400,8 @@ class ProcessRunner:
                                        cwd=cwd, env={**os.environ, 'STUDIO_JOB_TOKEN': token,
                                                      'STUDIO_PROGRESS_FD': str(progress_write)},
                                        start_new_session=True, pass_fds=(read_fd, progress_write),
-                                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            diagnostics = ChildDiagnostics(process.stdout)
             identity = {'pid': process.pid, 'start': ChildGroups().process(process.pid)[3],
                         'boot': ChildGroups().boot(), 'token': token}
             context.queue.attach_child(context.job.id, identity)
@@ -409,6 +414,8 @@ class ProcessRunner:
             # If attachment failed, EOF makes the gate exit, without executing argv.
             if process is not None and not opened:
                 process.wait()
+                if diagnostics is not None:
+                    retain(context.queue.store, context.job.id, diagnostics.finish())
             if not opened:
                 os.close(progress_read)
         pending = b''
@@ -445,13 +452,16 @@ class ProcessRunner:
                     drain()
                     if code != 0:
                         context.log(f'Child operation exited with code {code}')
-                        raise Conflict('Child command failed')
+                        output = diagnostics.finish()
+                        raise child_error(output.decode('utf-8', errors='replace'))
                     return code
                 except subprocess.TimeoutExpired:
                     continue
         finally:
             os.close(progress_read)
             context.queue.groups.stop(identity)
+            if diagnostics is not None:
+                retain(context.queue.store, context.job.id, diagnostics.finish())
 
 
 class WorkerPool:
@@ -535,10 +545,17 @@ class WorkerPool:
                     self.completion_hooks[job.kind](completed)
                 except Exception:
                     context.log('completion_hook_failed')
-        except Exception:
-            context.log(f'{job.kind} handler_failed')
+        except Exception as exc:
+            code = failure_code(exc)
             try:
-                completed = self.queue._finish(job.id, {'error': 'handler_failed'}, 'failed')
+                retain(self.queue.store, job.id, traceback.format_exc().encode())
+            except (OSError, ValidationError):
+                pass  # Reporting must not leave a failed job owning a resource.
+            context.log(f'{job.kind} handler_failed')
+            context.log(MESSAGES[code])
+            try:
+                completed = self.queue._finish(job.id, {'error': 'handler_failed', 'error_code': code,
+                                                        'message': MESSAGES[code]}, 'failed')
                 context.log(f'{job.kind} {completed.status}')
             except Conflict:
                 # The handler exited but a surviving/unknown child still owns

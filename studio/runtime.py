@@ -15,6 +15,7 @@ from studio.automation import AutomationService
 from studio.classification import ClassificationService
 from studio.models import WorkerHealth
 from studio.datasets import DatasetService
+from studio.augmentation_datasets import AugmentationDatasetService
 from studio.generation import GenerationService
 from studio.training import TrainingService
 from studio.deployment import DeploymentService
@@ -41,6 +42,7 @@ class StudioRuntime:
         self._classification = None
         self._workers: WorkerPool | None = None
         self._datasets: DatasetService | None = None
+        self._augmentation = None
         self._generation: GenerationService | None = None
         self._training: TrainingService | None = None
         self._deployment: DeploymentService | None = None
@@ -65,6 +67,7 @@ class StudioRuntime:
                 self._collection = CollectionService(store, self._samples, self._devices, clock=self.clock)
                 self._jobs = JobQueue(store, clock=self.clock, groups=self.groups)
                 self._datasets = DatasetService(store, self._jobs)
+                self._augmentation = AugmentationDatasetService(store, self._jobs)
                 self._generation = GenerationService(store, blobs, self._jobs, clock=self.clock)
                 self._training = TrainingService(store, blobs, self._jobs, self._datasets, clock=self.clock)
                 self._deployment = DeploymentService(store, self._devices, self._training, clock=self.clock)
@@ -76,7 +79,7 @@ class StudioRuntime:
                 self._workers = WorkerPool(self._jobs, clock=self.clock, runner=self.runner, schedules=self._schedules,
                                            maintenance=self._maintenance)
                 self._workers.register('scrape', 'collection', self._collect_job)
-                self._workers.register('download', 'download', self._datasets.execute)
+                self._workers.register('download', 'download', self._download_job)
                 self._workers.register('generation', 'gpu', self._generation.handle)
                 self._workers.register('preview', 'gpu', self._generation.handle_preview)
                 self._workers.register('train', 'gpu', self._train_job)
@@ -104,6 +107,16 @@ class StudioRuntime:
         if self._automation.scheduled_disabled(job):
             return {'skipped': True, 'reason': 'disabled'}
         return self._training.handle(job, context)
+
+    def _download_job(self, job, context):
+        if 'augmentation_id' in job.payload:
+            return self._augmentation.execute(job, context)
+        return self._datasets.execute(job, context)
+
+    @property
+    def augmentation(self):
+        self.startup()
+        return self._augmentation
 
     @property
     def migration(self) -> MigrationService:
@@ -237,6 +250,7 @@ class StudioRuntime:
                 self._schedules = None
                 self._workers = None
                 self._datasets = None
+                self._augmentation = None
                 self._generation = None
                 self._training = None
                 self._deployment = None

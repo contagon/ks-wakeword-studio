@@ -219,7 +219,7 @@ else
             if [ ! -f "${fname}" ] ; then
                 echo "   Downloading bal_train0${i}.tar"
                 url="${AUDIO_URL}/${rev}/${pattern}${i}.tar"
-                curl -L -s --fail "${url}" -o "${fname}" || { echo "Could not fetch ${fname} at rev ${rev}; continuing." ; continue ; }
+                curl -L -s --fail "${url}" -o "${fname}" || { echo "Could not fetch ${fname} at rev ${rev}; source download incomplete." >&2; exit 1; }
             fi
 
             tarball_filecount=$(tar -tvf "${fname}" | wc -l )

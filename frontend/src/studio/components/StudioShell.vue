@@ -95,7 +95,7 @@ onBeforeUnmount(() => {
         <KiosksPage v-else-if="current.id === 'kiosks'" />
         <AutomatePage v-else-if="current.id === 'automate'" />
         <DeployPage v-else-if="current.id === 'deploy'" />
-        <NegativeDatasetsPage v-else-if="current.id === 'negative-datasets'" />
+        <NegativeDatasetsPage v-else-if="current.id === 'online-datasets'" />
         <ArtificialPage v-else-if="current.id === 'artificial'" />
         <TrainPage v-else-if="current.id === 'train'" />
         <TestingPage v-else-if="current.id === 'testing'" />

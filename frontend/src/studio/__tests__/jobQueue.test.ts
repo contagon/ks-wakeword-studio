@@ -3,14 +3,28 @@ import { flushPromises, mount } from '@vue/test-utils';
 import TrainerApp from '../../TrainerApp.vue';
 import { fakeStudio, press } from './fakeStudio';
 import type { Job } from '../types';
+import { useDeviceRegistry } from '../devices';
 
 const job = (id: string, status: Job['status'], extra = {}): Job => ({ id, kind: 'train', resource: 'gpu', word_id: 'a', status, payload: {}, result: {}, created_at: '2026-10-19T12:00:00Z', started_at: null, finished_at: null, ...extra } as Job);
 let ui: ReturnType<typeof mount> | undefined;
 afterEach(() => { ui?.unmount(); ui = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); document.body.innerHTML = ''; });
 
+it('shows actionable failed-job guidance and the private diagnostic location without rendering raw error prose', async () => {
+  const s = fakeStudio();
+  s.db.jobs = [job('broken-moss', 'failed', { kind: 'generation', result: { error: 'handler_failed', error_code: 'gpu_memory', message: 'Authorization: Bearer private-secret' } })];
+  history.replaceState(null, '', '/#/wakewords?word=a');
+  ui = mount(TrainerApp); await flushPromises();
+  await ui.get('[data-action="open-job-queue"]').trigger('click'); await flushPromises();
+  const card = ui.get('[data-job-id="broken-moss"]');
+  expect(card.text()).toContain('GPU memory');
+  expect(card.text()).toContain('studio/jobs/broken-moss/diagnostics.log');
+  expect(card.text()).not.toContain('private-secret');
+});
+
 it('shows global compact job groups and loads logs only on expansion', async () => {
   const s = fakeStudio(); s.db.jobs = [job('run', 'running'), job('follower', 'cancelling', { kind: 'scrape', resource: 'collection', word_id: 'b', payload: { device_ids: ['kitchen', 'office'] } }), job('shared', 'queued', { kind: 'download', resource: 'download', word_id: null }), job('old', 'failed', { word_id: 'deleted-word' })];
   s.db.devices = ['kitchen', 'office'].map(id => ({ id, name: id === 'kitchen' ? 'Kitchen satellite' : 'Office satellite', url: `http://${id}`, role: 'standalone', active: true, leader_id: null, credentials_status: 'ready', profile_id: null, model_eligible: true }));
+  await useDeviceRegistry().load(true);
   history.replaceState(null, '', '/#/wakewords?word=a');
   ui = mount(TrainerApp, { attachTo: document.body }); await flushPromises();
   expect(ui.get('[data-action="open-job-queue"]').text()).toContain('3');

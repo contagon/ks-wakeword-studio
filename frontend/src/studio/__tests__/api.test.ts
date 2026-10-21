@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { readModelMetrics } from "../api";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { readModelMetrics, studioApi } from "../api";
+afterEach(() => vi.unstubAllGlobals());
+
+it('maps allowlisted operation codes without exposing arbitrary server error prose', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'augmentation_missing', detail: 'Authorization: Bearer private-secret' }), { status: 409 })));
+  await expect(studioApi.train('word')).rejects.toThrow('Online Datasets');
+  await expect(studioApi.train('word')).rejects.not.toThrow('private-secret');
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'unknown-secret', detail: 'private-secret' }), { status: 409 })));
+  await expect(studioApi.train('word')).rejects.toThrow('Refresh');
+});
 
 describe("opaque model metrics", () => {
   it("narrows only known finite calibration numbers", () => {

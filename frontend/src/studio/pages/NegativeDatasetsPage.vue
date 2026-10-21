@@ -5,6 +5,7 @@ import { useWorkspace } from "../workspace";
 import type { Dataset, Page } from "../types";
 import PaginatedTable from "../components/PaginatedTable.vue";
 import { isActiveJob, useJobQueue } from '../jobs';
+import AugmentationDatasets from '../components/AugmentationDatasets.vue';
 
 const workspace = useWorkspace();
 const queue = useJobQueue();
@@ -48,11 +49,12 @@ function bytes(value: number | null): string { return value === null ? "Size not
 </script>
 
 <template>
-  <section><div class="mb-4"><h1>Negative Datasets</h1><p class="studio-muted">Classifier-negative inputs are selected per wakeword. Augmentation backgrounds are configured separately and are not classifier datasets.</p></div>
-    <div class="studio-card"><div class="studio-toolbar"><label>Search<input v-model="search" name="dataset-search" type="search" placeholder="Search catalog"></label><label>Installation state<select v-model="status" name="dataset-status"><option value="">All states</option><option value="available">Available</option><option value="installed">Installed</option><option value="queued">Queued</option><option value="running">Running</option><option value="failed">Failed</option><option value="selected">Selected</option></select></label><button type="button" data-action="save-datasets" class="studio-primary" :disabled="saving || !activeId" @click="save">{{ saving ? "Saving…" : "Save selection" }}</button></div>
+  <section><div class="mb-4"><h1>Online Datasets</h1><p class="studio-muted">Download shared training resources. Negative and evaluation inputs are selected per wakeword; augmentation datasets are used automatically by all wakewords.</p></div>
+    <div class="studio-card"><h2>Negative &amp; evaluation datasets</h2><p class="studio-muted mb-3">Downloads are shared. Save a separate classifier selection for each wakeword.</p><div class="studio-toolbar"><label>Search<input v-model="search" name="dataset-search" type="search" placeholder="Search catalog"></label><label>Installation state<select v-model="status" name="dataset-status"><option value="">All states</option><option value="available">Available</option><option value="installed">Installed</option><option value="queued">Queued</option><option value="running">Running</option><option value="failed">Failed</option><option value="selected">Selected</option></select></label><button type="button" data-action="save-datasets" class="studio-primary" :disabled="saving || !activeId" @click="save">{{ saving ? "Saving…" : "Save selection" }}</button></div>
       <p v-if="loading" class="studio-muted mt-3">Loading catalog…</p><p v-if="error" class="studio-note mt-3" role="alert">{{ error }}</p>
       <div v-if="rows.length" class="studio-table mt-3 grid gap-3"><article v-for="dataset in rows" :key="dataset.id" class="studio-history"><div class="studio-dataset-row"><label class="studio-checkbox-label"><input :data-dataset-id="dataset.id" type="checkbox" :checked="selected.has(dataset.id)" @change="toggle(dataset.id, ($event.target as HTMLInputElement).checked)"><span class="studio-dataset-copy"><strong>{{ dataset.name }}</strong><span class="studio-muted block text-xs">{{ dataset.description }} · {{ dataset.source }} · {{ dataset.license }}</span><span class="studio-muted block text-xs">{{ dataset.representation }} / {{ dataset.adapter }} · {{ dataset.split }} · {{ bytes(dataset.installed_bytes ?? dataset.download_bytes) }}</span><span v-if="dataset.split === 'evaluation'" class="studio-note block text-xs">Evaluation-only: this dataset is not sampled as a training input.</span></span></label><div class="studio-dataset-actions"><span class="studio-status" :class="`studio-status-${dataset.status}`">{{ dataset.status }}</span><button v-if="dataset.status === 'available' || dataset.status === 'failed'" type="button" :disabled="downloading" @click="download(dataset)">Download</button><button v-if="dataset.job_id" type="button" data-action="view-dataset-job" @click="queue.show(dataset.job_id)">View in queue</button></div></div></article></div><p v-else-if="!loading" class="studio-muted mt-3">No catalog datasets match these filters.</p>
       <PaginatedTable :total="total" :offset="offset" :limit="50" :loading="loading" @page="offset = $event" />
     </div>
+    <AugmentationDatasets />
   </section>
 </template>

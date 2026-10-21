@@ -20,6 +20,7 @@ from studio.models import AutomationStatus
 from studio.storage import AUDIO_MIMES
 from studio.capture import analyze_capture
 from studio.models import CapturePreview
+from studio.errors import OperationError
 
 
 class StudioRoute(APIRoute):
@@ -29,6 +30,8 @@ class StudioRoute(APIRoute):
         async def sanitized(request: Request) -> Response:
             try:
                 return await handler(request)
+            except OperationError as exc:
+                return JSONResponse({'detail': str(exc), 'code': exc.code}, status_code=409)
             except (RequestValidationError, ValidationError):
                 # Framework validation details can echo credentials from rejected input.
                 return JSONResponse({"detail": "Invalid studio request"}, status_code=422)
@@ -243,6 +246,8 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
 
     @router.post('/wakewords/{word_id}/training/jobs', response_model=Job, status_code=201)
     def train(word_id: str):
+        runtime.workspaces.get(word_id)
+        runtime.augmentation.require_ready()
         return runtime.training.enqueue(word_id, 'manual')
 
     @router.get('/wakewords/{word_id}/training/runs', response_model=Page[Job])
@@ -351,6 +356,14 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     def select_batches(word_id: str, body: BatchSelectionBody) -> Page[Batch]:
         runtime.generation.select_batches(word_id, body.batch_ids)
         return runtime.generation.list(word_id)
+
+    @router.get('/augmentation/datasets')
+    def augmentation_datasets():
+        return runtime.augmentation.catalog()
+
+    @router.post('/augmentation/datasets/{dataset_id}/download', response_model=Job, status_code=201)
+    def download_augmentation(dataset_id: str):
+        return runtime.augmentation.download(dataset_id)
 
     @router.get('/wakewords/{word_id}/datasets', response_model=Page[Dataset])
     def datasets(word_id: str, search: str = '', status: str | None = None,

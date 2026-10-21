@@ -182,6 +182,8 @@ class TrainingService:
         if (context is None or context.queue is not self.jobs or context.job.id != job.id or job.id not in self.jobs._owners
                 or self.jobs.get(job.id).status != 'running' or job.kind != 'train'):
             raise Conflict('Owned job context required')
+        from studio.augmentation_datasets import AugmentationDatasetService
+        AugmentationDatasetService(self.store, self.jobs).require_ready()
         manifest = self.snapshot(job.word_id, job.id)
         root = self.store.scoped_directory('jobs', job.id) / 'training'
         with open_directory(root):

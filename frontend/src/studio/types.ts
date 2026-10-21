@@ -12,15 +12,15 @@ export type JobStatus = "queued" | "running" | "cancelling" | "complete" | "fail
 export type JobResource = "gpu" | "collection" | "download";
 /** Cancelled/interrupted jobs may finish with no result; handler crashes record only a code. */
 export type EmptyJobResult = { [key: string]: never };
-export interface JobFailure { error: "handler_failed" }
+export interface JobFailure { error: "handler_failed"; error_code?: string; message?: string }
 export interface TrainPayload { trigger?: "manual" | "scheduled" }
 export type TrainResult = { run_id: string; version_id: string } | { run_id: string; skipped: true };
 export interface GenerationPayload { phrase: string; recipe: GenerationRecipe }
 export interface GenerationResult { batch_id: string }
 export interface ScrapePayload { device_ids?: string[] | null }
 export interface ScrapeResult { run_id: string; status: string; new?: number; new_mapped?: number; failed?: number; unmapped?: number; evicted?: number }
-export interface DownloadPayload { dataset_id: string }
-export interface DownloadResult { dataset_id: string; fingerprint: string }
+export type DownloadPayload = { dataset_id: string; augmentation_id?: never } | { augmentation_id: string; dataset_id?: never };
+export type DownloadResult = { dataset_id: string; fingerprint: string } | { augmentation_id: string; fingerprint: string; installed_bytes: number; file_count: number };
 interface JobRecord<K extends string, R extends JobResource, P, T> { id: string; kind: K; word_id: string | null; resource: R; payload: P; status: JobStatus; created_at: string; started_at: string | null; finished_at: string | null; result: T | JobFailure | EmptyJobResult }
 export type TrainJob = JobRecord<"train", "gpu", TrainPayload, TrainResult> & { word_id: string };
 export type GenerationJob = JobRecord<"generation", "gpu", GenerationPayload, GenerationResult> & { word_id: string };
@@ -44,6 +44,8 @@ export interface Sample { id: string; word_id: string; recording_id: string | nu
 export interface CollectionCounters { listed: number; new: number; already_seen: number; unmapped: number; evicted: number; failed: number }
 export interface CollectionRun extends CollectionCounters { id: string; started_at: string; finished_at: string | null; status: string; devices: (CollectionCounters & { device_id: string; status: string; errors: string[] })[] }
 export interface Dataset { id: string; name: string; description: string; source: string; license: string; representation: string; split: string; adapter: string; purpose: string; download_bytes: number | null; installed_bytes: number | null; fingerprint: string | null; selected: boolean; status: string; job_id: string | null; error_code: string | null }
+export interface AugmentationDataset { id: string; name: string; description: string; source: string; license: string; status: string; download_bytes: number | null; installed_bytes: number | null; file_count: number | null; job_id: string | null; job_created_at?: string | null; error_code: string | null }
+export interface AugmentationCatalog { items: AugmentationDataset[]; ready: boolean; storage_free_bytes: number; storage_total_bytes: number }
 export type TtsMode = "hybrid" | "modern" | "piper";
 export interface GenerationRecipe { language: string; english_accent: string; tts_mode: TtsMode; samples: number; batch_size: number; engines?: string[] | null; moss_source_batch_ids?: string[]; moss_after_current?: boolean; moss_samples?: number | null }
 export interface GenerationSubmission { id: string; jobs: Job[]; batch_ids: string[] }

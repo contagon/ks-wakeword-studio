@@ -5,6 +5,7 @@ import NegativeDatasetsPage from "../pages/NegativeDatasetsPage.vue";
 import { createWorkspace, workspaceKey, type Workspace } from "../workspace";
 import { useStudioRoutes } from "../routes";
 import { createJobQueue, jobQueueKey, type JobQueue } from '../jobs';
+import { augmentationCatalog } from './augmentationFixture';
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 const words = [{ id: "a", phrase: "Hey Cedar", language: "en", model_id: "cedar", created_at: "", updated_at: "" }, { id: "b", phrase: "Okay Maple", language: "en", model_id: "maple", created_at: "", updated_at: "" }];
@@ -27,6 +28,8 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://localhost"); const path = url.pathname;
     if (path === '/api/studio/jobs') return json({ items: [], total: 0, offset: 0, limit: 100 });
+    if (path === '/api/studio/augmentation/datasets') return json(augmentationCatalog(false));
+    if (path === '/api/studio/augmentation/datasets/mit_rirs_16k/download') return json({ id: 'aug-1', kind: 'download', word_id: null, resource: 'download', payload: { augmentation_id: 'mit_rirs_16k' }, status: 'queued', created_at: '', started_at: null, finished_at: null, result: {} }, 201);
     if (path === "/api/studio/wakewords") return json({ items: words, total: 2, offset: 0, limit: 100 });
     if (path.match(/\/wakewords\/[ab]$/)) return json(words.find(word => path.endsWith(word.id)));
     if (path.endsWith("/queue")) return json({ items: [], total: 0, offset: 0, limit: 1 });
@@ -49,6 +52,50 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("NegativeDatasetsPage", () => {
+  it('does not let an older local failure override the catalog current attempt', async () => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (String(input).endsWith('/augmentation/datasets')) {
+        const catalog = augmentationCatalog(false);
+        return Promise.resolve(json({ ...catalog, items: catalog.items.map(row => row.id === 'mit_rirs_16k' ? { ...row, status: 'running', job_id: 'current' } : row) }));
+      }
+      return transport(input, init);
+    });
+    const ui = mount(host()); await flushPromises();
+    queue.track({ id: 'older', kind: 'download', resource: 'download', word_id: null, payload: { augmentation_id: 'mit_rirs_16k' }, created_at: '2026-10-20T00:00:00Z', started_at: null, finished_at: '', status: 'failed', result: { error: 'handler_failed', error_code: 'disk_full' } });
+    await flushPromises();
+    const row = ui.get('[data-augmentation-id="mit_rirs_16k"]');
+    expect(row.get('.studio-status').text()).toBe('running');
+    expect(row.text()).not.toContain('disk space');
+    ui.unmount();
+  });
+  it('uses the newest augmentation attempt even when older history arrives later', async () => {
+    const ui = mount(host()); await flushPromises();
+    const base = { kind: 'download' as const, resource: 'download' as const, word_id: null, payload: { augmentation_id: 'mit_rirs_16k' }, started_at: null, finished_at: null };
+    queue.track({ ...base, id: 'new', status: 'running', created_at: '2026-10-21T10:00:00Z', result: {} });
+    queue.track({ ...base, id: 'old', status: 'failed', created_at: '2026-10-20T10:00:00Z', result: { error: 'handler_failed', error_code: 'disk_full' } });
+    await flushPromises();
+    const row = ui.get('[data-augmentation-id="mit_rirs_16k"]');
+    expect(row.get('.studio-status').text()).toBe('running');
+    expect(row.text()).not.toContain('disk space');
+    ui.unmount();
+  });
+  it('offers shared augmentation downloads separately from per-word classifier selection', async () => {
+    const ui = mount(host()); await flushPromises();
+    expect(ui.get('h1').text()).toBe('Online Datasets');
+    const augmentation = ui.get('[data-augmentation-datasets]');
+    expect(augmentation.text()).toContain('automatically');
+    expect(augmentation.text()).toContain('100 GiB');
+    expect(augmentation.find('input[type="checkbox"]').exists()).toBe(false);
+    await augmentation.get('[data-augmentation-id="mit_rirs_16k"] button').trigger('click'); await flushPromises();
+    expect(queue.jobs.value['aug-1']?.word_id).toBeNull();
+    expect(augmentation.get('[data-augmentation-id="mit_rirs_16k"]').text()).toContain('queued');
+    expect((ui.get('[data-dataset-id="set-0"]').element as HTMLInputElement).checked).toBe(true);
+    queue.track({ id: 'aug-1', kind: 'download', word_id: null, resource: 'download', payload: { augmentation_id: 'mit_rirs_16k' }, status: 'failed', created_at: '', started_at: null, finished_at: '', result: { error: 'handler_failed', error_code: 'disk_full' } });
+    await flushPromises();
+    expect(augmentation.text()).toContain('disk space');
+    ui.unmount();
+  });
   it('refreshes completed downloads while closed without discarding unsaved dataset selections', async () => {
     const ui = mount(host()); await flushPromises();
     await ui.get('[data-dataset-id="set-4"]').setValue(true);

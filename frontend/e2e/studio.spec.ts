@@ -14,6 +14,23 @@ test.beforeEach(async ({ page }) => {
 });
 test.afterEach(async ({ page }) => { expect(browserErrors.get(page)).toEqual([]); });
 
+test('Online Datasets preserves old links and shows shared augmentation readiness on Train', async ({ page, request }) => {
+  const a = await word(request, 'browser_online_datasets');
+  await page.goto(`/#/negative-datasets?word=${a.id}`);
+  await expect(page.getByRole('heading', { name: 'Online Datasets', exact: true })).toBeVisible();
+  await expect(page.locator('nav [data-page="online-datasets"]')).toHaveAttribute('aria-current', 'page');
+  const augmentation = page.locator('[data-augmentation-datasets]');
+  await expect(augmentation.locator('article')).toHaveCount(4);
+  await expect(augmentation).toContainText('automatically');
+  await expect(augmentation.locator('input[type="checkbox"]')).toHaveCount(0);
+  await expect(augmentation.locator('.studio-status')).toHaveText(['installed', 'installed', 'installed', 'installed']);
+  await page.goto(`/#/train?word=${a.id}`);
+  await expect(page.locator('[data-training-prerequisites]')).toContainText('All four augmentation datasets are installed');
+  await expect(page.locator('[data-action="start-training"]')).toBeEnabled();
+  await page.locator('[data-training-prerequisites] a').click();
+  await expect(page).toHaveURL(new RegExp(`online-datasets\\?word=${a.id}`));
+});
+
 test('dark mode follows the system and remembers an explicit light choice', async ({ page, request }) => {
   const a = await word(request, 'browser_theme');
   await page.emulateMedia({ colorScheme: 'dark' });
@@ -137,9 +154,12 @@ test('browser generates and selects a batch, queues real training and downloads 
   const a = await word(request, 'browser_training');
   await page.goto(`/#/artificial?word=${a.id}`);
   await page.locator('[name="samples"]').fill('3');
-  await page.locator('[name="batch-size"]').fill('1');
-  await expect(page.locator('[data-engine="qwen3"]')).toBeChecked();
-  const generated = page.waitForResponse(response => response.url().endsWith('/generation/jobs') && response.request().method() === 'POST');
+  // Batching is internal; use the current explicit-provider submission workflow.
+  for (const input of await page.locator('[data-engine]').all()) {
+    if (await input.getAttribute('data-engine') !== 'qwen3' && await input.isChecked()) await input.uncheck();
+  }
+  await page.locator('[data-engine="qwen3"]').check();
+  const generated = page.waitForResponse(response => response.url().endsWith('/generation/submissions') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Generate dataset' }).click();
   expect((await generated).ok()).toBeTruthy();
   expect((await (await request.post('/__test/drain-gpu')).json()).ran).toBe(true);

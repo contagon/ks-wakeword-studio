@@ -3,7 +3,7 @@ import { onScopeDispose, ref, watch } from "vue";
 export const pages = [
   { id: "wakewords", name: "Wakewords", group: "Workspace" },
   { id: "kiosks", name: "Kiosks", group: "Fleet" },
-  { id: "negative-datasets", name: "Negative Datasets", group: "Data" },
+  { id: "online-datasets", name: "Online Datasets", group: "Data" },
   { id: "artificial", name: "Artificial", group: "Data" },
   { id: "record", name: "Record", group: "Data" },
   { id: "classify", name: "Classify", group: "Data" },
@@ -25,7 +25,7 @@ export function useStudioRoutes() {
   const classifyTab = ref<ClassifyTab>('review');
   function read() {
     const [path, search = ""] = location.hash.replace(/^#\/?/, "").split("?");
-    page.value = path === 'scrape' ? 'classify' : pages.find(p => p.id === path)?.id ?? "wakewords";
+    page.value = path === 'scrape' ? 'classify' : path === 'negative-datasets' ? 'online-datasets' : pages.find(p => p.id === path)?.id ?? "wakewords";
     selectedId.value = new URLSearchParams(search).get("word") ?? storedSelection();
     const tab = path === 'scrape' ? 'collect' : new URLSearchParams(search).get('tab');
     classifyTab.value = tab === 'collect' || tab === 'unmapped' ? tab : 'review';

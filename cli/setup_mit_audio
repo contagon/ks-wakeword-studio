@@ -48,7 +48,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 repo_id = sys.argv[1]
 api_url = sys.argv[2]
@@ -67,6 +67,13 @@ files = sorted(
 )
 if not files:
     raise SystemExit("Hugging Face MIT RIR dataset did not list any 16khz WAV files")
+
+# Validate the entire upstream manifest before creating any output paths.
+for rel in files:
+    path = PurePosixPath(rel)
+    if (path.is_absolute() or '..' in path.parts or path.as_posix() != rel
+            or '\\' in rel or ':' in rel or any(ord(c) < 32 for c in rel)):
+        raise SystemExit('Unsafe MIT RIR source filename')
 
 print(f"   Found {len(files)} MIT environmental RIR files on Hugging Face mirror", flush=True)
 downloaded = 0
@@ -100,6 +107,8 @@ def download_file(url: str, target: Path, rel: str):
 total = len(files)
 for idx, rel in enumerate(files, start=1):
     target = audio_dir / rel
+    if target.is_symlink() or not target.resolve().is_relative_to(audio_dir.resolve()):
+        raise SystemExit('Unsafe MIT RIR output path')
     if target.exists() and target.stat().st_size > 0:
         skipped += 1
         if idx == 1 or idx % 25 == 0 or idx == total:

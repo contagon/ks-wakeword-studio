@@ -4,6 +4,8 @@ import type { LegacyRun } from './types';
 import type { GenerationSubmission, GenerationSource } from './types';
 import type { AutomationSettings, AutomationStatus } from './types';
 import type { CapturePreview, CaptureSelection } from './types';
+import type { AugmentationCatalog } from './types';
+import { publicError } from './errors';
 
 const base = "/api/studio";
 const segment = encodeURIComponent;
@@ -15,8 +17,9 @@ function query(values: Query = {}): string {
   return params.size ? `?${params}` : "";
 }
 export class StudioApiError extends Error {
-  constructor(public readonly status: number) {
+  constructor(public readonly status: number, code?: unknown) {
     super(({ 401: "Kiosk admin credentials required.", 403: "Kiosk admin credentials required.", 404: "Studio record no longer available.", 409: "Studio record conflict. Refresh and try again.", 422: "Invalid studio request. Check the supplied values.", 502: "Kiosk rejected the request.", 503: "Kiosk unavailable." } as Record<number, string>)[status] ?? "Studio request failed. Try again.");
+    this.message = publicError(code) || this.message;
   }
 }
 /** Do not surface raw remote error bodies (which may contain secrets). */
@@ -31,7 +34,11 @@ async function request<T>(path: string, method = "GET", body?: unknown, signal?:
     if (signal?.aborted) throw error;
     throw new Error("Unable to reach the studio. Check your connection and retry.");
   }
-  if (!response.ok) throw new StudioApiError(response.status);
+  if (!response.ok) {
+    let code: unknown;
+    try { code = (await response.json())?.code; } catch { /* Non-JSON proxy errors remain generic. */ }
+    throw new StudioApiError(response.status, code);
+  }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
@@ -51,6 +58,8 @@ const post = <T>(path: string, body?: unknown, signal?: AbortSignal) => request<
 const put = <T>(path: string, body: unknown, signal?: AbortSignal) => request<T>(path, "PUT", body, signal);
 
 export const studioApi = {
+  augmentationDatasets: (signal?: AbortSignal) => get<AugmentationCatalog>('/augmentation/datasets', undefined, signal),
+  downloadAugmentation: (id: string, signal?: AbortSignal) => post<Job>(`/augmentation/datasets/${segment(id)}/download`, undefined, signal),
   capabilities: (signal?: AbortSignal) => get<StudioCapabilities>("/capabilities", undefined, signal),
   testingManifest: (word: string, version: string, model: string, signal?: AbortSignal) => get<unknown>(`${wordPath(word)}/models/${segment(version)}/archive/${segment(model + '.json')}`, undefined, signal),
   testingModelUrl: (word: string, version: string, model: string) => `${base}${wordPath(word)}/models/${segment(version)}/archive/${segment(model + '.tflite')}`,

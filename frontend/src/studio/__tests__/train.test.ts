@@ -6,6 +6,7 @@ import JobConsole from "../components/JobConsole.vue";
 import { createWorkspace, workspaceKey, type Workspace } from "../workspace";
 import { useStudioRoutes } from "../routes";
 import { createJobQueue, jobQueueKey, type JobQueue } from '../jobs';
+import { augmentationCatalog } from './augmentationFixture';
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 const words = [{ id: "a", phrase: "Hey Cedar", language: "en", model_id: "cedar", created_at: "", updated_at: "" }, { id: "b", phrase: "Okay Maple", language: "en", model_id: "maple", created_at: "", updated_at: "" }];
@@ -25,6 +26,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://localhost"); const path = url.pathname;
     if (path === '/api/studio/jobs') return json({ items: [], total: 0, offset: 0, limit: 100 });
+    if (path === '/api/studio/augmentation/datasets') return json(augmentationCatalog());
     if (path === "/api/studio/wakewords") return json({ items: words, total: 2, offset: 0, limit: 100 }); if (path.match(/\/wakewords\/[ab]$/)) return json(words.find(word => path.endsWith(word.id)));
     if (path.endsWith("/queue")) return json({ items: [], total: 0, offset: 0, limit: 1 }); if (path.endsWith("/models") && !path.includes("training")) return json({ items: [], total: 0, offset: 0, limit: 50 });
     if (path === "/api/studio/schedules") return json([{ scope: "train:a", cron: "0 2 * * *", timezone: "UTC", enabled: true, next_run_at: "2026-11-01T02:00:00Z" }]);
@@ -41,6 +43,16 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("TrainPage", () => {
+  it('blocks training until augmentation datasets are installed and links to Online Datasets', async () => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/augmentation/datasets')
+      ? Promise.resolve(json(augmentationCatalog(false))) : transport(input, init));
+    const ui = mount(host()); await flushPromises();
+    expect((ui.get('[data-action="start-training"]').element as HTMLButtonElement).disabled).toBe(true);
+    expect(ui.get('[data-training-prerequisites]').text()).toContain('MIT room impulse responses');
+    expect(ui.get('[data-training-prerequisites] a').attributes('href')).toBe('#/online-datasets?word=a');
+    ui.unmount();
+  });
   it.each([0, 2, 101])('counts %s selected training datasets across pages without counting evaluation inputs', async count => {
     const transport = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation((input, init) => {

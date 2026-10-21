@@ -185,6 +185,48 @@ browser request inspection can see a submitted password.
    Piper stays visible with availability guidance when local voice files are missing;
    viewing the catalog never downloads models.
 
+### Online Datasets and training prerequisites
+
+**Data → Online Datasets** contains two separate resource types:
+
+- **Negative & evaluation datasets:** downloaded once and selected independently
+  for each wakeword. Evaluation-only inputs are not sampled during training.
+- **Augmentation datasets:** MIT room impulse responses, AudioSet, Free Music
+  Archive, and CHiME-Home. Download and prepare all four once; every wakeword uses
+  them automatically, without a separate selection checkbox.
+
+Augmentation downloads run in the global queue. Preparation initializes the shared
+training Python environment if needed, downloads the source audio, converts it to
+16 kHz mono PCM WAV, validates it, and publishes the completed corpus. Failed or
+cancelled downloads do not publish partial corpora. Existing CLI-installed corpora
+are recognized. Viewing the catalog never starts downloads.
+
+If an existing corpus folder contains corrupt/partial audio, Studio reports
+**repair required** before downloading anything. Move that specific folder out of
+`<data-dir>/training_datasets/`, retaining it for inspection, then retry. Studio
+does not delete or overwrite existing operator-managed corpora.
+
+Check the displayed free disk space first: source archives, conversion, and
+retained augmentation snapshots need additional space beyond the final installed
+size. Source download sizes are not published. Review each source's licensing
+terms before using its recordings.
+
+**Train** shows missing augmentation prerequisites and links back to Online
+Datasets. Once ready, starting training automatically snapshots the inputs,
+augments your real/synthetic samples with noise and reverberation, extracts audio
+features, then trains and validates the model. Original samples stay unchanged;
+augmentation datasets are not deployed to kiosks.
+
+### Job errors and private diagnostics
+
+The job queue and training history show safe, actionable failure guidance. Raw
+child stdout/stderr and exception tracebacks are retained in
+`<data-dir>/studio/jobs/<job-id>/diagnostics.log` (a bounded 128 KiB tail, file mode
+`0600`). These diagnostics are **server-only**, not downloadable through the UI.
+They can contain private recordings' metadata, paths, provider output or secrets;
+inspect them locally and redact before sharing. Older failed jobs may not have a
+diagnostic file; retry once after upgrading to capture the original error.
+
 ### Workspace automation and theme
 
 **Automate** edits only the workspace selected in the header. Collection,

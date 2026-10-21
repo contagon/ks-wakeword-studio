@@ -66,7 +66,7 @@ async function open() { wrapper = mount(TrainerApp, { attachTo: document.body })
 describe("compact studio workspace", () => {
   it("groups the approved navigation pages with Automate immediately after Deploy", async () => {
     const ui = await open();
-    expect(ui.get('nav').findAll('a').map(a => a.text())).toEqual(["Wakewords", "Kiosks", "Negative Datasets", "Artificial", "Record", "Classify", "Samples", "Train", "Deploy", "Automate", "Testing"]);
+    expect(ui.get('nav').findAll('a').map(a => a.text())).toEqual(["Wakewords", "Kiosks", "Online Datasets", "Artificial", "Record", "Classify", "Samples", "Train", "Deploy", "Automate", "Testing"]);
     expect(ui.get('nav').text()).toContain("Data");
     expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
     await ui.get('[data-page="train"]').trigger('click'); await flushPromises();
@@ -76,7 +76,7 @@ describe("compact studio workspace", () => {
   });
   it("unmounts the legacy trainer after all formerly unfinished pages gain studio implementations", async () => {
     const ui = await open();
-    for (const pageId of ["negative-datasets", "artificial", "train"] as const) {
+    for (const pageId of ["online-datasets", "artificial", "train"] as const) {
       await ui.get(`[data-page="${pageId}"]`).trigger('click'); await flushPromises();
       expect(ui.find('[data-legacy-trainer]').exists()).toBe(false);
       expect(ui.find('[data-studio-placeholder]').exists()).toBe(false);
