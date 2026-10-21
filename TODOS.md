@@ -2,9 +2,9 @@
 - [x] Remove rename/change language button under actions on main page. Remove action toggle and just add delete button in top right.
 
 # kiosk page
-- [ ] remove fleet safety details fold down.
-- [ ] remove add device fold down and just include it in the overview.
-- [ ] remove "register a fleet leader or standalone kiosks"
+- [x] remove fleet safety details fold down.
+- [x] remove add device fold down and just include it in the overview.
+- [x] remove "register a fleet leader or standalone kiosks"
 
 # online datasets
 - [ ] rename to Downloaded

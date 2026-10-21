@@ -97,10 +97,10 @@ onBeforeUnmount(() => registry.abort());
 <template>
   <section ref="registryElement" class="studio-card" data-device-registry>
     <div data-device-registry-content :inert="deleting ? true : undefined">
-    <div class="flex flex-wrap items-start justify-between gap-3"><div><h2>Fleet setup</h2><p class="studio-muted">Register a fleet leader or standalone kiosks.</p></div><button type="button" data-action="refresh-registry" :disabled="registry.loading.value" @click="registry.load(true)">Refresh registry</button></div>
-    <details class="mt-3"><summary>Fleet safety details</summary><p class="studio-muted">Register one fleet leader or standalone kiosks. A leader is authoritative: its existing mirror can propagate selections and remove follower-only models. This studio never edits enabled selections or uploads directly to followers.</p><p v-if="props.surface === 'deploy'" class="studio-muted text-xs mt-3">Publication staging prerequisite: upload staging must start clean and no concurrent manual uploads may occur while the trainer owns a publication. This condition cannot be checked automatically.</p></details>
+    <div class="flex flex-wrap items-start justify-between gap-3"><div><h2>Fleet setup</h2><p v-if="props.surface !== 'kiosks'" class="studio-muted">Register a fleet leader or standalone kiosks.</p></div><button type="button" data-action="refresh-registry" :disabled="registry.loading.value" @click="registry.load(true)">Refresh registry</button></div>
+    <details v-if="props.surface !== 'kiosks'" class="mt-3"><summary>Fleet safety details</summary><p class="studio-muted">Register one fleet leader or standalone kiosks. A leader is authoritative: its existing mirror can propagate selections and remove follower-only models. This studio never edits enabled selections or uploads directly to followers.</p><p v-if="props.surface === 'deploy'" class="studio-muted text-xs mt-3">Publication staging prerequisite: upload staging must start clean and no concurrent manual uploads may occur while the trainer owns a publication. This condition cannot be checked automatically.</p></details>
     <p v-if="notice" class="studio-note" role="status">{{ notice }}</p><p v-if="error || registry.error.value" class="studio-note" role="alert">{{ error || registry.error.value }}</p>
-    <details data-device-registration class="mt-3" :open="!registry.devices.value.length"><summary>Add device</summary>
+    <component :is="props.surface === 'kiosks' ? 'div' : 'details'" data-device-registration class="mt-3" :open="props.surface !== 'kiosks' && !registry.devices.value.length ? true : undefined"><summary v-if="props.surface !== 'kiosks'">Add device</summary>
     <form data-device-add class="studio-registration-row" @submit.prevent="add">
       <label>Address<input v-model="url" required name="url" autocomplete="url" placeholder="http://kiosk.local:2324"></label>
       <label>Role<select v-model="role" name="role"><option value="standalone">Standalone</option><option value="leader">Fleet leader</option></select></label>
@@ -108,7 +108,7 @@ onBeforeUnmount(() => registry.abort());
       <button type="submit" class="studio-primary" :disabled="busy === 'add'">Add device</button>
     </form>
     <p class="studio-muted text-xs mt-2">Use the kiosk's Remote Administration password. Studio saves only the resulting 10-year token, not your password. Submit only over a trusted connection.</p>
-    </details>
+    </component>
     <p v-if="registry.loading.value" class="studio-muted mt-3">Loading registered devices…</p>
     <div v-else class="mt-4 grid gap-2">
       <article v-for="device in registry.devices.value" :key="device.id" class="studio-device-row" :data-device-id="device.id">

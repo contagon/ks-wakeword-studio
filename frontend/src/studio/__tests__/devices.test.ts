@@ -28,6 +28,21 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("shared fleet registry", () => {
+  it('keeps kiosk registration inline before and after adding a device', async () => {
+    const ui = mount(DeviceRegistry, { props: { surface: 'kiosks' } });
+    await flushPromises();
+    expect(ui.get('form[data-device-add]').element.closest('details')).toBeNull();
+    expect(ui.text()).not.toContain('Fleet safety details');
+    expect(ui.text()).not.toContain('Register a fleet leader or standalone kiosks.');
+    await ui.get('input[name="url"]').setValue('http://leader');
+    await ui.get('input[name="password"]').setValue('admin-password');
+    await ui.get('form[data-device-add]').trigger('submit');
+    await flushPromises();
+    expect(ui.find('[data-device-id="leader"]').exists()).toBe(true);
+    expect(ui.get('form[data-device-add]').element.closest('details')).toBeNull();
+    expect(ui.get('form[data-device-add]').isVisible()).toBe(true);
+    ui.unmount();
+  });
   it('shows satellite names, updates reactive labels, and falls back without opaque IDs', async () => {
     devices = [{ ...leader, name: 'Main kiosk' }, { ...follower, name: 'Kitchen satellite' }];
     await useDeviceRegistry().load(true);
