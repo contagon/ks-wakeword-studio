@@ -125,19 +125,34 @@ check_directories() {
     done
 }
 
-check_directories "${WORK_DIR}/wake_word_samples_augmented"
 if [ -z "${DATASET_MANIFEST:-}" ]; then
     check_directories "${TRAINING_DS}"/negative_datasets/{speech,dinner_party,no_speech,dinner_party_eval}
 fi
 
-# Personal features are optional, but if present they MUST have /training
+# A directory alone may be empty, particularly with per-family split manifests.
+# Keep evaluation-only providers, but require at least one positive training pool.
+has_features() {
+  [ -n "$(find "$1" -type f -path '*_mmap/data.ninja' -size +0c -print -quit 2>/dev/null)" ]
+}
+
+GENERATED_FEATURES_DIR="${WORK_DIR}/wake_word_samples_augmented"
 PERSONAL_FEATURES_DIR="${WORK_DIR}/personal_augmented_features"
+if ! has_features "${GENERATED_FEATURES_DIR}/training" && ! has_features "${PERSONAL_FEATURES_DIR}/training"; then
+  echo "ERROR: No positive training features; add real recordings or synthetic training audio" >&2
+  exit 1
+fi
+
+HAS_GENERATED="false"
+if has_features "${GENERATED_FEATURES_DIR}"; then
+  HAS_GENERATED="true"
+fi
+
 HAS_PERSONAL="false"
-if [ -d "${PERSONAL_FEATURES_DIR}/training" ] ; then
+if has_features "${PERSONAL_FEATURES_DIR}"; then
   HAS_PERSONAL="true"
-  echo "✅ Found personal features: ${PERSONAL_FEATURES_DIR}/training (will weight sampling_weight=3.0)"
+  echo "✅ Found personal features: ${PERSONAL_FEATURES_DIR} (sampling_weight=3.0; 60% of positive draws when both pools have training data)"
 else
-  echo "ℹ️  No personal features found at ${PERSONAL_FEATURES_DIR}/training (continuing without personal weighting)"
+  echo "ℹ️  No personal features found at ${PERSONAL_FEATURES_DIR} (using synthetic positives only)"
 fi
 
 # Reviewed false-positive features are optional hard negatives.
@@ -165,12 +180,7 @@ batch_size: 16
 clip_duration_ms: 1500
 eval_step_interval: 500
 features:
-- features_dir: __WAKEWORD_FEATURES__
-  penalty_weight: 1.0
-  sampling_weight: 2.0
-  truncation_strategy: truncate_start
-  truth: true
-  type: mmap
+__GENERATED_FEATURE_MARKER__
 __PERSONAL_FEATURE_MARKER__
 __REVIEWED_NEGATIVE_FEATURE_MARKER__
 - features_dir: __NEG_SPEECH__
@@ -222,7 +232,6 @@ EOF
 
 # Replace placeholders
 sed -i \
-  -e "s|__WAKEWORD_FEATURES__|${WORK_DIR}/wake_word_samples_augmented|g" \
   -e "s|__NEG_SPEECH__|${TRAINING_DS}/negative_datasets/speech|g" \
   -e "s|__NEG_DINNER__|${TRAINING_DS}/negative_datasets/dinner_party|g" \
   -e "s|__NEG_NOSPEECH__|${TRAINING_DS}/negative_datasets/no_speech|g" \
@@ -230,6 +239,22 @@ sed -i \
   -e "s|__TRAIN_DIR__|${WORK_DIR}/trained_models/wakeword|g" \
   -e "s|__TRAINING_STEPS__|${TRAINING_STEPS}|g" \
   "${YAML_PATH}"
+
+# Insert/remove generated block (real-only Studio runs have no generated features).
+if [ "${HAS_GENERATED}" = "true" ]; then
+  generated_block="$(cat <<EOF
+- features_dir: ${GENERATED_FEATURES_DIR}
+  penalty_weight: 1.0
+  sampling_weight: 2.0
+  truncation_strategy: truncate_start
+  truth: true
+  type: mmap
+EOF
+)"
+  perl -0777 -i -pe "s#__GENERATED_FEATURE_MARKER__#${generated_block}#g" "${YAML_PATH}"
+else
+  sed -i -e "/__GENERATED_FEATURE_MARKER__/d" "${YAML_PATH}"
+fi
 
 # Insert/remove personal block
 if [ "${HAS_PERSONAL}" = "true" ]; then

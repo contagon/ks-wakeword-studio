@@ -164,11 +164,14 @@ def _run(argv, *, cwd, env):
 
 def stage_inputs(manifest, root):
     split_map = {}
-    for label, directory in (('positive', 'wake_word_samples'), ('negative', 'reviewed_negatives')):
+    for label, directory in (('positive', 'wake_word_samples'), ('positive', 'personal_samples'),
+                             ('negative', 'reviewed_negatives')):
         target = root / 'work' / directory
         target.mkdir(parents=True)
         for index, audio in enumerate(manifest['audio']):
             if audio['label'] != label:
+                continue
+            if label == 'positive' and (audio.get('batch_id') is not None) != (directory == 'wake_word_samples'):
                 continue
             source = Path(audio['path'])
             if source.is_symlink() or sha256(source) != audio['normalized_hash']:
@@ -218,7 +221,7 @@ def main(argv=None):
     dataset_path = root / 'datasets.json'
     dataset_path.write_text(json.dumps({'schema_version': 1, 'datasets': mww_datasets}))
     _run([python, cli / 'wake_word_sample_augmenter', f'--data-dir={root}', f'--split-manifest={split_path}', f'--seed={manifest["seed"]}',
-          f'--personal-dir={root / "empty-personal"}', f'--negative-dir={root / "work/reviewed_negatives"}',
+          f'--personal-dir={root / "work/personal_samples"}', f'--negative-dir={root / "work/reviewed_negatives"}',
           *[f'--{flag}={augmentation[name]}' for flag, name in
             (('mit-rirs-16k-dir', 'mit_rirs_16k'), ('audioset-16k-dir', 'audioset_16k'), ('fma-16k-dir', 'fma_16k'), ('chime-16k-dir', 'chime_16k'))]], cwd=root, env=env)
     _run([cli / 'wake_word_sample_trainer', f'--data-dir={root}', f'--tool-data-dir={shared}', f'--dataset-manifest={dataset_path}',

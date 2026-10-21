@@ -190,7 +190,9 @@ class DatasetTests(unittest.TestCase):
         self.service.select(self.a, ['speech'])
         manifest = self.root / 'inputs.json'
         manifest.write_text(json.dumps({'schema_version': 1, 'datasets': [asdict(row) for row in self.service.snapshot(self.a)]}))
-        (self.root / 'work/wake_word_samples_augmented').mkdir(parents=True)
+        positive_features = self.root / 'work/wake_word_samples_augmented/training/wakeword_mmap'
+        positive_features.mkdir(parents=True)
+        (positive_features / 'data.ninja').write_bytes(b'positive-feature-fixture')
         (self.root / '.venv/bin').mkdir(parents=True)
         (self.root / '.venv/bin/activate').write_text('')
         stub = self.root / '.venv/bin/nvidia-smi'

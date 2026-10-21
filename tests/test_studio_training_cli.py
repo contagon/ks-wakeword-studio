@@ -13,6 +13,46 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class TrainingCLITests(unittest.TestCase):
+    def test_staging_separates_real_and_synthetic_positives_without_changing_splits(self):
+        from studio.legacy_training import stage_inputs
+        cases = (
+            [('positive', None, 'training', 'personal_samples'),
+             ('positive', 'batch', 'testing', 'wake_word_samples'),
+             ('negative', None, 'validation', 'reviewed_negatives')],
+            [('positive', None, 'validation', 'personal_samples')],
+            [('positive', 'batch', 'training', 'wake_word_samples')],
+        )
+        for entries in cases:
+            with self.subTest(entries=entries), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                audio, expected_splits = [], {}
+                for index, (label, batch, split, target) in enumerate(entries):
+                    content = f'audio-{index}'.encode()
+                    source = base / f'{index}.wav'
+                    source.write_bytes(content)
+                    audio.append(dict(label=label, batch_id=batch, split=split, path=str(source),
+                                      normalized_hash=hashlib.sha256(content).hexdigest()))
+                    expected_splits[str(base / 'run/work' / target / f'{index:08d}.wav')] = split
+                split_path = stage_inputs({'audio': audio}, base / 'run')
+                self.assertEqual(json.loads(split_path.read_text()), expected_splits)
+                self.assertEqual(set(map(str, (base / 'run/work').glob('*/*.wav'))), set(expected_splits))
+                for index, entry in enumerate(entries):
+                    self.assertEqual((base / 'run/work' / entry[3] / f'{index:08d}.wav').read_bytes(),
+                                     f'audio-{index}'.encode())
+
+    def test_staging_still_rejects_changed_audio(self):
+        from studio.legacy_training import stage_inputs
+        from studio.models import ValidationError
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            source = base / 'audio.wav'
+            source.write_bytes(b'changed')
+            for batch in (None, 'batch'):
+                with self.subTest(batch=batch), self.assertRaisesRegex(ValidationError, 'checksum'):
+                    stage_inputs({'audio': [dict(label='positive', batch_id=batch, split='training',
+                        path=str(source), normalized_hash=hashlib.sha256(b'original').hexdigest())]},
+                        base / ('real' if batch is None else 'synthetic'))
+
     def test_cli_rejects_unpinned_corpora_before_any_environment_setup(self):
         from studio import legacy_training as training
         from studio.models import ValidationError
@@ -154,7 +194,9 @@ lite.Interpreter = Interpreter
             self.assertIn('--training-steps=123', trainer)
             dataset_path = Path(next(a.split('=', 1)[1] for a in trainer if a.startswith('--dataset-manifest=')))
             self.assertEqual(json.loads(dataset_path.read_text()), {'schema_version': 1, 'datasets': []})
-            self.assertEqual(len(list((run / 'work/wake_word_samples').glob('*.wav'))), 3)
+            self.assertEqual(len(list((run / 'work/personal_samples').glob('*.wav'))), 3)
+            self.assertEqual(len(list((run / 'work/wake_word_samples').glob('*.wav'))), 0)
+            self.assertIn(f'--personal-dir={run / "work/personal_samples"}', calls[1][1])
             self.assertFalse((shared / 'work').exists())
             self.assertTrue((run / 'logs/commands.log').is_file())
 

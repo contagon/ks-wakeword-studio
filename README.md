@@ -217,6 +217,15 @@ augments your real/synthetic samples with noise and reverberation, extracts audi
 features, then trains and validates the model. Original samples stay unchanged;
 augmentation datasets are not deployed to kiosks.
 
+Real positives (recorded, scraped, or uploaded) and selected synthetic positives
+use separate training pools. When both have training examples, **60% of positive
+training draws come from real samples and 40% from synthetic samples**, regardless
+of pool size. If only one pool has training examples, all positive draws use that
+pool. Held-out validation/testing audio stays held out, and reviewed negatives
+retain their separate hard-negative weighting. These pools are per-run staging
+and feature artifacts; permanent audio storage is unchanged. The weighting applies
+to new training runs, not existing model archives.
+
 ### Job errors and private diagnostics
 
 The job queue and training history show safe, actionable failure guidance. Raw

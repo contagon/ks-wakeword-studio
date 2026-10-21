@@ -254,6 +254,11 @@ def generate_feature_set(input_wav_dir: str, out_root_dir: str, label: str, *, r
     out_root.mkdir(parents=True, exist_ok=True)
 
     for split, cfg in split_cfg.items():
+        if stable_splits is not None and not any(
+            stable_splits[os.path.realpath(path)] == split for path in files
+        ):
+            print(f"ℹ️  No {split} WAVs for {label} (skipping)")
+            continue
         out_dir = out_root / split
         out_dir.mkdir(parents=True, exist_ok=True)
 

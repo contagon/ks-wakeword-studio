@@ -119,7 +119,7 @@ class TrainingService:
                                           row['sample_id'], row['revision'], row['batch_id']))
             effective = dict(model_id=word['model_id'], phrase=word['phrase'], language=word['language'],
                              config=asdict(settings), seed=seed, audio=[asdict(a) for a in audio],
-                             datasets=[asdict(d) for d in datasets], augmentation=[asdict(a) for a in augmentation], selected_batches=batches, adapter_version=2)
+                              datasets=[asdict(d) for d in datasets], augmentation=[asdict(a) for a in augmentation], selected_batches=batches, adapter_version=3)
             fingerprint = hashlib.sha256(encode(effective).encode()).hexdigest()
             manifest = RunManifest(1, run_id, word_id, word['model_id'], word['phrase'], word['language'], settings,
                                    seed, tuple(audio), datasets, batches, fingerprint, self._now(), augmentation)

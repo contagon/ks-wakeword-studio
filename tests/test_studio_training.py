@@ -112,6 +112,19 @@ class TrainingTests(unittest.TestCase):
         self.assertEqual(len(self.runner.calls), 2)
         self.assertNotEqual(first.result['version_id'], self.service.versions(self.word.id).items[0].id)
 
+    def test_positive_pool_change_invalidates_combined_pool_training_fingerprint(self):
+        import hashlib
+        from studio.training import encode
+        self.audio()
+        manifest = self.service.snapshot(self.word.id, 'a' * 32)
+        previous_inputs = dict(model_id=manifest.model_id, phrase=manifest.phrase, language=manifest.language,
+            config=asdict(manifest.config), seed=manifest.seed, audio=[asdict(a) for a in manifest.audio],
+            datasets=[asdict(d) for d in manifest.datasets], augmentation=[asdict(a) for a in manifest.augmentation],
+            selected_batches=manifest.selected_batches, adapter_version=2)
+        previous_fingerprint = hashlib.sha256(encode(previous_inputs).encode()).hexdigest()
+        self.assertNotEqual(manifest.fingerprint, previous_fingerprint,
+                            'Scheduled training must not skip the new weighting when input audio is unchanged')
+
     def test_identical_imports_stable_family_splits(self):
         original = self.audio()
         self.audio(self.other.id)
