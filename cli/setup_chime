@@ -19,6 +19,10 @@ Usage: $0 [ --cleanup-archives ] [ --cleanup-input-files ] [ --data-dir=<data_di
     <data_dir>            : Path to the data directory.
                           : Default: ${DATA_DIR}
 
+Environment:
+    CHIME_AUDIO_URL       : Override the source URL with a trusted mirror of the
+                            original chime_home.tar.gz archive.
+
 EOF
     exit 1
 fi
@@ -28,7 +32,7 @@ cd "${DATA_DIR}/training_datasets"
 
 echo "***** Checking CHiME-Home *****"
 
-AUDIO_URL="https://archive.org/download/chime-home/chime_home.tar.gz"
+AUDIO_URL="${CHIME_AUDIO_URL:-https://archive.org/download/chime-home/chime_home.tar.gz}"
 AUDIO_TARFILE="chime_home.tar.gz"
 AUDIO_TAR="./downloads/${AUDIO_TARFILE}"
 AUDIO_DIR="./chime"
@@ -40,6 +44,30 @@ AUDIO_IN_GLOB="*.48kHz.wav"
 
 declare -A filecounts=( [${AUDIO_TARFILE}]=0 )
 get_filecounts filecounts "${AUDIO_FILECOUNT}"
+
+download_archive() {
+    local partial="${AUDIO_TAR}.incomplete"
+    # Never leave an interrupted transfer looking like a complete cached archive.
+    trap 'rm -f "${AUDIO_TAR}.incomplete"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    for attempt in 1 2 3 ; do
+        echo "   Downloading ${AUDIO_TARFILE} (attempt ${attempt}/3)"
+        if curl -fSL --connect-timeout 20 --speed-limit 1024 --speed-time 60 \
+                "${AUDIO_URL}" -o "${partial}" \
+                && tar -tzf "${partial}" >/dev/null 2>&1 ; then
+            mv "${partial}" "${AUDIO_TAR}"
+            return 0
+        fi
+        rm -f "${partial}"
+        if [ "${attempt}" -lt 3 ] ; then
+            echo "   Download failed or archive invalid; retrying..." >&2
+            sleep $(( attempt * 2 ))
+        fi
+    done
+    echo "   Failed to download a valid ${AUDIO_TARFILE}. Check network/source availability, or set CHIME_AUDIO_URL to a trusted mirror." >&2
+    return 1
+}
 
 converter() {
     source "${DATA_DIR}/.venv/bin/activate"
@@ -101,9 +129,12 @@ if [ "${actual_filecount}" -ne 0 ] && [ "${actual_filecount}" -eq "${expected_fi
 else
     actual_filecount=$(find "${AUDIO_DIR}" -name "${AUDIO_IN_GLOB}" 2>/dev/null | wc -l) || :
     if [ "${actual_filecount}" -eq 0 ] || [ "${actual_filecount}" -ne "${expected_filecount}" ] ; then
+        if [ -f "${AUDIO_TAR}" ] && ! tar -tzf "${AUDIO_TAR}" >/dev/null 2>&1 ; then
+            echo "   Removing incomplete or corrupt cached ${AUDIO_TARFILE}" >&2
+            rm -f "${AUDIO_TAR}"
+        fi
         if [ ! -f "${AUDIO_TAR}" ] ; then
-            echo "   Downloading ${AUDIO_TARFILE}"
-            curl -sfL "${AUDIO_URL}" -o "${AUDIO_TAR}"
+            download_archive
         fi
 
         rm -rf "${AUDIO_DIR}" || :

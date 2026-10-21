@@ -277,6 +277,14 @@ bash cli/setup_fma --data-dir=/data
 bash cli/setup_chime --data-dir=/data
 ```
 
+If CHiME-Home's Internet Archive source is unavailable, setup retries failed or
+stalled transfers and automatically replaces corrupt cached archives on the next
+attempt. To use a trusted mirror of the **original** `chime_home.tar.gz`, set
+`CHIME_AUDIO_URL` in the setup command's environment. For Studio downloads, pass
+that variable into the server/container environment. An already downloaded archive
+can also be placed at `/data/training_datasets/downloads/chime_home.tar.gz`.
+Preprocessed datasets with different audio content are not interchangeable mirrors.
+
 These setup commands perform real, potentially large downloads/conversions. Run
 them to completion while training is stopped; Studio does not silently install
 corpora after taking a snapshot. Missing/empty/unsafe roots fail training with
