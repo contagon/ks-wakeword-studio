@@ -132,33 +132,31 @@ describe("compact studio workspace", () => {
     expect(ui.text()).not.toContain('999');
     expect(ui.text()).toContain('Okay Maple');
   });
-  it("edits phrase/language without sending or changing stable model identity", async () => {
+  it("exposes deletion directly in the overview without rename controls", async () => {
     const ui = await open();
     expect(ui.find('input[name="model_id"]').exists()).toBe(false);
     expect(ui.find('[data-form="edit"]').exists()).toBe(false);
-    await ui.get('[data-action="edit-workspace"]').trigger('click');
-    await ui.get('[data-form="edit"] input[name="phrase"]').setValue('Hello Cedar');
-    await ui.get('[data-form="edit"]').trigger('submit'); await flushPromises();
-    const patch = requests.find(r => r.init?.method === 'PATCH');
-    expect(JSON.parse(String(patch?.init?.body))).toEqual({ phrase: 'Hello Cedar', language: 'en' });
-    expect(ui.text()).toContain('Hello Cedar');
+    expect(ui.find('[data-action="edit-workspace"]').exists()).toBe(false);
+    const overview = ui.findAll('.studio-card').find(card => card.find('h2').exists() && card.get('h2').text() === 'Hey Cedar · Overview')!;
+    expect(overview.find('details').exists()).toBe(false);
+    await overview.get('[data-action="delete-workspace"]').trigger('click');
+    expect(ui.get('[role="alertdialog"]').text()).toContain('Delete Hey Cedar permanently?');
+    expect(requests.some(r => r.init?.method === 'PATCH')).toBe(false);
     expect(records[0].model_id).toBe('cedar');
   });
-  it('contains keyboard focus in the edit modal and restores it on Escape', async () => {
+  it('disables deletion controls while deletion is pending', async () => {
+    let finish!: (value: Response) => void;
+    intercept = (_path, init) => init?.method === 'DELETE' ? new Promise(resolve => { finish = resolve; }) : undefined;
     const ui = await open();
-    (ui.get('.studio-card details').element as HTMLDetailsElement).open = true;
-    await ui.get('[data-action="edit-workspace"]').trigger('click'); await flushPromises();
-    const form = ui.get('[data-form="edit"]');
-    const first = form.get('input[name="phrase"]');
-    const cancel = form.findAll('button').find(button => button.text() === 'Cancel')!;
-    (cancel.element as HTMLButtonElement).focus();
-    await cancel.trigger('keydown', { key: 'Tab' });
-    expect(document.activeElement).toBe(first.element);
-    await first.trigger('keydown', { key: 'Tab', shiftKey: true });
-    expect(document.activeElement).toBe(cancel.element);
-    await cancel.trigger('keydown', { key: 'Escape' });
-    expect(ui.find('[data-form="edit"]').exists()).toBe(false);
-    expect(document.activeElement).toBe(ui.get('[data-action="edit-workspace"]').element);
+    await ui.get('[data-action="delete-workspace"]').trigger('click');
+    await ui.get('[data-action="confirm-delete"]').trigger('click');
+    for (const action of ['delete-workspace', 'confirm-delete', 'cancel-delete']) {
+      expect((ui.get(`[data-action="${action}"]`).element as HTMLButtonElement).disabled).toBe(true);
+    }
+    expect(ui.get('[data-action="confirm-delete"]').text()).toBe('Deleting…');
+    finish(new Response(null, { status: 204 })); await flushPromises();
+    expect(ui.find('[role="alertdialog"]').exists()).toBe(false);
+    expect((ui.get('[data-action="delete-workspace"]').element as HTMLButtonElement).disabled).toBe(false);
   });
   it("creates a real workspace and selects the server's immutable identity", async () => {
     const ui = await open();
@@ -168,14 +166,6 @@ describe("compact studio workspace", () => {
     expect(JSON.parse(String(requests.find(r => r.init?.method === 'POST')?.init?.body))).toEqual({ phrase: 'Hi Birch', language: 'en' });
     expect((ui.get('#studio-word').element as HTMLSelectElement).value).toBe('c');
     expect(location.hash).toBe('#/wakewords?word=c');
-  });
-  it("initializes edit fields when returning to an already selected workspace", async () => {
-    const ui = await open();
-    await ui.get('[data-page="samples"]').trigger('click'); await flushPromises();
-    await ui.get('[data-page="wakewords"]').trigger('click'); await flushPromises();
-    await ui.get('[data-action="edit-workspace"]').trigger('click');
-    expect((ui.get('[data-form="edit"] input[name="phrase"]').element as HTMLInputElement).value).toBe('Hey Cedar');
-    expect((ui.get('[data-form="edit"] input[name="language"]').element as HTMLInputElement).value).toBe('en');
   });
   it("requires confirmation before permanent deletion and selects a surviving workspace", async () => {
     const ui = await open();
