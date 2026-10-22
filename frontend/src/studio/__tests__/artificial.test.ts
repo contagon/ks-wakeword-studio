@@ -71,6 +71,20 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ArtificialPage", () => {
+  it('enables only OmniVoice and Qwen3-TTS by default for an unsaved recipe', async () => {
+    newWorkspace = true;
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    const checked = (engine: string) => (ui.get(`[data-engine="${engine}"]`).element as HTMLInputElement).checked;
+    expect(['omnivoice', 'qwen3', 'moss', 'piper'].map(checked)).toEqual([true, true, false, false]);
+    ui.unmount();
+  });
+  it('places the delete button in the same row as the dataset details', async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    const row = ui.get('[data-delete-batch="ready"]').element.parentElement!;
+    expect(row.classList.contains('studio-dataset-row')).toBe(true);
+    expect(row.lastElementChild).toBe(ui.get('[data-delete-batch="ready"]').element);
+    ui.unmount();
+  });
   it('hides batch size while preserving the saved internal value when generating', async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     expect(ui.find('input[name="batch-size"]').exists()).toBe(false);
@@ -134,6 +148,7 @@ describe("ArtificialPage", () => {
   });
   it('removes deleted MOSS sources from reference selection and refreshes the picker', async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
+    await ui.get('[data-engine="moss"]').setValue(true);
     await ui.get('[name="moss-after-current"]').setValue(false); await flushPromises();
     await ui.get('[data-source="ready"]').setValue(true);
     await ui.get('[data-source="source-omni"]').setValue(true);
@@ -161,6 +176,7 @@ describe("ArtificialPage", () => {
   });
   it('submits full per-provider counts and tracks all children with after-current MOSS', async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
+    await ui.get('[data-engine="moss"]').setValue(true);
     await ui.get('[name="samples"]').setValue(20);
     await ui.get('[name="moss-samples"]').setValue(10);
     await ui.get('[name="moss-after-current"]').setValue(true);
@@ -178,6 +194,7 @@ describe("ArtificialPage", () => {
   });
   it('selects multiple existing MOSS sources independently of training selection', async () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
+    await ui.get('[data-engine="moss"]').setValue(true);
     await ui.get('[name="moss-after-current"]').setValue(false); await flushPromises();
     await ui.get('[data-source="ready"]').setValue(true);
     await ui.get('[data-source="source-omni"]').setValue(true);
@@ -191,6 +208,7 @@ describe("ArtificialPage", () => {
   it('preserves MOSS source selections across pages and ignores stale workspace loads', async () => {
     manySources = true;
     const ui = mount(host()); await flushPromises(); await flushPromises();
+    await ui.get('[data-engine="moss"]').setValue(true);
     await ui.get('[name="moss-after-current"]').setValue(false); await flushPromises();
     await ui.get('[data-source="source-0"]').setValue(true);
     await ui.get('[data-source-picker] [data-action="next-page"]').trigger('click'); await flushPromises();
@@ -253,6 +271,7 @@ describe("ArtificialPage", () => {
     expect(ui.get('[data-generation-phrase]').text()).toContain("Hey Cedar"); expect(ui.find('input[name="phrase"]').exists()).toBe(false);
     expect(ui.find('select[name="tts-mode"]').exists()).toBe(false);
     expect(ui.text()).not.toContain('Save recipe');
+    await ui.get('[data-engine="piper"]').setValue(true);
     for (const engine of ['omnivoice', 'qwen3', 'moss']) await ui.get(`[data-engine="${engine}"]`).setValue(false);
     expect((ui.get('select[name="english-accent"]').element as HTMLSelectElement).disabled).toBe(true);
     await ui.get('input[name="samples"]').setValue("0"); await ui.get("form").trigger("submit");

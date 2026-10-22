@@ -226,8 +226,11 @@ class GenerationService:
             raise ValidationError('Invalid pagination')
         with self.store.transaction() as db:
             self._word(db, word_id)
-            total = db.execute('SELECT count(*) FROM generation_batches WHERE word_id=?', (word_id,)).fetchone()[0]
-            rows = db.execute('SELECT id FROM generation_batches WHERE word_id=? ORDER BY rowid DESC LIMIT ? OFFSET ?',
+            # Failed, cancelled and interrupted datasets are unusable, so they are not listed.
+            visible = ("FROM generation_batches b JOIN studio_jobs j ON j.id=b.id WHERE b.word_id=? AND "
+                       "(j.status IN ('queued','running','cancelling') OR (j.status='complete' AND b.committed_at IS NOT NULL))")
+            total = db.execute(f'SELECT count(*) {visible}', (word_id,)).fetchone()[0]
+            rows = db.execute(f'SELECT b.id {visible} ORDER BY b.rowid DESC LIMIT ? OFFSET ?',
                               (word_id, limit, offset)).fetchall()
             return Page([self._batch(db, word_id, row[0]) for row in rows], total, offset, limit)
 

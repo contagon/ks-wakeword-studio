@@ -448,6 +448,17 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(self.runtime.jobs.get(queued.id).status, 'cancelled')
         self.assertEqual(self.service.get_batch(self.word.id, queued.id).audio, [])
 
+    def test_list_hides_failed_and_cancelled_batches_but_keeps_pending(self):
+        _, ready = self.generate()
+        cancelled = self.service.enqueue(self.word.id)
+        self.runner.hook = lambda context: self.runtime.jobs.cancel(context.job.id)
+        self.runtime.workers.run_once('gpu')
+        self.assertEqual(self.runtime.jobs.get(cancelled.id).status, 'cancelled')
+        pending = self.service.enqueue(self.word.id)
+        page = self.service.list(self.word.id)
+        self.assertEqual([batch.id for batch in page.items], [pending.id, ready.id])
+        self.assertEqual(page.total, 2)
+
     def test_execute_without_owned_context_or_unadmitted_job_rejected(self):
         job = self.service.enqueue(self.word.id)
         with self.assertRaises(Conflict):

@@ -15,9 +15,9 @@
 - [x] Match teh negative datasets to look more like augmentation datasets in detail. one line info, next line license, final line size in gb and number of data samples
 
 # artificial
-- [ ] make omnivoie / qwen be on by default
-- [ ] don't add failed datasets to the bottom.
-- [ ] move delete dataset button to the far right
+- [x] make omnivoie / qwen be on by default
+- [x] don't add failed datasets to the bottom.
+- [x] move delete dataset button to the far right
 
 # record
 - [ ] rename tab to Manual
