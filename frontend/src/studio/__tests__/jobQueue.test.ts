@@ -9,16 +9,24 @@ const job = (id: string, status: Job['status'], extra = {}): Job => ({ id, kind:
 let ui: ReturnType<typeof mount> | undefined;
 afterEach(() => { ui?.unmount(); ui = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); document.body.innerHTML = ''; });
 
-it('shows actionable failed-job guidance and the private diagnostic location without rendering raw error prose', async () => {
+it('shows actionable failed-job guidance without diagnostics paths or raw error prose', async () => {
   const s = fakeStudio();
-  s.db.jobs = [job('broken-moss', 'failed', { kind: 'generation', result: { error: 'handler_failed', error_code: 'gpu_memory', message: 'Authorization: Bearer private-secret' } })];
+  s.db.jobs = [job('broken-moss', 'failed', { kind: 'generation', result: { error: 'handler_failed', error_code: 'gpu_memory', message: 'Authorization: Bearer private-secret' } }),
+    job('generic', 'failed', { result: { error: 'handler_failed', error_code: 'handler_failed' } }),
+    job('child', 'failed', { result: { error: 'handler_failed', error_code: 'child_command_failed' } })];
   history.replaceState(null, '', '/#/wakewords?word=a');
   ui = mount(TrainerApp); await flushPromises();
   await ui.get('[data-action="open-job-queue"]').trigger('click'); await flushPromises();
   const card = ui.get('[data-job-id="broken-moss"]');
   expect(card.text()).toContain('GPU memory');
-  expect(card.text()).toContain('studio/jobs/broken-moss/diagnostics.log');
+  expect(card.text()).not.toContain('diagnostics.log');
   expect(card.text()).not.toContain('private-secret');
+  for (const id of ['generic', 'child']) {
+    const generic = ui.get(`[data-job-id="${id}"]`);
+    expect(generic.text()).toContain('failed');
+    expect(generic.find('[role="alert"]').exists()).toBe(false);
+    expect(generic.text()).not.toContain('diagnostics');
+  }
 });
 
 it('shows global compact job groups and loads logs only on expansion', async () => {

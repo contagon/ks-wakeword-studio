@@ -163,10 +163,11 @@ class TrainingService:
         WorkspaceService(self.store).get(word_id)
         self._page(offset, limit)
         with self.store.transaction() as db:
-            rows = db.execute("SELECT v.version,EXISTS(SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id) legacy,EXISTS(SELECT 1 FROM legacy_model_validations a WHERE a.version_id=v.id) validated FROM model_versions v JOIN studio_jobs j ON j.id=v.run_id WHERE v.word_id=? AND j.status='complete' ORDER BY v.rowid DESC", (word_id,)).fetchall()
+            rows = db.execute("SELECT v.version,j.run_number,EXISTS(SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id) legacy,EXISTS(SELECT 1 FROM legacy_model_validations a WHERE a.version_id=v.id) validated FROM model_versions v JOIN studio_jobs j ON j.id=v.run_id WHERE v.word_id=? AND j.status='complete' ORDER BY v.rowid DESC", (word_id,)).fetchall()
             items = []
             for row in rows[offset:offset + limit]:
                 data = json.loads(row[0])
+                data['run_number'] = row['run_number']
                 if row['legacy']:
                     data.update(origin='legacy', validation_state='validated' if row['validated'] else 'unvalidated')
                 items.append(ModelVersion(**data))

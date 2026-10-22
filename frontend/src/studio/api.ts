@@ -136,5 +136,4 @@ export const studioApi = {
   deploymentStatus: (word: string, signal?: AbortSignal) => get<Publication[]>(`${wordPath(word)}/deployment/status`, undefined, signal),
   deploymentHistory: (word: string, params?: Pagination, signal?: AbortSignal) => get<Page<Publication>>(`${wordPath(word)}/deployment/history`, params, signal),
   publish: (word: string, version_id: string, signal?: AbortSignal) => post<Publication[]>(`${wordPath(word)}/deployment/publish`, { version_id }, signal),
-  rollback: (word: string, version_id: string, signal?: AbortSignal) => post<Publication[]>(`${wordPath(word)}/deployment/rollback`, { version_id }, signal),
 };

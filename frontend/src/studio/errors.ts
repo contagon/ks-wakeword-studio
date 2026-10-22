@@ -20,7 +20,11 @@ export function publicError(code: unknown): string {
   return typeof code === 'string' && Object.hasOwn(messages, code) ? messages[code]! : '';
 }
 
+// Generic failures add no actionable guidance beyond the failed status itself.
+const genericJobErrors = new Set(['handler_failed', 'child_command_failed']);
+
 export function jobError(job: Job): string {
   if (job.status !== 'failed' && job.status !== 'interrupted') return '';
-  return publicError('error_code' in job.result ? job.result.error_code : undefined) || publicError('handler_failed');
+  const code = 'error_code' in job.result ? job.result.error_code : undefined;
+  return typeof code === 'string' && genericJobErrors.has(code) ? '' : publicError(code);
 }

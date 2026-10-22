@@ -45,7 +45,7 @@ onBeforeUnmount(stop);
 <template>
   <section class="studio-card mt-3" :data-job-id="jobId" aria-live="polite">
     <div class="flex flex-wrap items-center justify-between gap-3"><div><h3>Job {{ jobId }}</h3><p v-if="loading" class="studio-muted text-xs">Loading job state…</p><span v-else-if="job" class="studio-status" :class="`studio-status-${job.status}`">{{ job.status }}</span></div><button v-if="canCancel" type="button" data-action="cancel-job" @click="cancel">Cancel job</button></div>
-    <p v-if="job && jobError(job)" class="studio-note" role="alert">{{ jobError(job) }}<span class="block text-xs">Private diagnostics: studio/jobs/{{ job.id }}/diagnostics.log (server only).</span></p>
+    <p v-if="job && jobError(job)" class="studio-note" role="alert">{{ jobError(job) }}</p>
     <pre v-if="displayLog" class="studio-log" aria-label="Job log tail">{{ displayLog }}</pre><p v-else-if="terminal" class="studio-muted text-xs">No retained log output.</p><p v-if="error" class="studio-note" role="alert">{{ error }}</p>
   </section>
 </template>

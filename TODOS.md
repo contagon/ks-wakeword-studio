@@ -34,16 +34,16 @@
 - [x] remove little menu about add microphone recordings
 
 # train
-- [ ] remove training prereqs section
-- [ ] make training logging more verbose, maybe counting steps and even including the loss
-- [ ] Remove the id and list the timestamp (prettily) in run history
-- [ ] add a single index for each training run (basically a version) that will increment as things are increased.
+- [x] remove training prereqs section
+- [x] make training logging more verbose, maybe counting steps and even including the loss
+- [x] Remove the id and list the timestamp (prettily) in run history
+- [x] add a single index for each training run (basically a version) that will increment as things are increased.
 
 # deploy
-- [ ] remove entire before publishing section
-- [ ] remove automation link
-- [ ] make download archive into jsut "Download" and make it match
-- [ ] again list them by dates not by run ids.
+- [x] remove entire before publishing section
+- [x] remove automation link
+- [x] make download archive into jsut "Download" and make it match
+- [x] again list them by dates not by run ids.
 
 # Overall
 - [ ] Make all timestamps pretty and relative to browser timestamps throughout.

@@ -281,7 +281,11 @@ class DeploymentService:
     def status(self, word_id):
         WorkspaceService(self.store).get(word_id)
         with self.store.transaction() as db:
-            return [Publication(**dict(row)) for row in db.execute('SELECT * FROM publications WHERE word_id=? ORDER BY device_id', (word_id,))]
+            return [Publication(**dict(row)) for row in db.execute(
+                'SELECT p.*,j.run_number FROM publications p '
+                'LEFT JOIN model_versions v ON v.id=p.desired_version AND v.word_id=p.word_id '
+                'LEFT JOIN studio_jobs j ON j.id=v.run_id '
+                'WHERE p.word_id=? ORDER BY p.device_id', (word_id,))]
 
     def history(self, word_id, offset=0, limit=50):
         WorkspaceService(self.store).get(word_id)
@@ -302,7 +306,7 @@ class DeploymentService:
         data.pop('cache_effect', None)
         updated = Publication(**data)
         with self.store.transaction() as db:
-            fields = [k for k in data if k not in ('word_id', 'device_id', 'revision', 'desired_version')]
+            fields = [k for k in data if k not in ('word_id', 'device_id', 'revision', 'desired_version', 'run_number')]
             db.execute('UPDATE publications SET ' + ','.join(k + '=?' for k in fields) +
                        ' WHERE word_id=? AND device_id=? AND revision=? AND desired_version=?',
                        (*[data[k] for k in fields], p.word_id, p.device_id, p.revision, p.desired_version))

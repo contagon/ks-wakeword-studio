@@ -123,6 +123,7 @@ class Job:
     started_at: str | None
     finished_at: str | None
     result: dict
+    run_number: int | None = None
 
 
 @dataclass(frozen=True)
@@ -255,6 +256,7 @@ class ModelVersion:
     metrics: dict
     origin: str = 'training'
     validation_state: str = 'validated'
+    run_number: int | None = None
 
 
 @dataclass(frozen=True)
@@ -349,7 +351,8 @@ class Publication:
     error_code: str | None
     updated_at: str
     cache_effect: str = ('Refresh restarts detection, clears downloaded model caches for all engines and may '
-                         're-download other selected remote models; selections are unchanged.')
+                          're-download other selected remote models; selections are unchanged.')
+    run_number: int | None = None
 
 
 @dataclass(frozen=True)

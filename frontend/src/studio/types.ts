@@ -21,7 +21,7 @@ export interface ScrapePayload { device_ids?: string[] | null }
 export interface ScrapeResult { run_id: string; status: string; new?: number; new_mapped?: number; failed?: number; unmapped?: number; evicted?: number }
 export type DownloadPayload = { dataset_id: string; augmentation_id?: never } | { augmentation_id: string; dataset_id?: never };
 export type DownloadResult = { dataset_id: string; fingerprint: string } | { augmentation_id: string; fingerprint: string; installed_bytes: number; file_count: number };
-interface JobRecord<K extends string, R extends JobResource, P, T> { id: string; kind: K; word_id: string | null; resource: R; payload: P; status: JobStatus; created_at: string; started_at: string | null; finished_at: string | null; result: T | JobFailure | EmptyJobResult }
+interface JobRecord<K extends string, R extends JobResource, P, T> { id: string; kind: K; word_id: string | null; resource: R; payload: P; status: JobStatus; created_at: string; started_at: string | null; finished_at: string | null; result: T | JobFailure | EmptyJobResult; run_number?: number | null }
 export type TrainJob = JobRecord<"train", "gpu", TrainPayload, TrainResult> & { word_id: string };
 export type GenerationJob = JobRecord<"generation", "gpu", GenerationPayload, GenerationResult> & { word_id: string };
 export type ScrapeJob = JobRecord<"scrape", "collection", ScrapePayload, ScrapeResult>;
@@ -60,8 +60,8 @@ export interface AugmentationInput { id: string; path: string; fingerprint: stri
 export interface LegacyRun { kind: 'legacy'; schema_version: number; run_id: string; word_id: string; model_id: string; phrase: string; language: string; fingerprint: string; created_at: string; legacy_identity: string }
 /** Calibration metrics narrowed from opaque `ModelVersion.metrics`; absent or malformed values are null. */
 export interface ModelMetrics { recall: number | null; false_accepts_per_hour: number | null; target_false_accepts_per_hour: number | null }
-export interface ModelVersion { id: string; word_id: string; model_id: string; run_id: string; trained_at: string; path: string; fingerprint: string; checksums: Record<string, string>; metrics: unknown; origin?: 'training' | 'legacy'; validation_state?: 'unvalidated' | 'validated' }
-export interface Publication { word_id: string; device_id: string; desired_version: string; revision: number; state: string; attempts: number; next_retry: string | null; manifest_state: string; refresh_state: string; runtime_state: string; error_code: string | null; updated_at: string; cache_effect: string }
+export interface ModelVersion { id: string; word_id: string; model_id: string; run_id: string; run_number?: number | null; trained_at: string; path: string; fingerprint: string; checksums: Record<string, string>; metrics: unknown; origin?: 'training' | 'legacy'; validation_state?: 'unvalidated' | 'validated' }
+export interface Publication { word_id: string; device_id: string; desired_version: string; run_number?: number | null; revision: number; state: string; attempts: number; next_retry: string | null; manifest_state: string; refresh_state: string; runtime_state: string; error_code: string | null; updated_at: string; cache_effect: string }
 export interface DeploymentCapabilities { requires_initially_clean_staging: boolean; requires_exclusive_staging: boolean; automatic_clean_check: boolean; remote_staging_inspection: boolean; remote_staging_discard: boolean; remote_staging_lock: boolean; notice: string; quarantine_notice: string; operator_action: string }
 export interface Pagination { offset?: number; limit?: number }
 export interface SampleQuery extends Pagination { label?: string; device_id?: string; near_miss?: boolean; source?: string; search?: string; after?: string; before?: string }

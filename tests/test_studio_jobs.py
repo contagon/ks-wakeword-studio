@@ -114,6 +114,44 @@ time.sleep(.5)
     def enqueue(self, kind='train', key=None):
         return self.jobs.enqueue(kind, self.word.id, {}, key)
 
+    def test_training_jobs_get_sequential_per_workspace_run_numbers(self):
+        other = WorkspaceService(self.store).create('Other', 'en', 'other')
+        first, generation, second = self.enqueue(), self.enqueue('generation'), self.enqueue()
+        elsewhere = self.jobs.enqueue('train', other.id, {})
+        self.assertEqual((first.run_number, second.run_number, elsewhere.run_number), (1, 2, 1))
+        self.assertIsNone(generation.run_number)
+        self.assertEqual(self.jobs.get(second.id).run_number, 2)
+        self.assertEqual(self.enqueue(key='same').run_number, self.enqueue(key='same').run_number)
+
+    def test_run_number_migration_backfills_existing_training_jobs_in_creation_order(self):
+        jobs = [self.enqueue(), self.enqueue('generation'), self.enqueue()]
+        with self.store.transaction() as db:
+            db.execute('DROP INDEX studio_jobs_run_number')
+            db.execute('ALTER TABLE studio_jobs DROP COLUMN run_number')
+            db.execute('PRAGMA user_version=17')
+        self.store.close()
+        self.store = Store.open(self.root)
+        self.addCleanup(self.store.close)
+        queue = JobQueue(self.store, groups=self.groups)
+        self.assertEqual([queue.get(job.id).run_number for job in jobs], [1, None, 2])
+        self.assertEqual(queue.enqueue('train', self.word.id, {}).run_number, 3)
+
+    def test_training_progress_metrics_are_bounded_and_formatted(self):
+        import json
+        job = self.enqueue()
+        context = JobContext(self.jobs, job, None, None)
+        accepted = [{'stage': 'training', 'completed': 400, 'total': 40000, 'loss': 0.1234, 'accuracy': 0.951},
+                    {'stage': 'evaluating', 'completed': 500, 'total': 40000, 'recall': 0.9, 'false_accepts_per_hour': 0.5},
+                    {'stage': 'augmenting'}]
+        rejected = [{'stage': 'training', 'accuracy': 1.5}, {'stage': 'training', 'loss': True},
+                    {'stage': 'generating', 'loss': 0.1}, {'stage': 'training', 'loss': 'secret'},
+                    {'stage': 'training', 'learning_rate': 0.001}]
+        for event in accepted + rejected:
+            ProcessRunner._progress(context, json.dumps(event).encode())
+        lines = self.jobs.log_tail(job.id).splitlines()
+        self.assertEqual(lines, ['Training 400/40000 · loss 0.1234 · accuracy 95.10%',
+                                 'Validation 500/40000 · recall 90.00% · false accepts/hour 0.5000', 'Augmenting'])
+
     def test_gpu_generation_and_training_share_durable_claim(self):
         train = self.enqueue()
         self.enqueue('generation')
@@ -346,7 +384,7 @@ time.sleep(.5)
                 self.assertEqual(WorkspaceService(store).get('word').model_id, 'hello')
                 self.assertEqual(JobQueue(store).list().total, 0)
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 17)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 18)
                     self.assertEqual(db.execute("SELECT role FROM devices WHERE id='device'").fetchone()[0], 'standalone')
             finally:
                 store.close()

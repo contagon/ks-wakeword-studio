@@ -174,11 +174,12 @@ mkdir -p "${WORK_DIR}/trained_models" || :
 
 # We write a YAML with a marker, then splice personal feature block in if it exists.
 YAML_PATH="${WORK_DIR}/trained_models/training_parameters.yaml"
+EVAL_STEP_INTERVAL=500
 
 cat <<'EOF' > "${YAML_PATH}"
 batch_size: 16
 clip_duration_ms: 1500
-eval_step_interval: 500
+eval_step_interval: __EVAL_STEP_INTERVAL__
 features:
 __GENERATED_FEATURE_MARKER__
 __PERSONAL_FEATURE_MARKER__
@@ -238,6 +239,7 @@ sed -i \
   -e "s|__NEG_DINNER_EVAL__|${TRAINING_DS}/negative_datasets/dinner_party_eval|g" \
   -e "s|__TRAIN_DIR__|${WORK_DIR}/trained_models/wakeword|g" \
   -e "s|__TRAINING_STEPS__|${TRAINING_STEPS}|g" \
+  -e "s|__EVAL_STEP_INTERVAL__|${EVAL_STEP_INTERVAL}|g" \
   "${YAML_PATH}"
 
 # Insert/remove generated block (real-only Studio runs have no generated features).
@@ -397,7 +399,8 @@ run_attempt() {
   echo
 
   "${PYTHON_BIN:-python}" "${TRAIN_ARGS[@]}" 2>&1 \
-    | tr '\r' '\n' \
+    | stdbuf -o0 tr '\r' '\n' \
+    | python3 "${PROGDIR}/training_progress.py" --total-steps="${TRAINING_STEPS}" --eval-interval="${EVAL_STEP_INTERVAL}" \
     | stdbuf -i0 -o0 sed -r -e "/^Validation Batch/d" \
     | tee "${TRAIN_LOG}" \
     | sed -r -e "/^Validation Batch/d" -e "s/^INFO:absl:/   /g"

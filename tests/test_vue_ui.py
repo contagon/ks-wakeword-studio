@@ -44,7 +44,7 @@ class VueTrainerUiTests(unittest.TestCase):
         self.assertNotIn('LegacyTrainer', app + shell)
         for page in ('Wakewords', 'Kiosks', 'NegativeDatasets', 'Artificial', 'Classify', 'Samples', 'Train', 'Deploy', 'Automate'):
             self.assertIn(f'<{page}Page', shell)
-        for contract in ('/queue', '/label', '/generation/jobs', '/training/jobs', '/datasets', '/deployment/rollback'):
+        for contract in ('/queue', '/label', '/generation/jobs', '/training/jobs', '/datasets', '/deployment/publish'):
             self.assertIn(contract, api)
         classify = (REPO_ROOT / 'frontend/src/studio/pages/ClassifyPage.vue').read_text()
         self.assertIn('expected_revision', api)

@@ -43,14 +43,35 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("TrainPage", () => {
-  it('blocks training until augmentation datasets are installed and links to Online Datasets', async () => {
+  it('blocks training until augmentation datasets are installed and links to Downloaded', async () => {
     const transport = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/augmentation/datasets')
       ? Promise.resolve(json(augmentationCatalog(false))) : transport(input, init));
     const ui = mount(host()); await flushPromises();
+    expect(ui.find('[data-training-prerequisites]').exists()).toBe(false);
+    expect(ui.text()).not.toContain('Training prerequisites');
     expect((ui.get('[data-action="start-training"]').element as HTMLButtonElement).disabled).toBe(true);
-    expect(ui.get('[data-training-prerequisites]').text()).toContain('MIT room impulse responses');
-    expect(ui.get('[data-training-prerequisites] a').attributes('href')).toBe('#/online-datasets?word=a');
+    expect(ui.get('[data-training-blocked]').text()).toContain('MIT room impulse responses');
+    expect(ui.get('[data-training-blocked] a').attributes('href')).toBe('#/online-datasets?word=a');
+    ui.unmount();
+  });
+  it('hides the blocked note when every selected dataset is installed', async () => {
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    expect(ui.find('[data-training-blocked]').exists()).toBe(false);
+    ui.unmount();
+  });
+  it('lists runs by run number and a readable local timestamp instead of job ids', async () => {
+    vi.setSystemTime(new Date('2026-10-21T12:00:00Z'));
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/a/training/runs')
+      ? Promise.resolve(json({ items: [{ ...train('complete'), id: 'b'.repeat(32), run_number: 7, created_at: '2026-10-21T09:00:00Z', started_at: '2026-10-21T10:00:00Z' }], total: 1, offset: 0, limit: 50 }))
+      : transport(input, init));
+    const ui = mount(host()); await flushPromises(); await flushPromises();
+    const run = ui.get('.studio-history');
+    expect(run.get('[data-run-number]').text()).toBe('Run #7');
+    expect(run.get('[data-run-time]').text()).toContain('2 hours ago');
+    expect(run.get('[data-run-time]').text()).toContain('2026');
+    expect(run.text()).not.toContain('b'.repeat(32));
     ui.unmount();
   });
   it.each([0, 2, 101])('counts %s selected training datasets across pages without counting evaluation inputs', async count => {
@@ -110,6 +131,7 @@ describe("TrainPage", () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     expect(ui.text()).toContain("3 reviewed positives"); expect(ui.text()).toContain("4 reviewed negatives"); expect(ui.text()).toContain("5 selected artificial"); expect(ui.text()).not.toContain("unreviewed");
     expect(ui.get('[data-effective-counts]').findAll("p").map(item => item.text())).toEqual(["3 reviewed positives", "4 reviewed negatives", "5 selected artificial", "1 selected negative datasets"]);
+    expect(ui.find('[data-dataset-compatibility]').exists()).toBe(false); expect(ui.text()).not.toContain('classifier representations');
     expect(ui.find('[data-cron-editor]').exists()).toBe(false);
     expect(ui.find('a[href*="automate"]').exists()).toBe(false);
     expect(ui.text()).not.toContain('Automatic training');

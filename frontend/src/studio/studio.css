@@ -47,10 +47,10 @@ html[data-studio-theme="dark"] .studio-app { --studio-text: #e0e8f0; --studio-bg
 .studio-app * { box-sizing: border-box; }
 .studio-app h1:not(.legacy-scope *) { font-size: 24px; font-weight: 700; letter-spacing: -.6px; margin: 0 0 5px; }
 .studio-app h2:not(.legacy-scope *) { font-size: 16px; font-weight: 650; margin: 0 0 12px; }
-.studio-app :where(button, input:not([type=checkbox]):not([type=radio]), select):not(.legacy-scope *) { font: inherit; border: 1px solid var(--studio-border); border-radius: 7px; padding: 7px 12px; color: var(--studio-text); background: var(--studio-surface); max-width: 100%; min-height: 36px; }
-.studio-app button:not(.legacy-scope *) { width: auto; height: fit-content; flex: 0 0 auto; justify-self: start; line-height: 20px; }
+.studio-app :where(button, .studio-button, input:not([type=checkbox]):not([type=radio]), select):not(.legacy-scope *) { font: inherit; border: 1px solid var(--studio-border); border-radius: 7px; padding: 7px 12px; color: var(--studio-text); background: var(--studio-surface); max-width: 100%; min-height: 36px; }
+.studio-app :where(button, .studio-button):not(.legacy-scope *) { width: auto; height: fit-content; flex: 0 0 auto; justify-self: start; line-height: 20px; }
 .studio-app :is(button, select):not(.legacy-scope *) { cursor: pointer; }
-.studio-app button:hover:not(.legacy-scope *) { background: var(--studio-hover); }
+.studio-app :where(button, .studio-button):hover:not(.legacy-scope *) { background: var(--studio-hover); }
 .studio-app button:disabled:not(.legacy-scope *) { opacity: .6; cursor: default; }
 .studio-app input:not([type=checkbox]):not([type=radio]):not(.legacy-scope *) { display: block; width: 100%; margin-top: 0; }
 .studio-app input:is([type=checkbox], [type=radio]):not(.legacy-scope *) { appearance: auto; width: 16px; height: 16px; min-height: 0; flex: 0 0 16px; padding: 0; margin: 0; accent-color: var(--color-studio-green); cursor: pointer; }

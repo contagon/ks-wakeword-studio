@@ -333,7 +333,7 @@ class GenerationTests(unittest.TestCase):
             store = Store.open(root)
             try:
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 17)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 18)
                     self.assertEqual(db.execute("SELECT phrase FROM wakewords WHERE id='old'").fetchone()[0], 'Old robot')
                     self.assertEqual(db.execute("SELECT family_id FROM audio_records WHERE id='audio'").fetchone()[0], 'family')
             finally:

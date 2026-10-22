@@ -32,15 +32,14 @@ test('Downloaded preserves old links and saves per-wakeword augmentation selecti
   await expect(augmentation.locator('[data-augmentation-id="fma_16k"] input')).not.toBeChecked();
   await expect(augmentation.locator('.studio-status')).toHaveText(['installed', 'installed', 'installed', 'installed']);
   await page.goto(`/#/train?word=${a.id}`);
-  await expect(page.locator('[data-training-prerequisites]')).toContainText('All selected augmentation datasets are installed');
-  await expect(page.locator('[data-missing-negative-datasets]')).toBeVisible();
+  await expect(page.locator('[data-training-prerequisites]')).toHaveCount(0);
+  await expect(page.locator('[data-training-blocked]')).toBeVisible();
   await expect(page.locator('[data-action="start-training"]')).toBeDisabled();
+  await expect(page.locator('[data-training-blocked] a')).toHaveAttribute('href', `#/online-datasets?word=${a.id}`);
   expect((await request.put(`/api/studio/wakewords/${a.id}/datasets`, { data: { dataset_ids: [] } })).ok()).toBeTruthy();
   await page.reload();
-  await expect(page.locator('[data-missing-negative-datasets]')).toHaveCount(0);
+  await expect(page.locator('[data-training-blocked]')).toHaveCount(0);
   await expect(page.locator('[data-action="start-training"]')).toBeEnabled();
-  await page.locator('[data-training-prerequisites] a').click();
-  await expect(page).toHaveURL(new RegExp(`online-datasets\\?word=${a.id}`));
 });
 
 test('dark mode follows the system and remembers an explicit light choice', async ({ page, request }) => {

@@ -150,16 +150,37 @@ class LegacyTrainingAdapter:
         return TrainingResult(artifacts, {name: sha256(Path(path)) for name, path in artifacts.items()}, metrics, True)
 
 
+def _progress_fd(env):
+    try:
+        descriptor = int(env.get('STUDIO_PROGRESS_FD', ''))
+        os.fstat(descriptor)
+        return descriptor
+    except (ValueError, OSError):
+        return None
+
+
+def _stage(env, stage):
+    # Enumerated stage names only; the queue rejects anything else.
+    descriptor = _progress_fd(env)
+    if descriptor is not None:
+        try:
+            os.write(descriptor, (json.dumps({'stage': stage}) + '\n').encode())
+        except OSError:
+            pass
+
+
 def _run(argv, *, cwd, env):
     # Called only by main inside the queue-owned CLI tree (or an explicit CLI
     # invocation). No shell interpolation, new sessions, daemonization or globals.
+    descriptor = _progress_fd(env)
+    pass_fds = (descriptor,) if descriptor is not None else ()
     log_path = env.get('STUDIO_TRAIN_COMMAND_LOG')
     if log_path:
         with Path(log_path).open('ab') as log:
             subprocess.run([str(a) for a in argv], cwd=cwd, env=env, check=True,
-                           stdout=log, stderr=subprocess.STDOUT)
+                           stdout=log, stderr=subprocess.STDOUT, pass_fds=pass_fds)
     else:
-        subprocess.run([str(a) for a in argv], cwd=cwd, env=env, check=True)
+        subprocess.run([str(a) for a in argv], cwd=cwd, env=env, check=True, pass_fds=pass_fds)
 
 
 def stage_inputs(manifest, root):
@@ -210,21 +231,25 @@ def main(argv=None):
     env['STUDIO_TRAIN_COMMAND_LOG'] = str(root / 'logs/commands.log')
     cli = REPO / 'cli'
     python = shared / '.venv/bin/python'
+    _stage(env, 'preparing')
     try:
         _run([python, cli / 'check_training_venv'], cwd=root, env=env)
     except (OSError, subprocess.CalledProcessError):
         _run(['bash', cli / 'setup_python_venv', f'--data-dir={shared}'], cwd=shared, env=env)
         _run([python, cli / 'check_training_venv'], cwd=root, env=env)
+    _stage(env, 'staging')
     split_path = stage_inputs(manifest, root)
     # Engine-specific explicit manifests: never fall back to catalog defaults.
     mww_datasets = manifest['datasets']
     dataset_path = root / 'datasets.json'
     dataset_path.write_text(json.dumps({'schema_version': 1, 'datasets': mww_datasets}))
+    _stage(env, 'augmenting')
     _run([python, cli / 'wake_word_sample_augmenter', f'--data-dir={root}', f'--split-manifest={split_path}', f'--seed={manifest["seed"]}',
           f'--augmentation-ids={",".join(augmentation)}',
           f'--personal-dir={root / "work/personal_samples"}', f'--negative-dir={root / "work/reviewed_negatives"}',
           *[f'--{flag}={augmentation[name]}' for flag, name in
             (('mit-rirs-16k-dir', 'mit_rirs_16k'), ('audioset-16k-dir', 'audioset_16k'), ('fma-16k-dir', 'fma_16k'), ('chime-16k-dir', 'chime_16k')) if name in augmentation]], cwd=root, env=env)
+    _stage(env, 'training')
     _run([cli / 'wake_word_sample_trainer', f'--data-dir={root}', f'--tool-data-dir={shared}', f'--dataset-manifest={dataset_path}',
           f'--artifact-slug={manifest["model_id"]}', f'--language={manifest["language"]}',
           f'--stable-model-id={manifest["model_id"]}',
@@ -232,5 +257,6 @@ def main(argv=None):
           f'--samples={sum(a["label"] == "positive" for a in manifest["audio"])}',
           'studio-input', manifest['phrase']], cwd=root, env=env)
     validation_args = [f'--data-dir={root}', f'--model-id={manifest["model_id"]}']
+    _stage(env, 'validating')
     _run([python, cli / 'validate_studio_model.py', *validation_args, '--engine=mww'], cwd=root, env=env)
     return 0

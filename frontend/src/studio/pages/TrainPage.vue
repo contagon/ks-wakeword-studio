@@ -6,6 +6,7 @@ import type { Dataset, Job, Page, TrainingCounts, TrainingSettings } from "../ty
 import { isActiveJob, useJobQueue } from '../jobs';
 import type { AugmentationCatalog } from '../types';
 import { jobError } from '../errors';
+import { absoluteTime, prettyTime } from '../time';
 
 const workspace = useWorkspace();
 const queue = useJobQueue();
@@ -22,10 +23,17 @@ async function loadPrerequisites(): Promise<void> {
   finally { if (!controller.signal.aborted) prerequisitesLoading.value = false; }
 }
 const datasetsHref = computed(() => `#/online-datasets${activeId.value ? '?word=' + encodeURIComponent(activeId.value) : ''}`);
+const blockedReason = computed(() => {
+  if (prerequisitesLoading.value || loading.value) return '';
+  if (prerequisiteError.value) return prerequisiteError.value;
+  const missing = [...(augmentation.value?.items.filter(item => item.selected && item.status !== 'installed') ?? []), ...missingDatasets.value];
+  return missing.length ? `Download or deselect ${missing.map(row => row.name).join(', ')} before training.` : '';
+});
+const now = ref(Date.now()); const clock = setInterval(() => { now.value = Date.now(); }, 60000);
+function runTime(run: Job): string { return run.started_at ?? run.created_at; }
 const counts = ref<TrainingCounts | null>(null); const settings = ref<TrainingSettings>({ training_steps: 40000 }); const runs = ref<Job[]>([]); const selectedDatasets = ref<Dataset[]>([]); const loading = ref(false); const saving = ref(false); const starting = ref(false); const error = ref(""); const started = ref<Job | null>(null);
 let loadRequest: AbortController | undefined; let saveRequest: AbortController | undefined; let startRequest: AbortController | undefined; let loadGeneration = 0; let saveGeneration = 0; let startGeneration = 0;
 const activeId = computed(() => workspace.selectedId.value);
-const selectedRepresentations = computed(() => [...new Set(selectedDatasets.value.map(dataset => `${dataset.representation}/${dataset.adapter}`))]);
 const negativeDatasetCount = computed(() => selectedDatasets.value.filter(dataset => dataset.selected && dataset.split !== 'evaluation').length);
 const evaluationDatasetCount = computed(() => selectedDatasets.value.filter(dataset => dataset.selected && dataset.split === 'evaluation').length);
 const missingDatasets = computed(() => selectedDatasets.value.filter(dataset => dataset.selected && dataset.status !== 'installed'));
@@ -59,22 +67,14 @@ watch(queue.jobs, jobs => { runs.value = runs.value.map(run => jobs[run.id]?.wor
 watch(() => Object.values(queue.jobs.value).filter(job => job.kind === 'download' && job.payload.augmentation_id).map(job => ({ id: job.id, active: isActiveJob(job) })), (next, previous) => {
   if (next.some(job => !job.active && previous.some(old => old.id === job.id && old.active))) void loadPrerequisites();
 });
-onBeforeUnmount(() => prerequisiteRequest?.abort());
+onBeforeUnmount(() => { prerequisiteRequest?.abort(); clearInterval(clock); });
 watch(activeId, () => { abortWorkspaceMutations(); void load(); void loadPrerequisites(); }, { immediate: true }); onBeforeUnmount(() => { loadRequest?.abort(); saveRequest?.abort(); startRequest?.abort(); });
 </script>
 
 <template>
   <section><div class="mb-4"><h1>Train</h1><p class="studio-muted">Configure inputs and start a manual training run. Progress and logs are available in the global job queue.</p></div>
-    <div data-training-prerequisites class="studio-card mb-4"><div class="studio-toolbar"><h2>Training prerequisites</h2><button type="button" :disabled="prerequisitesLoading" @click="loadPrerequisites">Refresh status</button></div>
-      <p v-if="prerequisitesLoading" class="studio-muted mt-3">Checking augmentation datasets…</p>
-      <p v-else-if="augmentation?.ready" class="studio-muted mt-3">All selected augmentation datasets are installed. Selected augmentation runs automatically before model training.</p>
-      <template v-else><p class="studio-note mt-3" role="alert">Download and prepare the selected augmentation datasets before starting training.</p><ul class="studio-muted mt-3"><li v-for="row in augmentation?.items.filter(item => item.selected && item.status !== 'installed') ?? []" :key="row.id">{{ row.name }} — {{ row.status }}</li></ul></template>
-      <p v-if="prerequisiteError" class="studio-note mt-3" role="alert">{{ prerequisiteError }}</p>
-      <template v-if="!loading && missingDatasets.length"><p data-missing-negative-datasets class="studio-note mt-3" role="alert">Download the selected negative datasets, or deselect them, before starting training.</p><ul class="studio-muted mt-3"><li v-for="row in missingDatasets" :key="row.id">{{ row.name }} — {{ row.status }}</li></ul></template>
-      <a :href="datasetsHref" class="mt-3 inline-block">Open Downloaded</a>
-    </div>
     <div class="studio-card"><h2>Effective inputs for the next snapshot</h2><p v-if="loading" class="studio-muted">Loading effective inputs…</p><div v-else-if="counts" data-effective-counts class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 my-4"><p class="studio-muted"><strong class="text-2xl font-semibold">{{ counts.positive }}</strong> reviewed positives</p><p class="studio-muted"><strong class="text-2xl font-semibold">{{ counts.negative }}</strong> reviewed negatives</p><p class="studio-muted"><strong class="text-2xl font-semibold">{{ counts.artificial }}</strong> selected artificial</p><p data-negative-datasets-count class="studio-muted"><strong class="text-2xl font-semibold">{{ negativeDatasetCount }}</strong> selected negative datasets</p></div><p v-if="!loading && counts && evaluationDatasetCount" class="studio-muted text-xs">{{ evaluationDatasetCount }} evaluation-only {{ evaluationDatasetCount === 1 ? 'dataset' : 'datasets' }} selected separately; not sampled for training.</p><p class="studio-muted text-xs">Training uses reviewed positive/negative samples, completed selected artificial batches, and selected external negative datasets. Dataset totals count datasets, not individual audio samples. Pending and discarded recordings are not training inputs.</p></div>
-    <div class="studio-card mt-4"><h2>Training parameters</h2><div class="grid gap-3 mt-3"><label>Training steps<input v-model.number="settings.training_steps" name="training-steps" type="number" min="1" max="10000000" required></label><p data-dataset-compatibility class="studio-note text-xs">Selected classifier representations: <strong>{{ selectedRepresentations.join(", ") || "none" }}</strong>. microWakeWord uses mww_mmap feature tensors. dinner_party_eval is evaluation-only and is never a training-sampled input. Server preflight remains authoritative.</p><div class="flex gap-2"><button type="button" data-action="save-training-settings" class="studio-primary" :disabled="saving" @click="save">{{ saving ? "Saving…" : "Save parameters" }}</button><button type="button" data-action="start-training" :disabled="!activeId || starting || prerequisitesLoading || !augmentation?.ready || loading || missingDatasets.length > 0" @click="start">{{ starting ? "Starting…" : "Start training" }}</button></div></div><p v-if="error" class="studio-note mt-3" role="alert">{{ error }}</p><button v-if="started" type="button" class="mt-3" @click="queue.show(started.id)">View training in queue</button></div>
-    <div class="studio-card mt-4"><h2>Run history</h2><article v-for="run in runs" :key="run.id" class="studio-history mt-3"><div class="flex justify-between gap-3"><strong>{{ run.id }}</strong><span class="studio-status" :class="`studio-status-${run.status}`">{{ run.status }}</span><button type="button" @click="queue.show(run.id)">View in queue</button></div><p v-if="skipped(run)" class="studio-note text-xs">Skipped because inputs and configuration were unchanged.</p><p v-if="jobError(run)" class="studio-note text-xs" role="alert">{{ jobError(run) }}</p></article><p v-if="!loading && !runs.length" class="studio-muted">No training runs for this workspace yet.</p></div>
+    <div class="studio-card mt-4"><h2>Training parameters</h2><div class="grid gap-3 mt-3"><label>Training steps<input v-model.number="settings.training_steps" name="training-steps" type="number" min="1" max="10000000" required></label><div class="flex gap-2"><button type="button" data-action="save-training-settings" class="studio-primary" :disabled="saving" @click="save">{{ saving ? "Saving…" : "Save parameters" }}</button><button type="button" data-action="start-training" :disabled="!activeId || starting || prerequisitesLoading || !augmentation?.ready || loading || missingDatasets.length > 0" @click="start">{{ starting ? "Starting…" : "Start training" }}</button></div><p v-if="blockedReason" data-training-blocked class="studio-note text-xs" role="alert">{{ blockedReason }} <a :href="datasetsHref">Open Downloaded</a></p></div><p v-if="error" class="studio-note mt-3" role="alert">{{ error }}</p><button v-if="started" type="button" class="mt-3" @click="queue.show(started.id)">View training in queue</button></div>
+    <div class="studio-card mt-4"><h2>Run history</h2><article v-for="run in runs" :key="run.id" class="studio-history mt-3" :data-run-id="run.id"><div class="flex justify-between items-center gap-3"><span><strong data-run-number>{{ run.run_number ? `Run #${run.run_number}` : 'Run' }}</strong><span data-run-time class="studio-muted block text-xs" :title="absoluteTime(runTime(run))">{{ prettyTime(runTime(run), now) }}</span></span><span class="studio-status ml-auto" :class="`studio-status-${run.status}`">{{ run.status }}</span><button type="button" @click="queue.show(run.id)">View in queue</button></div><p v-if="skipped(run)" class="studio-note text-xs">Skipped because inputs and configuration were unchanged.</p><p v-if="jobError(run)" class="studio-note text-xs" role="alert">{{ jobError(run) }}</p></article><p v-if="!loading && !runs.length" class="studio-muted">No training runs for this workspace yet.</p></div>
   </section>
 </template>

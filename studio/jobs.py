@@ -7,6 +7,7 @@ child group are gone; elapsed time alone is never evidence of process death.
 
 import fcntl
 import json
+import math
 import os
 import re
 import signal
@@ -29,6 +30,9 @@ RESOURCES = {'train': 'gpu', 'generation': 'gpu', 'preview': 'gpu', 'classify': 
              'deploy': 'collection', 'scrape': 'collection', 'download': 'download'}
 ACTIVE = ('running', 'cancelling')
 LOG_LIMIT = 65536
+# Bounded numeric training metrics a child may report: (label, maximum, shown as percentage).
+TRAINING_METRICS = {'loss': ('loss', 1e6, False), 'accuracy': ('accuracy', 1, True), 'recall': ('recall', 1, True),
+                    'precision': ('precision', 1, True), 'false_accepts_per_hour': ('false accepts/hour', 1e9, False)}
 
 
 def utc_now():
@@ -158,7 +162,8 @@ class JobQueue:
     @staticmethod
     def _record(row):
         return Job(row['id'], row['kind'], row['word_id'], row['resource'], json.loads(row['payload']),
-                   row['status'], row['created_at'], row['started_at'], row['finished_at'], json.loads(row['result']))
+                   row['status'], row['created_at'], row['started_at'], row['finished_at'], json.loads(row['result']),
+                   row['run_number'])
 
     def _row(self, db, job_id):
         row = db.execute('SELECT * FROM studio_jobs WHERE id=?', (job_id,)).fetchone()
@@ -181,9 +186,13 @@ class JobQueue:
                     raise Conflict('Dedupe key belongs to different work')
                 return self._record(old)
         job_id = uuid.uuid4().hex
-        db.execute('INSERT INTO studio_jobs(id,kind,word_id,resource,payload,dedupe_key,schedule_scope,status,created_at) '
-                   "VALUES (?,?,?,?,?,?,?,'queued',?)",
-                   (job_id, kind, word_id, RESOURCES[kind], encoded, dedupe_key, scope, aware_utc(now).isoformat()))
+        run_number = None
+        if kind == 'train':
+            run_number = db.execute("SELECT coalesce(max(run_number),0)+1 FROM studio_jobs WHERE word_id=? AND kind='train'",
+                                    (word_id,)).fetchone()[0]
+        db.execute('INSERT INTO studio_jobs(id,kind,word_id,resource,payload,dedupe_key,schedule_scope,status,created_at,run_number) '
+                   "VALUES (?,?,?,?,?,?,?,'queued',?,?)",
+                   (job_id, kind, word_id, RESOURCES[kind], encoded, dedupe_key, scope, aware_utc(now).isoformat(), run_number))
         return self._record(self._row(db, job_id))
 
     def enqueue(self, kind: str, word_id: str | None, payload: dict, dedupe_key: str | None = None) -> Job:
@@ -362,11 +371,11 @@ class ProcessRunner:
         # free-form messages, paths, exception text or model responses.
         try:
             event = json.loads(raw)
-            if not isinstance(event, dict) or set(event) - {'stage', 'engine', 'completed', 'total'}:
+            if not isinstance(event, dict) or set(event) - {'stage', 'engine', 'completed', 'total', *TRAINING_METRICS}:
                 return
             stage = event.get('stage')
             if stage not in ('preparing', 'loading', 'generating', 'qualifying', 'qualified',
-                             'normalizing', 'validating', 'saved'):
+                             'normalizing', 'validating', 'saved', 'staging', 'augmenting', 'training', 'evaluating'):
                 return
             engine = event.get('engine')
             if engine is not None and engine not in ('omnivoice', 'qwen3', 'moss', 'piper'):
@@ -377,7 +386,19 @@ class ProcessRunner:
                 if type(done) is not int or type(total) is not int or not 0 <= done <= total <= 100000000:
                     return
                 count = f' {done}/{total}'
-            context.log(f'{stage.capitalize()}{" " + engine if engine else ""}{count}')
+            metrics = []
+            for name, (label, upper, percent) in TRAINING_METRICS.items():
+                if name not in event:
+                    continue
+                value = event[name]
+                if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= upper:
+                    return
+                metrics.append(f'{label} {value * 100:.2f}%' if percent else f'{label} {value:.4f}')
+            if metrics and stage not in ('training', 'evaluating'):
+                return
+            name = 'Validation' if stage == 'evaluating' else stage.capitalize()
+            context.log(f'{name}{" " + engine if engine else ""}{count}{"".join(" · " + m for m in metrics)}')
+            return True
         except (ValueError, UnicodeError, RecursionError):
             return
 
@@ -423,7 +444,7 @@ class ProcessRunner:
         started = heartbeat = time.monotonic()
 
         def drain():
-            nonlocal pending, dropping
+            nonlocal pending, dropping, heartbeat
             try:
                 data = os.read(progress_read, 65536)
             except BlockingIOError:
@@ -435,8 +456,9 @@ class ProcessRunner:
                     if len(pending) > 2048:
                         pending, dropping = b'', True
                 if end:
-                    if not dropping:
-                        self._progress(context, pending)
+                    if not dropping and self._progress(context, pending):
+                        # Fresh structured progress replaces the generic heartbeat.
+                        heartbeat = time.monotonic()
                     pending, dropping = b'', False
         try:
             while True:

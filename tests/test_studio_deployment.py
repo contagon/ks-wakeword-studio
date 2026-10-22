@@ -157,6 +157,16 @@ class DeploymentTests(unittest.TestCase):
     def status(self):
         return {p.device_id: p for p in self.service.status(self.word.id)}
 
+    def test_archive_and_delivery_run_numbers_follow_the_training_job(self):
+        old = self.train()
+        new = self.train()
+        archived = self.runtime.training.versions(self.word.id, limit=1)
+        self.assertEqual(archived.items[0].id, new.id)
+        self.assertEqual(archived.items[0].run_number, 2)
+        self.service.publish(old.id)
+        self.assertEqual(self.status()['leader'].run_number, 1)
+        self.assertEqual(self.status()['leader'].desired_version, old.id)
+
     def test_automatic_complete_only_leader_and_standalone_preserve_slots_and_unrelated(self):
         self.client.files['solo'] = {'openwakeword/unrelated.onnx': b'keep'}
         before = list(self.client.slots)
@@ -438,7 +448,7 @@ class DeploymentTests(unittest.TestCase):
             store = Store.open(root)
             try:
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 17)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 18)
                     self.assertEqual(db.execute('SELECT phrase FROM wakewords').fetchone()[0], 'Retained')
                     self.assertEqual(db.execute('SELECT count(*) FROM publications').fetchone()[0], 0)
             finally:
@@ -664,6 +674,8 @@ class DeploymentTests(unittest.TestCase):
             db.execute('ALTER TABLE devices DROP COLUMN removed')
             db.execute('ALTER TABLE devices DROP COLUMN name')
             db.execute("CREATE UNIQUE INDEX one_studio_leader ON devices(role) WHERE role='leader'")
+            db.execute('DROP INDEX studio_jobs_run_number')
+            db.execute('ALTER TABLE studio_jobs DROP COLUMN run_number')
             db.execute('PRAGMA user_version=9')
         self.runtime.startup()
         self.runtime.devices.client = self.client
@@ -671,7 +683,7 @@ class DeploymentTests(unittest.TestCase):
         with self.runtime.devices.store.transaction() as db:
             names = db.execute("SELECT filenames FROM deployment_staging WHERE device_id='leader' AND word_id=?", (self.word.id,)).fetchone()
             self.assertEqual(set(json.loads(names[0])), {'hello_robot.json', 'hello_robot.tflite'})
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 17)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 18)
         other = self.other_version()
         self.service.publish(other.id)
         self.assertEqual(self.client.files['leader']['microwakeword/hello_robot.tflite'],
