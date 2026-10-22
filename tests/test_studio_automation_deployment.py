@@ -61,7 +61,7 @@ def test_scheduled_deployment_independent_of_training_and_preserves_rollback(pre
     runtime.workers.run_once('collection')
     assert runtime.jobs.get(job.id).status == 'complete'
     assert intent(runtime, word)['version_id'] == new.id
-    runtime.deployment.rollback(word.id, old.id)
+    runtime.deployment.publish(old.id)
     runtime.jobs.enqueue('deploy', word.id, {})
     runtime.workers.run_once('collection')
     runtime.deployment.reconcile()

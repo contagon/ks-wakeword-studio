@@ -1,3 +1,4 @@
+from dataclasses import asdict
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -533,10 +534,8 @@ class JobBoundaryTests(unittest.TestCase):
             runtime = StudioRuntime(Path(root))
             app = FastAPI()
             app.include_router(create_router(runtime))
-            with TestClient(app) as api, patch.object(Store, 'open', side_effect=AssertionError('Unexpected DB access')):
-                response = api.get('/api/studio/jobs/health')
-                self.assertEqual(response.status_code, 200, response.text)
-                self.assertEqual(response.json(), {'workers_started': False, 'degraded': False, 'loops': []})
+            with TestClient(app), patch.object(Store, 'open', side_effect=AssertionError('Unexpected DB access')):
+                self.assertEqual(asdict(runtime.health()), {'workers_started': False, 'degraded': False, 'loops': []})
                 self.assertFalse((Path(root) / 'studio').exists())
 
     def test_health_route_remains_readable_during_sql_failure_and_exposes_recovery(self):
@@ -550,24 +549,22 @@ class JobBoundaryTests(unittest.TestCase):
             app.include_router(create_router(runtime))
             try:
                 pool = runtime.workers
-                with TestClient(app) as api:
+                with TestClient(app):
                     # Run one deterministic failed iteration, without real threads or waits.
                     with patch.object(runtime._store, 'transaction', side_effect=sqlite3.OperationalError('Bearer secret-sql')), \
                          patch.object(pool.stop_event, 'wait', side_effect=lambda delay: pool.stop_event.set()):
                         pool._loop('gpu')
-                        response = api.get('/api/studio/jobs/health')
-                        self.assertEqual(response.status_code, 200, response.text)
-                        failed = response.json()
+                        failed = asdict(runtime.health())
                         self.assertTrue(failed['degraded'])
                         gpu = next(item for item in failed['loops'] if item['component'] == 'gpu')
                         self.assertEqual(gpu['last_error_code'], 'resource_loop_failed')
                         self.assertEqual(gpu['last_failure_at'], now.isoformat())
-                        self.assertNotIn('secret-sql', response.text)
+                        self.assertNotIn('secret-sql', str(failed))
                     pool.stop_event.clear()
                     now += timedelta(seconds=1)
                     with patch.object(pool.stop_event, 'wait', side_effect=lambda delay: pool.stop_event.set()):
                         pool._loop('gpu')
-                    recovered = api.get('/api/studio/jobs/health').json()
+                    recovered = asdict(runtime.health())
                     self.assertFalse(recovered['degraded'])
                     gpu = next(item for item in recovered['loops'] if item['component'] == 'gpu')
                     self.assertEqual((gpu['status'], gpu['failure_count'], gpu['consecutive_failures']), ('ok', 1, 0))
@@ -584,19 +581,14 @@ class JobBoundaryTests(unittest.TestCase):
             app.include_router(create_router(runtime))
             try:
                 with TestClient(app) as client:
-                    schedule = client.put('/api/studio/schedules/scrape', json={
-                        'cron': '*/5 * * * *', 'timezone': 'UTC', 'enabled': True})
-                    self.assertEqual(schedule.status_code, 200, schedule.text)
-                    self.assertIn('next_run_at', schedule.json())
-                    job = client.post('/api/studio/jobs', json={'kind': 'scrape', 'payload': {'device_ids': []}})
-                    self.assertEqual(job.status_code, 201, job.text)
-                    job_id = job.json()['id']
-                    self.assertNotIn('child', job.json())
+                    self.assertIsNotNone(runtime.schedules.save('scrape', '*/5 * * * *', 'UTC', True).next_run_at)
+                    job_id = runtime.jobs.enqueue('scrape', None, {'device_ids': []}).id
+                    self.assertNotIn('child', client.get(f'/api/studio/jobs/{job_id}').json())
                     self.assertEqual(client.get('/api/studio/jobs').json()['total'], 1)
                     self.assertEqual(client.get(f'/api/studio/jobs/{job_id}/logs').status_code, 200)
                     self.assertEqual(client.post(f'/api/studio/jobs/{job_id}/cancel').json()['status'], 'cancelled')
-                    self.assertEqual(client.put('/api/studio/schedules/scrape', json={
-                        'cron': '* * * * * *', 'timezone': 'UTC', 'enabled': True}).status_code, 422)
+                    with self.assertRaises(ValidationError):
+                        runtime.schedules.save('scrape', '* * * * * *', 'UTC', True)
             finally:
                 runtime.shutdown()
 

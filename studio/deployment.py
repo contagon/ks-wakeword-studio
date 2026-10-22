@@ -20,7 +20,7 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from studio.jobs import aware_utc, utc_now
 from studio.legacy_training import checked_file, sha256
 from studio.models import (Conflict, CredentialsRequired, IdentityMismatch, ModelVersion,
-                           NotFound, Page, Publication, RemoteRejected, RemoteUnavailable,
+                           NotFound, Publication, RemoteRejected, RemoteUnavailable,
                            ValidationError)
 from studio.storage import open_directory
 from studio.workspaces import WorkspaceService
@@ -268,10 +268,6 @@ class DeploymentService:
             db.execute('INSERT INTO legacy_model_validations VALUES (?,?) ON CONFLICT(version_id) DO UPDATE SET validated_at=excluded.validated_at', (version.id, self._now()))
         return validated
 
-    def rollback(self, word_id, version_id):
-        self.version(version_id, word_id)
-        return self.publish(version_id)
-
     def retry_due(self, now):
         now = aware_utc(now)
         with self._lock('intent'):
@@ -286,15 +282,6 @@ class DeploymentService:
                 'LEFT JOIN model_versions v ON v.id=p.desired_version AND v.word_id=p.word_id '
                 'LEFT JOIN studio_jobs j ON j.id=v.run_id '
                 'WHERE p.word_id=? ORDER BY p.device_id', (word_id,))]
-
-    def history(self, word_id, offset=0, limit=50):
-        WorkspaceService(self.store).get(word_id)
-        self.training._page(offset, limit)
-        with self.store.transaction() as db:
-            total = db.execute('SELECT count(*) FROM publication_history WHERE word_id=?', (word_id,)).fetchone()[0]
-            rows = db.execute('SELECT record FROM publication_history WHERE word_id=? ORDER BY id DESC LIMIT ? OFFSET ?',
-                              (word_id, limit, offset)).fetchall()
-        return Page([Publication(**json.loads(r[0])) for r in rows], total, offset, limit)
 
     def _current(self, p):
         with self.store.transaction() as db:

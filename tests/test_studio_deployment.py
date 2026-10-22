@@ -95,29 +95,6 @@ class FixtureKiosk(KioskClient):
 
 
 class DeploymentTests(unittest.TestCase):
-    def test_capabilities_help_exposes_staging_boundary_without_probe_or_mutation(self):
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-        from studio.api import create_router
-        app = FastAPI()
-        app.include_router(create_router(self.runtime))
-        with TestClient(app) as api:
-            response = api.get('/api/studio/deployment/capabilities')
-            self.assertEqual(response.status_code, 200)
-            help = response.json()
-            self.assertTrue(help['requires_initially_clean_staging'])
-            self.assertTrue(help['requires_exclusive_staging'])
-            self.assertFalse(help['automatic_clean_check'])
-            self.assertFalse(help['remote_staging_inspection'])
-            self.assertFalse(help['remote_staging_discard'])
-            self.assertFalse(help['remote_staging_lock'])
-            self.assertIn('manual uploads', help['notice'])
-            self.assertIn('before detection', help['quarantine_notice'])
-            self.assertIn('operator', help['operator_action'])
-            schema = api.get('/openapi.json').json()
-            self.assertIn('DeploymentCapabilities', schema['components']['schemas'])
-        self.assertEqual(self.client.calls, [])
-
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.now = datetime(2026, 10, 18, tzinfo=timezone.utc)
@@ -189,7 +166,7 @@ class DeploymentTests(unittest.TestCase):
         self.client.offline.add('solo')
         old = self.train()
         new = self.train()
-        self.service.rollback(self.word.id, old.id)
+        self.service.publish(old.id)
         revision = self.status()['solo'].revision
         self.client.offline.clear()
         self.client.calls.clear()
@@ -239,7 +216,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn('follow', self.client.refreshes())
         self.assertEqual(self.client.uploads('follow'), [])
         new = self.train()
-        self.service.rollback(self.word.id, old.id)
+        self.service.publish(old.id)
         self.client.calls.clear()
         self.client.files['follow']['microwakeword/hello_robot.tflite'] = b'wrong'
         self.service.retry_due(self.now + timedelta(days=1))
@@ -262,7 +239,7 @@ class DeploymentTests(unittest.TestCase):
     def test_recovery_does_not_replay_old_version_over_manual_rollback(self):
         old = self.train()
         new = self.train()
-        self.service.rollback(self.word.id, old.id)
+        self.service.publish(old.id)
         revision = self.status()['leader'].revision
         self.service.reconcile()
         self.service.reconcile()
@@ -312,7 +289,7 @@ class DeploymentTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=2) as pool:
             publishing = pool.submit(self.service.publish, new.id)
             self.assertTrue(entered.wait(5))
-            rollback = pool.submit(other.rollback, self.word.id, old.id)
+            rollback = pool.submit(other.publish, old.id)
             release.set()
             publishing.result(5)
             rollback.result(5)
@@ -350,7 +327,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(self.status()['solo'].state, 'published')
         self.assertNotIn('openwakeword/hello_robot.oww.onnx', self.client.loaded['solo'])
 
-    def test_api_archive_history_publish_and_cross_word_rollback_validation(self):
+    def test_api_archive_publish_and_cross_word_validation(self):
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
         from studio.api import create_router
@@ -361,20 +338,15 @@ class DeploymentTests(unittest.TestCase):
         base = '/api/studio/wakewords/' + self.word.id
         with TestClient(app) as api:
             self.assertEqual(api.get(base + '/deployment/status').status_code, 200)
-            history = api.get(base + '/deployment/history?limit=2').json()
-            self.assertEqual(len(history['items']), 2)
-            self.assertGreater(history['total'], 2)
-            self.assertIn('re-download', history['items'][0]['cache_effect'])
-            self.assertEqual(api.get(base + '/models/' + version.id).status_code, 200)
             archive = api.get(base + '/models/' + version.id + '/archive')
             self.assertEqual(archive.status_code, 200)
             with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
                 self.assertIn('run-manifest.json', bundle.namelist())
                 self.assertIn('hello_robot.tflite', bundle.namelist())
             self.assertEqual(api.post(base + '/deployment/publish', json={'version_id': version.id}).status_code, 200)
-            self.assertEqual(api.post(base + '/deployment/rollback', json={'version_id': version.id, 'token': 'secret'}).status_code, 422)
+            self.assertEqual(api.post(base + '/deployment/publish', json={'version_id': version.id, 'token': 'secret'}).status_code, 422)
             other = self.runtime.workspaces.create('Other', 'en', 'other')
-            self.assertEqual(api.post('/api/studio/wakewords/' + other.id + '/deployment/rollback', json={'version_id': version.id}).status_code, 409)
+            self.assertEqual(api.post('/api/studio/wakewords/' + other.id + '/deployment/publish', json={'version_id': version.id}).status_code, 409)
 
     def test_cancel_after_archive_before_worker_completion_never_publishes(self):
         original = self.runtime.training.handle
@@ -419,7 +391,7 @@ class DeploymentTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=2) as pool:
             retry = pool.submit(self.service.retry_due, self.now + timedelta(days=1))
             self.assertTrue(entered.wait(5))
-            rollback = pool.submit(self.service.rollback, self.word.id, old.id)
+            rollback = pool.submit(self.service.publish, old.id)
             release.set()
             retry.result(5)
             rollback.result(5)
@@ -524,7 +496,7 @@ class DeploymentTests(unittest.TestCase):
         # New service, same persisted store: in-memory locks/ownership aren't
         # enough. Rollback is to bytes that are *already installed*.
         recovered = DeploymentService(self.runtime.devices.store, self.runtime.devices, self.runtime.training, clock=lambda: self.now)
-        recovered.rollback(self.word.id, old.id)
+        recovered.publish(old.id)
         other = self.other_version()
         recovered.publish(other.id)
         self.assertEqual(self.client.files['leader']['microwakeword/hello_robot.tflite'],
@@ -636,7 +608,7 @@ class DeploymentTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=2) as pool:
             repair = pool.submit(recovered.publish, other.id)
             self.assertTrue(entered.wait(5))
-            newer = pool.submit(self.service.rollback, self.word.id, new.id)
+            newer = pool.submit(self.service.publish, new.id)
             release.set()
             repair.result(5)
             newer.result(5)
@@ -706,7 +678,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(self.status()['solo'].error_code, 'staging_unowned')
         self.assertEqual(self.status()['solo'].manifest_state, 'unverified')
         self.assertEqual(self.status()['solo'].refresh_state, 'pending')
-        self.service.rollback(self.word.id, version.id)
+        self.service.publish(version.id)
         self.service.retry_due(self.now + timedelta(days=1))
         self.assertEqual(self.status()['solo'].state, 'staging_blocked')
         self.assertEqual([p for d, p, _ in self.client.calls if d == 'solo'], [])

@@ -136,7 +136,7 @@ class StudioWorkflowTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(RemoteRejected):
                 self.runtime.devices.client.identity(Device('unowned', url, 'standalone'))
 
-    def test_api_workflow_scrapes_labels_schedules_archives_publishes_and_rolls_back(self):
+    def test_api_workflow_collects_labels_schedules_archives_publishes_and_rolls_back(self):
         word = self.client.post("/api/studio/wakewords", json={"phrase": "Hello robot", "language": "en", "model_id": "hello_robot"}).json()
         from dataclasses import replace
         policy = self.runtime.automation.get(word['id']).settings
@@ -153,28 +153,32 @@ class StudioWorkflowTests(unittest.TestCase):
         before_slots = (list(self.leader.slots), list(self.follower.slots))
         for device in (leader, follower):
             self.client.put(f"/api/studio/devices/{device['id']}/source-mappings", json={"engine": "mww", "source_phrase": "Hello robot", "word_id": word["id"]}).raise_for_status()
-        first = self.client.post("/api/studio/scrape", json={}).json()
-        second_scrape = self.client.post("/api/studio/scrape", json={}).json()
-        self.assertEqual(first["new"], 2); self.assertEqual(second_scrape["already_seen"], 2)
+        def collect():
+            job = self.client.post(f"/api/studio/wakewords/{word['id']}/collection/jobs", json={}).json()
+            self.assertTrue(self.runtime.workers.run_once("collection"))
+            return self.runtime.collection.get_run(self.runtime.jobs.get(job["id"]).result["run_id"])
+        first, second_scrape = collect(), collect()
+        self.assertEqual(first.new, 2); self.assertEqual(second_scrape.already_seen, 2)
         queue = self.client.get(f"/api/studio/wakewords/{word['id']}/queue").json()
         sample = queue["items"][0]
         self.client.post(f"/api/studio/wakewords/{word['id']}/samples/{sample['id']}/label", json={"label": "positive", "expected_revision": sample["revision"]}).raise_for_status()
-        self.client.put(f"/api/studio/wakewords/{word['id']}/generation/recipe", json={"language": "en", "english_accent": "mixed", "tts_mode": "modern", "samples": 1, "batch_size": 1}).raise_for_status()
-        batch = self.client.post(f"/api/studio/wakewords/{word['id']}/generation/jobs").json()
+        submission = self.client.post(f"/api/studio/wakewords/{word['id']}/generation/submissions", json={"language": "en", "english_accent": "mixed", "tts_mode": "modern", "samples": 1, "batch_size": 1, "engines": ["qwen3"]})
+        submission.raise_for_status()
+        [batch] = submission.json()["jobs"]
         self.assertTrue(self.runtime.workers.run_once("gpu"))
         self.client.put(f"/api/studio/wakewords/{word['id']}/generation/batches", json={"batch_ids": [batch["id"]]}).raise_for_status()
         archive = Path(self.temp.name) / "speech.zip"
         with zipfile.ZipFile(archive, "w") as output: output.writestr("speech/example.ninja", b"fixture features")
         self.runtime.datasets.install_archive("speech", archive)
         self.client.put(f"/api/studio/wakewords/{word['id']}/datasets", json={"dataset_ids": ["speech"]}).raise_for_status()
-        schedule = self.client.put(f"/api/studio/schedules/train:{word['id']}", json={"cron": "* * * * *", "timezone": "UTC", "enabled": True}).json()
-        admitted = self.runtime.schedules.tick(datetime.fromisoformat(schedule["next_run_at"]) + timedelta(seconds=1))
+        schedule = self.runtime.schedules.save(f"train:{word['id']}", "* * * * *", "UTC", True)
+        admitted = self.runtime.schedules.tick(datetime.fromisoformat(schedule.next_run_at) + timedelta(seconds=1))
         self.assertEqual(len(admitted), 1); self.assertTrue(self.runtime.workers.run_once("gpu"))
         self.assertEqual(self.runtime.jobs.get(admitted[0].id).status, 'complete')
         version = self.client.get(f"/api/studio/wakewords/{word['id']}/models").json()["items"][0]
-        manifest = self.client.get(f"/api/studio/wakewords/{word['id']}/training/runs/{version['run_id']}").json()
-        self.assertEqual(manifest['selected_batches'], [batch['id']])
-        self.assertEqual([dataset['id'] for dataset in manifest['datasets']], ['speech'])
+        manifest = self.runtime.training.get_manifest(word['id'], version['run_id'])
+        self.assertEqual(list(manifest.selected_batches), [batch['id']])
+        self.assertEqual([dataset.id for dataset in manifest.datasets], ['speech'])
         archive_path = Path(version['path'])
         retained = {str(path.relative_to(archive_path)): path.read_bytes() for path in archive_path.rglob('*') if path.is_file()}
         for name, checksum in version['checksums'].items():
@@ -197,7 +201,7 @@ class StudioWorkflowTests(unittest.TestCase):
         latest = self.client.get(f"/api/studio/wakewords/{word['id']}/models").json()['items'][0]
         self.assertNotEqual(latest['id'], version['id'])
         self.assertNotEqual(self.leader.files['microwakeword/hello_robot.tflite'], retained['hello_robot.tflite'])
-        self.client.post(f"/api/studio/wakewords/{word['id']}/deployment/rollback", json={"version_id": version["id"]}).raise_for_status()
+        self.client.post(f"/api/studio/wakewords/{word['id']}/deployment/publish", json={"version_id": version["id"]}).raise_for_status()
         self.assertEqual(self.leader.files['microwakeword/hello_robot.tflite'], retained['hello_robot.tflite'])
         # The lagging follower is honestly pending until its simulated fleet copy arrives.
         self.follower.files = dict(self.leader.files)

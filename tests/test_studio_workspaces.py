@@ -152,17 +152,14 @@ class WorkspaceAPITests(unittest.TestCase):
         responses = [
             self.client.get("/api/studio/wakewords"),
             self.client.get(f'/api/studio/wakewords/{word["id"]}'),
-            self.client.patch(f'/api/studio/wakewords/{word["id"]}', json={"phrase": "New"}),
             self.client.post("/api/studio/wakewords", json={
                 "phrase": "Other", "language": "en", "model_id": "hello"}),
             self.client.post("/api/studio/wakewords", json={"token": secret}),
-            self.client.patch(f'/api/studio/wakewords/{word["id"]}', json={"model_id": secret}),
             self.client.get("/api/studio/wakewords?limit=101"),
             self.client.get("/api/studio/wakewords/missing"),
         ]
-        self.assertEqual([r.status_code for r in responses], [200, 200, 200, 409, 422, 422, 422, 404])
+        self.assertEqual([r.status_code for r in responses], [200, 200, 409, 422, 422, 404])
         self.assertEqual(responses[0].json()["total"], 1)
-        self.assertEqual(responses[2].json()["model_id"], "hello")
         for result in responses:
             self.assertNotIn(secret, result.text)
 

@@ -38,7 +38,7 @@ class SubmissionTests(unittest.TestCase):
         app = FastAPI(); app.include_router(create_router(self.runtime))
         return TestClient(app)
 
-    def test_submission_http_contract_is_additive_and_per_provider(self):
+    def test_submission_http_contract_is_per_provider(self):
         with self.api() as client:
             path = f'/api/studio/wakewords/{self.word.id}/generation'
             result = client.post(path + '/submissions', json=asdict(self.recipe))
@@ -47,10 +47,6 @@ class SubmissionTests(unittest.TestCase):
             self.assertEqual(len(body['jobs']), 2)
             self.assertEqual(body['batch_ids'], [j['id'] for j in body['jobs']])
             self.assertEqual([j['payload']['recipe']['samples'] for j in body['jobs']], [2, 2])
-            legacy = client.post(path + '/jobs', json=asdict(self.recipe))
-            self.assertEqual(legacy.status_code, 201)
-            self.assertEqual(legacy.json()['kind'], 'generation')
-            self.assertNotIn('jobs', legacy.json())
             self.assertEqual(client.post(path.replace(self.word.id, '0' * 32) + '/submissions', json=asdict(self.recipe)).status_code, 404)
             self.assertEqual(client.post(path + '/submissions', json={**asdict(self.recipe), 'samples': True}).status_code, 422)
 

@@ -10,9 +10,8 @@ from pydantic import BaseModel, ConfigDict, SecretStr
 
 from studio.models import (CollectionRun, Conflict, CredentialsRequired, Device, IdentityMismatch, SourceMapping,
                            RemoteRejected, RemoteUnavailable, NotFound, Page, Recording, Sample, SampleQuery,
-                           ValidationError, Wakeword, WakewordUpdate, Job, Schedule, WorkerHealth, Dataset,
-                           Batch, GenerationRecipe, GenerationSubmission, GenerationSource, TrainingSettings, RunManifest, ModelVersion, Publication,
-                           DeploymentCapabilities, LegacyRun)
+                           ValidationError, Wakeword, Job, Schedule, Dataset,
+                           Batch, GenerationRecipe, GenerationSubmission, GenerationSource, TrainingSettings, ModelVersion, Publication)
 from studio.runtime import StudioRuntime
 from studio.automation import settings_from_dict
 from studio.models import AutomationStatus
@@ -70,12 +69,6 @@ class AddDevice(DeviceCredentials):
 class UpdateDevice(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     url: str
-
-
-class UpdateWakeword(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    phrase: str | None = None
-    language: str | None = None
 
 
 class RevisionBody(BaseModel):
@@ -139,14 +132,6 @@ class AutomationBody(BaseModel):
     deployment_policy: DeploymentPolicyBody
 
 
-class JobBody(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    kind: str
-    word_id: str | None = None
-    payload: dict = {}
-    dedupe_key: str | None = None
-
-
 class DatasetSelectionBody(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     dataset_ids: list[str]
@@ -203,11 +188,6 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     def save_automation(word_id: str, body: AutomationBody):
         return runtime.automation.save(word_id, settings_from_dict(body.model_dump()))
 
-    @router.get('/deployment/capabilities', response_model=DeploymentCapabilities)
-    def deployment_capabilities():
-        """Static operational prerequisites, not a remote staging-cleanliness probe."""
-        return DeploymentCapabilities()
-
     @router.get('/wakewords/{word_id}/training/settings', response_model=TrainingSettings)
     def training_settings(word_id: str):
         return runtime.training.settings(word_id)
@@ -231,17 +211,9 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     def training_runs(word_id: str, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
         return runtime.training.runs(word_id, offset, limit)
 
-    @router.get('/wakewords/{word_id}/training/runs/{run_id}', response_model=RunManifest | LegacyRun)
-    def training_manifest(word_id: str, run_id: str):
-        return runtime.training.get_manifest(word_id, run_id)
-
     @router.get('/wakewords/{word_id}/models', response_model=Page[ModelVersion])
     def models(word_id: str, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
         return runtime.training.versions(word_id, offset, limit)
-
-    @router.get('/wakewords/{word_id}/models/{version_id}', response_model=ModelVersion)
-    def model_version(word_id: str, version_id: str):
-        return runtime.deployment.version(version_id, word_id)
 
     @router.get('/wakewords/{word_id}/models/{version_id}/archive')
     def model_archive(word_id: str, version_id: str):
@@ -260,24 +232,14 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
                                headers={'Content-Disposition': f'attachment; filename="{name}"'})
 
     @router.get('/wakewords/{word_id}/deployment/status', response_model=list[Publication],
-                description='Publication observations, not proof of clean upload staging. '
-                            'See GET /api/studio/deployment/capabilities for required staging ownership '
-                            'and quarantine/operator-action notices.')
+                description='Publication observations, not proof of clean upload staging.')
     def publication_status(word_id: str):
         return runtime.deployment.status(word_id)
-
-    @router.get('/wakewords/{word_id}/deployment/history', response_model=Page[Publication])
-    def publication_history(word_id: str, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
-        return runtime.deployment.history(word_id, offset, limit)
 
     @router.post('/wakewords/{word_id}/deployment/publish', response_model=list[Publication])
     def publish_version(word_id: str, body: PublishBody):
         runtime.deployment.version(body.version_id, word_id)
         return runtime.deployment.publish(body.version_id)
-
-    @router.post('/wakewords/{word_id}/deployment/rollback', response_model=list[Publication])
-    def rollback_version(word_id: str, body: PublishBody):
-        return runtime.deployment.rollback(word_id, body.version_id)
 
     @router.get('/generation/catalog')
     def generation_catalog():
@@ -290,14 +252,6 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.get('/wakewords/{word_id}/generation/recipe', response_model=GenerationRecipe)
     def generation_recipe(word_id: str) -> GenerationRecipe:
         return runtime.generation.get_recipe(word_id)
-
-    @router.put('/wakewords/{word_id}/generation/recipe', response_model=GenerationRecipe)
-    def save_generation_recipe(word_id: str, body: GenerationRecipeBody) -> GenerationRecipe:
-        return runtime.generation.save_recipe(word_id, GenerationRecipe(**body.model_dump()))
-
-    @router.post('/wakewords/{word_id}/generation/jobs', response_model=Job, status_code=201)
-    def generate_batch(word_id: str, body: GenerationRecipeBody | None = None) -> Job:
-        return runtime.generation.enqueue(word_id, GenerationRecipe(**body.model_dump()) if body else None)
 
     @router.post('/wakewords/{word_id}/generation/submissions', response_model=GenerationSubmission, status_code=201)
     def submit_generation(word_id: str, body: GenerationRecipeBody) -> GenerationSubmission:
@@ -319,10 +273,6 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.get('/wakewords/{word_id}/generation/batches', response_model=Page[Batch])
     def batches(word_id: str, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)) -> Page[Batch]:
         return runtime.generation.list(word_id, offset, limit)
-
-    @router.get('/wakewords/{word_id}/generation/batches/{batch_id}', response_model=Batch)
-    def batch(word_id: str, batch_id: str) -> Batch:
-        return runtime.generation.get_batch(word_id, batch_id)
 
     @router.delete('/wakewords/{word_id}/generation/batches/{batch_id}', status_code=204)
     def delete_batch(word_id: str, batch_id: str):
@@ -369,22 +319,10 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     def schedules() -> list[Schedule]:
         return runtime.schedules.list()
 
-    @router.put('/schedules/{scope}', response_model=Schedule)
-    def save_schedule(scope: str, body: ScheduleBody) -> Schedule:
-        return runtime.schedules.save(scope, body.cron, body.timezone, body.enabled)
-
-    @router.post('/jobs', response_model=Job, status_code=201)
-    def enqueue_job(body: JobBody) -> Job:
-        return runtime.jobs.enqueue(body.kind, body.word_id, body.payload, body.dedupe_key)
-
     @router.get('/jobs', response_model=Page[Job])
     def jobs(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
              state: Literal['active', 'history'] | None = None) -> Page[Job]:
         return runtime.jobs.list(offset, limit, state=state)
-
-    @router.get('/jobs/health', response_model=WorkerHealth)
-    def worker_health() -> WorkerHealth:
-        return runtime.health()
 
     @router.get('/jobs/{job_id}', response_model=Job)
     def job(job_id: str) -> Job:
@@ -398,10 +336,6 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     def cancel_job(job_id: str) -> Job:
         return runtime.jobs.cancel(job_id)
 
-    @router.post("/scrape", response_model=CollectionRun)
-    def scrape(body: ScrapeBody = ScrapeBody()) -> CollectionRun:
-        return runtime.collection.run(body.device_ids)
-
     @router.post('/wakewords/{word_id}/collection/jobs', response_model=Job, status_code=201)
     def collect_workspace(word_id: str, body: ScrapeBody = ScrapeBody()) -> Job:
         runtime.workspaces.get(word_id)
@@ -410,10 +344,6 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.get("/scrape/runs", response_model=Page[CollectionRun])
     def scrape_runs(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)) -> Page[CollectionRun]:
         return runtime.collection.list_runs(offset, limit)
-
-    @router.get("/devices/{device_id}/source-mappings", response_model=list[SourceMapping])
-    def source_mappings(device_id: str) -> list[SourceMapping]:
-        return runtime.workspaces.source_mappings(device_id)
 
     @router.put("/devices/{device_id}/source-mappings", response_model=SourceMapping)
     def set_source_mapping(device_id: str, body: SourceMappingBody) -> SourceMapping:
@@ -456,10 +386,6 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.get("/wakewords/{word_id}", response_model=Wakeword)
     def get_word(word_id: str) -> Wakeword:
         return runtime.workspaces.get(word_id)
-
-    @router.patch("/wakewords/{word_id}", response_model=Wakeword)
-    def update_word(word_id: str, body: UpdateWakeword) -> Wakeword:
-        return runtime.workspaces.update(word_id, WakewordUpdate(body.phrase, body.language))
 
     @router.delete("/wakewords/{word_id}", status_code=204)
     def delete_word(word_id: str) -> Response:

@@ -373,11 +373,14 @@ class CollectionTests(unittest.TestCase):
         with TestClient(app) as api:
             body = {'engine': 'mww', 'source_phrase': 'Hello', 'word_id': self.word.id}
             self.assertEqual(api.put('/api/studio/devices/a/source-mappings', json=body).status_code, 200)
-            self.assertEqual(len(api.get('/api/studio/devices/a/source-mappings').json()), 1)
+            self.assertEqual(len(runtime.workspaces.source_mappings('a')), 1)
             self.client.clips['a'] = [self.clip()]
-            self.assertEqual(api.post('/api/studio/scrape', json={}).json()['new'], 1)
+            job = api.post(f'/api/studio/wakewords/{self.word.id}/collection/jobs', json={}).json()
+            self.assertTrue(runtime.workers.run_once('collection'))
+            self.assertEqual(api.get(f'/api/studio/jobs/{job["id"]}').json()['result']['new'], 1)
             self.assertEqual(api.get('/api/studio/scrape/runs').json()['total'], 1)
-            self.assertEqual(api.post('/api/studio/scrape', json={'word_id': self.other.id}).status_code, 422)
+            self.assertEqual(api.post(f'/api/studio/wakewords/{self.word.id}/collection/jobs',
+                                      json={'word_id': self.other.id}).status_code, 422)
             self.assertEqual(api.get('/api/studio/scrape/runs?limit=0').status_code, 422)
             self.assertEqual(api.put('/api/studio/devices/missing/source-mappings', json=body).status_code, 404)
 

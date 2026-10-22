@@ -74,8 +74,13 @@ test('real kiosk collection, keyboard labels, focus suppression and workspace is
   for (const device of [leader, discovered[0]]) {
     expect((await request.put(`/api/studio/devices/${device.id}/source-mappings`, { data: { engine: 'mww', source_phrase: 'Hello robot', word_id: a.id } })).ok()).toBeTruthy();
   }
-  expect((await (await request.post('/api/studio/scrape', { data: {} })).json()).new).toBe(2);
-  expect((await (await request.post('/api/studio/scrape', { data: {} })).json()).already_seen).toBe(2);
+  const collect = async () => {
+    const job = await (await request.post(`/api/studio/wakewords/${a.id}/collection/jobs`, { data: {} })).json();
+    expect((await (await request.post('/__test/drain-collection')).json()).ran).toBe(true);
+    return (await (await request.get(`/api/studio/jobs/${job.id}`)).json()).result;
+  };
+  expect((await collect()).new).toBe(2);
+  expect((await collect()).new).toBe(0);
   await page.goto(`/#/classify?word=${a.id}`);
   await expect(page.locator('[data-progress]')).toContainText('2 pending');
   const current = page.locator('[data-classify-current]');
@@ -330,9 +335,9 @@ test('workspace Automate controls scoped collection and explicitly opted-in publ
   expect(samples.items.every((sample: { label: string }) => sample.label === 'negative')).toBe(true);
   expect(samples.total).toBe(2);
   expect((await (await request.get(`/api/studio/wakewords/${b.id}/samples`)).json()).total).toBe(0);
-  const generated = await (await request.post(`/api/studio/wakewords/${a.id}/generation/jobs`, { data: { language: 'en', english_accent: 'mixed', tts_mode: 'hybrid', engines: ['qwen3'], samples: 2, batch_size: 1 } })).json();
+  const generated = await (await request.post(`/api/studio/wakewords/${a.id}/generation/submissions`, { data: { language: 'en', english_accent: 'mixed', tts_mode: 'hybrid', engines: ['qwen3'], samples: 2, batch_size: 1 } })).json();
   await request.post('/__test/drain-gpu');
-  await request.put(`/api/studio/wakewords/${a.id}/generation/batches`, { data: { batch_ids: [generated.id] } });
+  await request.put(`/api/studio/wakewords/${a.id}/generation/batches`, { data: { batch_ids: generated.batch_ids } });
   const train = async () => {
     const job = await (await request.post(`/api/studio/wakewords/${a.id}/training/jobs`)).json();
     await request.post('/__test/drain-gpu');

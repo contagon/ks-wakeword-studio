@@ -30,7 +30,6 @@ beforeEach(() => {
     if (path.endsWith("/models")) return json({ items: [{ ...version("new", path.includes("/b/") ? "b" : "a"), ...(legacy ? { origin: 'legacy', validation_state: 'unvalidated' } : {}) }, version("old", path.includes("/b/") ? "b" : "a")], total: 2, offset: 0, limit: 50 });
     if (path.endsWith("/deployment/status")) return json([publication(path.includes("/b/") ? "b" : "a")]);
     if (path === "/api/studio/devices") { deviceRequests += 1; return json([{ id: "leader", url: "http://leader", role: "leader", active: true, leader_id: null, credentials_status: "ready", profile_id: null, model_eligible: true }, { id: "follower", url: "http://follower", role: "follower", active: true, leader_id: "leader", credentials_status: "ready", profile_id: "voice", model_eligible: true }]); }
-    if (path === "/api/studio/deployment/capabilities") return json({ requires_initially_clean_staging: true, requires_exclusive_staging: true, automatic_clean_check: false, remote_staging_inspection: false, remote_staging_discard: false, remote_staging_lock: false, notice: "clean staging required", quarantine_notice: "Unexpected accepted models quarantine this target until an operator resolves staging.", operator_action: "stop uploads" });
     if (path.endsWith("/deployment/publish")) {
       actionSignal = init?.signal ?? undefined;
       return new Promise<Response>(resolve => { resolveAction = resolve; });

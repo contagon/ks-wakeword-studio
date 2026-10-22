@@ -179,9 +179,9 @@ class GenerationTests(unittest.TestCase):
         app.include_router(create_router(self.runtime))
         submitted = replace(self.recipe, samples=3, engines=['qwen3'])
         with TestClient(app) as client:
-            response = client.post(f'/api/studio/wakewords/{self.word.id}/generation/jobs', json=asdict(submitted))
+            response = client.post(f'/api/studio/wakewords/{self.word.id}/generation/submissions', json=asdict(submitted))
         self.assertEqual(response.status_code, 201, response.text)
-        job = response.json()
+        [job] = response.json()['jobs']
         self.assertEqual(job['payload']['recipe'], asdict(submitted))
         self.assertEqual(self.service.get_recipe(self.word.id), submitted)
         self.service.save_recipe(self.word.id, replace(self.recipe, engines=['moss']))
@@ -482,11 +482,10 @@ class GenerationTests(unittest.TestCase):
             base = f'/api/studio/wakewords/{self.word.id}/generation'
             self.assertEqual(client.get('/api/studio/generation/catalog').status_code, 200)
             self.assertEqual(client.get(base + '/recipe').json(), asdict(self.recipe))
-            self.assertEqual(client.put(base + '/recipe', json={**asdict(self.recipe), 'tts_voice_count': 10}).status_code, 422)
-            self.assertEqual(client.put(base + '/recipe', json=asdict(self.recipe)).status_code, 200)
+            self.assertEqual(client.post(base + '/submissions', json={**asdict(self.recipe), 'tts_voice_count': 10}).status_code, 422)
             self.assertEqual(client.get(base + '/batches').json()['total'], 1)
             self.assertEqual(client.put(base + '/batches', json={'batch_ids': []}).status_code, 200)
-            self.assertEqual(client.post(base + '/jobs').status_code, 201)
+            self.assertEqual(client.post(base + '/submissions', json=asdict(replace(self.recipe, engines=['qwen3']))).status_code, 201)
 
 
 if __name__ == '__main__':

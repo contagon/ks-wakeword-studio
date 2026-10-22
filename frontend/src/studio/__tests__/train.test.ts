@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { provide } from "vue";
 import TrainPage from "../pages/TrainPage.vue";
-import JobConsole from "../components/JobConsole.vue";
 import { createWorkspace, workspaceKey, type Workspace } from "../workspace";
 import { useStudioRoutes } from "../routes";
 import { createJobQueue, jobQueueKey, type JobQueue } from '../jobs';
@@ -179,17 +178,6 @@ describe("TrainPage", () => {
     expect(ui.find('a[href*="automate"]').exists()).toBe(false);
     workspace.selectedId.value = "b"; await flushPromises(); await flushPromises();
     expect(ui.find('a[href*="automate"]').exists()).toBe(false); expect(ui.text()).toContain("1 reviewed positives"); expect(ui.text()).not.toContain("5 selected artificial");
-    ui.unmount();
-  });
-});
-
-describe("JobConsole", () => {
-  it("polls bounded real state/log tails and stops on terminal state and unmount", async () => {
-    const ui = mount(JobConsole, { props: { jobId: "train-1" } }); await flushPromises();
-    expect(ui.text()).toContain("queued"); expect(ui.text()).toContain("…");
-    const initial = vi.mocked(fetch).mock.calls.length; await vi.advanceTimersByTimeAsync(2000); await flushPromises(); expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(initial);
-    await ui.get('[data-action="cancel-job"]').trigger("click"); await flushPromises(); const stopped = vi.mocked(fetch).mock.calls.length;
-    await vi.advanceTimersByTimeAsync(4000); expect(vi.mocked(fetch).mock.calls.length).toBe(stopped);
     ui.unmount();
   });
 });

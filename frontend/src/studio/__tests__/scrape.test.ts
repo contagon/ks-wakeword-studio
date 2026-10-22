@@ -23,7 +23,6 @@ beforeEach(() => {
     if (path.endsWith('/collection/jobs')) return json({ id: 'manual', kind: 'scrape', word_id: 'a', resource: 'collection', payload: {}, status: 'queued', result: {}, created_at: '', started_at: null, finished_at: null });
     if (path.endsWith('/jobs/manual')) return json({ id: 'manual', kind: 'scrape', word_id: 'a', resource: 'collection', payload: {}, status: 'complete', result: { run_id: 'manual', status: 'complete' }, created_at: '', started_at: null, finished_at: '' });
     if (path.endsWith('/jobs/manual/logs')) return json({ text: '' });
-    if (path === "/api/studio/scrape" && init?.method === "POST") return json({ id: "manual", started_at: "", finished_at: "", status: "complete", listed: 0, new: 0, already_seen: 0, unmapped: 0, evicted: 0, failed: 0, devices: [] });
     return json({});
   }));
 });

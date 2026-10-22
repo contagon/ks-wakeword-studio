@@ -353,7 +353,7 @@ clears all engines' downloaded-model caches. Other selected remote models may ne
 to be downloaded again. Custom uploads and settings remain intact. File verification
 and refresh acknowledgement are **not** proof of the version used by inference;
 offline, uncredentialed, excluded, and lagging followers are not reported as success.
-Rollback chooses an older immutable archive as the new desired version and uploads
+Rolling back means publishing an older immutable archive as the new desired version and uploads
 it under the **same stable filenames**; it never edits enabled slots or thresholds.
 Retries follow the latest desired revision, not an obsolete queued version.
 `refresh_pending`, manifest-unverified, and runtime-unverified states are not proof
@@ -361,17 +361,14 @@ of live inference; refresh may remain pending until a follower has synchronized 
 its own credentials permit verification. The existing leader/fleet remains the
 authority for any fleet-controlled selections.
 
-Read-only API help (available even before any model is published):
+Deployment API:
 
-- `GET /api/studio/deployment/capabilities`: typed staging prerequisites, unavailable
-  remote safeguards, quarantine consequences, and operator-action notices. This
-  endpoint does not contact kiosks or claim that staging is clean.
 - `GET /api/studio/wakewords/{word_id}/deployment/status`: per-target publication,
   manifest, refresh and unverified-runtime states.
-- `GET /api/studio/wakewords/{word_id}/deployment/history`: paginated observations.
-- `POST /api/studio/wakewords/{word_id}/deployment/publish` or `/rollback` with
-  `{"version_id":"<archived-version-id>"}`: claim a new desired revision under the
-  same staging prerequisites; these are real mutation endpoints, not setup checks.
+- `POST /api/studio/wakewords/{word_id}/deployment/publish` with
+  `{"version_id":"<archived-version-id>"}`: claim a new desired revision (publishing an
+  older version is a rollback) under the same staging prerequisites; this is a real
+  mutation endpoint, not a setup check.
 
 ## What The UI Does
 
@@ -381,7 +378,7 @@ Read-only API help (available even before any model is published):
 - **Scrape / Classify / Samples**: shared registry, global collection cron, keyboard
   review, provenance, revision-safe labels, non-destructive trimming and audio import.
 - **Train / Deploy**: effective inputs, one shared GPU queue, per-word cron, retained
-  run manifests/checksums/logs, downloadable archives, publication history and rollback.
+  run manifests/checksums/logs, downloadable archives, and publish/rollback.
 
 ### Storage and scheduling
 
@@ -400,7 +397,7 @@ Shared downloaded tools/voices and training environments also occupy `/data`.
 remain browsable/downloadable as `legacy` / `unvalidated` archives and never create
 automatic publication events or change the desired version by import order.
 In Deploy, explicitly choose **Validate and
-publish** (rollback also requires this validation). This invokes the existing
+publish**. This invokes the existing
 `cli/validate_studio_model.py` using `/data/.venv/bin/python`: TensorFlow must load
 the TFLite model, allocate tensors, and expose input/output tensors. Prepare that
 environment with `cli/setup_python_venv` first. Checksums or a `TFL3` identifier alone
