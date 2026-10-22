@@ -1,70 +1,135 @@
-import { afterEach, expect, it, vi } from 'vitest';
-import { flushPromises, mount } from '@vue/test-utils';
-import StudioShell from '../components/StudioShell.vue';
-import { fakeStudio, press } from './fakeStudio';
-import type { Job } from '../types';
-import { useDeviceRegistry } from '../devices';
+import { afterEach, expect, it, vi } from "vitest";
+import { flushPromises, mount } from "@vue/test-utils";
+import StudioShell from "../components/StudioShell.vue";
+import { fakeStudio, press } from "./fakeStudio";
+import type { Job } from "../types";
+import { useDeviceRegistry } from "../devices";
 
-const job = (id: string, status: Job['status'], extra = {}): Job => ({ id, kind: 'train', resource: 'gpu', word_id: 'a', status, payload: {}, result: {}, created_at: '2026-10-19T12:00:00Z', started_at: null, finished_at: null, ...extra } as Job);
+const job = (id: string, status: Job["status"], extra = {}): Job =>
+  ({
+    id,
+    kind: "train",
+    resource: "gpu",
+    word_id: "a",
+    status,
+    payload: {},
+    result: {},
+    created_at: "2026-10-19T12:00:00Z",
+    started_at: null,
+    finished_at: null,
+    ...extra,
+  }) as Job;
 let ui: ReturnType<typeof mount> | undefined;
-afterEach(() => { ui?.unmount(); ui = undefined; vi.unstubAllGlobals(); vi.useRealTimers(); document.body.innerHTML = ''; });
+afterEach(() => {
+  ui?.unmount();
+  ui = undefined;
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+  document.body.innerHTML = "";
+});
 
-it('shows actionable failed-job guidance without diagnostics paths or raw error prose', async () => {
+it("shows actionable failed-job guidance without diagnostics paths or raw error prose", async () => {
   const s = fakeStudio();
-  s.db.jobs = [job('broken-moss', 'failed', { kind: 'generation', result: { error: 'handler_failed', error_code: 'gpu_memory', message: 'Authorization: Bearer private-secret' } }),
-    job('generic', 'failed', { result: { error: 'handler_failed', error_code: 'handler_failed' } }),
-    job('child', 'failed', { result: { error: 'handler_failed', error_code: 'child_command_failed' } })];
-  history.replaceState(null, '', '/#/wakewords?word=a');
-  ui = mount(StudioShell); await flushPromises();
-  await ui.get('[data-action="open-job-queue"]').trigger('click'); await flushPromises();
+  s.db.jobs = [
+    job("broken-moss", "failed", {
+      kind: "generation",
+      result: { error: "handler_failed", error_code: "gpu_memory", message: "Authorization: Bearer private-secret" },
+    }),
+    job("generic", "failed", { result: { error: "handler_failed", error_code: "handler_failed" } }),
+    job("child", "failed", { result: { error: "handler_failed", error_code: "child_command_failed" } }),
+  ];
+  history.replaceState(null, "", "/#/wakewords?word=a");
+  ui = mount(StudioShell);
+  await flushPromises();
+  await ui.get('[data-action="open-job-queue"]').trigger("click");
+  await flushPromises();
   const card = ui.get('[data-job-id="broken-moss"]');
-  expect(card.text()).toContain('GPU memory');
-  expect(card.text()).not.toContain('diagnostics.log');
-  expect(card.text()).not.toContain('private-secret');
-  for (const id of ['generic', 'child']) {
+  expect(card.text()).toContain("GPU memory");
+  expect(card.text()).not.toContain("diagnostics.log");
+  expect(card.text()).not.toContain("private-secret");
+  for (const id of ["generic", "child"]) {
     const generic = ui.get(`[data-job-id="${id}"]`);
-    expect(generic.text()).toContain('failed');
+    expect(generic.text()).toContain("failed");
     expect(generic.find('[role="alert"]').exists()).toBe(false);
-    expect(generic.text()).not.toContain('diagnostics');
+    expect(generic.text()).not.toContain("diagnostics");
   }
 });
 
-it('shows global compact job groups and loads logs only on expansion', async () => {
-  const s = fakeStudio(); s.db.jobs = [job('run', 'running'), job('follower', 'cancelling', { kind: 'scrape', resource: 'collection', word_id: 'b', payload: { device_ids: ['kitchen', 'office'] } }), job('shared', 'queued', { kind: 'download', resource: 'download', word_id: null }), job('old', 'failed', { word_id: 'deleted-word' })];
-  s.db.devices = ['kitchen', 'office'].map(id => ({ id, name: id === 'kitchen' ? 'Kitchen satellite' : 'Office satellite', url: `http://${id}`, role: 'standalone', active: true, leader_id: null, credentials_status: 'ready', profile_id: null, model_eligible: true }));
+it("shows global compact job groups and loads logs only on expansion", async () => {
+  const s = fakeStudio();
+  s.db.jobs = [
+    job("run", "running"),
+    job("follower", "cancelling", {
+      kind: "scrape",
+      resource: "collection",
+      word_id: "b",
+      payload: { device_ids: ["kitchen", "office"] },
+    }),
+    job("shared", "queued", { kind: "download", resource: "download", word_id: null }),
+    job("old", "failed", { word_id: "deleted-word" }),
+  ];
+  s.db.devices = ["kitchen", "office"].map((id) => ({
+    id,
+    name: id === "kitchen" ? "Kitchen satellite" : "Office satellite",
+    url: `http://${id}`,
+    role: "standalone",
+    active: true,
+    leader_id: null,
+    credentials_status: "ready",
+    profile_id: null,
+    model_eligible: true,
+  }));
   await useDeviceRegistry().load(true);
-  history.replaceState(null, '', '/#/wakewords?word=a');
-  ui = mount(StudioShell, { attachTo: document.body }); await flushPromises();
-  expect(ui.get('[data-action="open-job-queue"]').text()).toContain('3');
-  expect(s.requests.some(r => r.path.includes('/logs'))).toBe(false);
-  await ui.get('[data-action="open-job-queue"]').trigger('click'); await flushPromises();
+  history.replaceState(null, "", "/#/wakewords?word=a");
+  ui = mount(StudioShell, { attachTo: document.body });
+  await flushPromises();
+  expect(ui.get('[data-action="open-job-queue"]').text()).toContain("3");
+  expect(s.requests.some((r) => r.path.includes("/logs"))).toBe(false);
+  await ui.get('[data-action="open-job-queue"]').trigger("click");
+  await flushPromises();
   const drawer = ui.get('[role="dialog"][aria-label="Global job queue"]');
-  expect(drawer.text()).toContain('Hey Cedar'); expect(drawer.text()).toContain('Okay Maple');
-  expect(drawer.text()).toContain('Shared dataset'); expect(drawer.text()).toContain('Kitchen satellite, Office satellite');
-  expect(drawer.text()).toContain('deleted-word'); expect(drawer.text()).toContain('cancelling');
-  expect(drawer.findAll('[data-job-id]')).toHaveLength(4);
+  expect(drawer.text()).toContain("Hey Cedar");
+  expect(drawer.text()).toContain("Okay Maple");
+  expect(drawer.text()).toContain("Shared dataset");
+  expect(drawer.text()).toContain("Kitchen satellite, Office satellite");
+  expect(drawer.text()).toContain("deleted-word");
+  expect(drawer.text()).toContain("cancelling");
+  expect(drawer.findAll("[data-job-id]")).toHaveLength(4);
   const details = drawer.get('[data-job-id="run"] details');
-  (details.element as HTMLDetailsElement).open = true; await details.trigger('toggle'); await flushPromises();
-  expect(drawer.get('[data-job-id="run"] pre').text()).toBe('Training in progress');
-  s.failNext(r => r.path.endsWith('/run/cancel'), 503);
-  await drawer.get('[data-job-id="run"] [data-action="cancel-job"]').trigger('click'); await flushPromises();
-  expect(drawer.get('[data-job-id="run"] [role="alert"]').text()).toContain('unavailable');
+  (details.element as HTMLDetailsElement).open = true;
+  await details.trigger("toggle");
+  await flushPromises();
+  expect(drawer.get('[data-job-id="run"] pre').text()).toBe("Training in progress");
+  s.failNext((r) => r.path.endsWith("/run/cancel"), 503);
+  await drawer.get('[data-job-id="run"] [data-action="cancel-job"]').trigger("click");
+  await flushPromises();
+  expect(drawer.get('[data-job-id="run"] [role="alert"]').text()).toContain("unavailable");
 });
 
-it('contains focus, makes the background inert, and restores focus on Escape and backdrop close', async () => {
-  fakeStudio(); history.replaceState(null, '', '/#/wakewords');
-  ui = mount(StudioShell, { attachTo: document.body }); await flushPromises();
-  const trigger = ui.get('[data-action="open-job-queue"]'); (trigger.element as HTMLButtonElement).focus();
-  await trigger.trigger('click'); await flushPromises();
-  expect(ui.get('[data-studio-background]').attributes('inert')).toBeDefined();
+it("contains focus, makes the background inert, and restores focus on Escape and backdrop close", async () => {
+  fakeStudio();
+  history.replaceState(null, "", "/#/wakewords");
+  ui = mount(StudioShell, { attachTo: document.body });
+  await flushPromises();
+  const trigger = ui.get('[data-action="open-job-queue"]');
+  (trigger.element as HTMLButtonElement).focus();
+  await trigger.trigger("click");
+  await flushPromises();
+  expect(ui.get("[data-studio-background]").attributes("inert")).toBeDefined();
   const close = ui.get('[data-action="close-job-queue"]');
   expect(document.activeElement).toBe(close.element);
-  const buttons = ui.get('[role="dialog"]').findAll('button'); const last = buttons.at(-1)!;
-  (last.element as HTMLButtonElement).focus(); await last.trigger('keydown', { key: 'Tab' });
+  const buttons = ui.get('[role="dialog"]').findAll("button");
+  const last = buttons.at(-1)!;
+  (last.element as HTMLButtonElement).focus();
+  await last.trigger("keydown", { key: "Tab" });
   expect(document.activeElement).toBe(close.element);
-  press('Escape'); await flushPromises();
-  expect(ui.find('[role="dialog"]').exists()).toBe(false); expect(document.activeElement).toBe(trigger.element);
-  expect(ui.get('[data-studio-background]').attributes('inert')).toBeUndefined();
-  await trigger.trigger('click'); await flushPromises(); await ui.get('[data-job-queue-backdrop]').trigger('click');
+  press("Escape");
+  await flushPromises();
+  expect(ui.find('[role="dialog"]').exists()).toBe(false);
+  expect(document.activeElement).toBe(trigger.element);
+  expect(ui.get("[data-studio-background]").attributes("inert")).toBeUndefined();
+  await trigger.trigger("click");
+  await flushPromises();
+  await ui.get("[data-job-queue-backdrop]").trigger("click");
   expect(ui.find('[role="dialog"]').exists()).toBe(false);
 });

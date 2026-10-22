@@ -19,16 +19,16 @@ export function createWorkspace(routes: StudioRoutes) {
 
   const unavailable = "That wakeword is no longer available. Select another workspace.";
   function select(id: string) {
-    const available = wakewords.value.some(word => word.id === id);
+    const available = wakewords.value.some((word) => word.id === id);
     // A valid choice supersedes any earlier fallback; only a stale non-empty ID warrants a notice.
     notice.value = available || !id ? "" : unavailable;
-    selectedId.value = available ? id : wakewords.value[0]?.id ?? "";
+    selectedId.value = available ? id : (wakewords.value[0]?.id ?? "");
   }
   function remove(id: string) {
     // Invalidate any pre-deletion list response so it cannot resurrect the word.
     listRequest?.abort();
     loading.value = false;
-    wakewords.value = wakewords.value.filter(word => word.id !== id);
+    wakewords.value = wakewords.value.filter((word) => word.id !== id);
     if (selectedId.value === id) select(wakewords.value[0]?.id ?? "");
   }
   async function refreshSelected() {
@@ -51,13 +51,18 @@ export function createWorkspace(routes: StudioRoutes) {
       ]);
       if (!current()) return;
       selected.value = word;
-      summary.value = { pending: queue.total, modelCount: models.total, latestModel: models.items[0] ?? null, schedule: schedules.find(s => s.scope === `train:${id}`) ?? null };
-      wakewords.value = wakewords.value.map(w => w.id === id ? word : w);
+      summary.value = {
+        pending: queue.total,
+        modelCount: models.total,
+        latestModel: models.items[0] ?? null,
+        schedule: schedules.find((s) => s.scope === `train:${id}`) ?? null,
+      };
+      wakewords.value = wakewords.value.map((w) => (w.id === id ? word : w));
     } catch (cause) {
       if (!current()) return;
       if (cause instanceof StudioApiError && cause.status === 404) {
         // Exclude the missing ID even if a concurrent list response still contains it.
-        wakewords.value = wakewords.value.filter(word => word.id !== id);
+        wakewords.value = wakewords.value.filter((word) => word.id !== id);
         select(wakewords.value[0]?.id ?? "");
         notice.value = unavailable;
       } else selectedError.value = cause instanceof Error ? cause.message : "Unable to load this workspace.";
@@ -86,14 +91,40 @@ export function createWorkspace(routes: StudioRoutes) {
       select(previous || words[0]?.id || "");
       if (previous === selectedId.value) await refreshSelected();
     } catch (cause) {
-      if (!disposed && !controller.signal.aborted) error.value = cause instanceof Error ? cause.message : "Unable to load workspaces.";
+      if (!disposed && !controller.signal.aborted)
+        error.value = cause instanceof Error ? cause.message : "Unable to load workspaces.";
     } finally {
       if (!disposed && !controller.signal.aborted) loading.value = false;
     }
   }
-  watch(selectedId, () => { void refreshSelected(); }, { flush: "sync" });
-  onScopeDispose(() => { disposed = true; listRequest?.abort(); wordRequest?.abort(); });
-  return { routes, wakewords, selectedId, selected, summary, loading, selectedLoading, error, selectedError, notice, load, select, remove, refreshSelected };
+  watch(
+    selectedId,
+    () => {
+      void refreshSelected();
+    },
+    { flush: "sync" },
+  );
+  onScopeDispose(() => {
+    disposed = true;
+    listRequest?.abort();
+    wordRequest?.abort();
+  });
+  return {
+    routes,
+    wakewords,
+    selectedId,
+    selected,
+    summary,
+    loading,
+    selectedLoading,
+    error,
+    selectedError,
+    notice,
+    load,
+    select,
+    remove,
+    refreshSelected,
+  };
 }
 export type Workspace = ReturnType<typeof createWorkspace>;
 export const workspaceKey: InjectionKey<Workspace> = Symbol("studio-workspace");

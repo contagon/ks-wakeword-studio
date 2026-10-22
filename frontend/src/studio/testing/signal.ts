@@ -4,15 +4,15 @@ export class StreamingResampler {
   private outputIndex = 0;
   private previous = 0;
   constructor(private readonly rate: number) {
-    if (!Number.isFinite(rate) || rate < 16000) throw new Error('Unsupported microphone sample rate.');
+    if (!Number.isFinite(rate) || rate < 16000) throw new Error("Unsupported microphone sample rate.");
   }
   push(input: Float32Array): Float32Array {
     if (!input.length) return new Float32Array();
     if (this.rate === 16000) return input.slice();
     const output: number[] = [];
     const end = this.consumed + input.length - 1;
-    while (this.outputIndex * this.rate / 16000 < end) {
-      const position = this.outputIndex * this.rate / 16000;
+    while ((this.outputIndex * this.rate) / 16000 < end) {
+      const position = (this.outputIndex * this.rate) / 16000;
       const left = Math.floor(position);
       const fraction = position - left;
       const a = left < this.consumed ? this.previous : input[left - this.consumed]!;

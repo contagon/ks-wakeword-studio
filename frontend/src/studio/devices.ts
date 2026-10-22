@@ -15,8 +15,8 @@ function message(cause: unknown): string {
 /** One registry cache for collection and publication surfaces. No credential values live here. */
 export function useDeviceRegistry() {
   function deviceLabel(id: string): string {
-    const device = deviceItems.value.find(item => item.id === id);
-    return device?.name?.trim() || device?.url || 'Unknown kiosk';
+    const device = deviceItems.value.find((item) => item.id === id);
+    return device?.name?.trim() || device?.url || "Unknown kiosk";
   }
   async function load(force = false): Promise<void> {
     if (initialized && !force) return;
@@ -38,8 +38,11 @@ export function useDeviceRegistry() {
     }
   }
   function replace(device: Device): void {
-    const index = deviceItems.value.findIndex(item => item.id === device.id);
-    deviceItems.value = index < 0 ? [...deviceItems.value, device] : deviceItems.value.map(item => item.id === device.id ? device : item);
+    const index = deviceItems.value.findIndex((item) => item.id === device.id);
+    deviceItems.value =
+      index < 0
+        ? [...deviceItems.value, device]
+        : deviceItems.value.map((item) => (item.id === device.id ? device : item));
     initialized = true;
   }
   async function add(url: string, password: string, role: "leader" | "standalone"): Promise<Device> {
@@ -66,6 +69,20 @@ export function useDeviceRegistry() {
     await studioApi.deleteDevice(id);
     await load(true);
   }
-  function abort(): void { request?.abort(); }
-  return { devices: readonly(deviceItems), loading: readonly(loading), error: readonly(error), deviceLabel, load, add, refresh, credentials, update, remove, abort };
+  function abort(): void {
+    request?.abort();
+  }
+  return {
+    devices: readonly(deviceItems),
+    loading: readonly(loading),
+    error: readonly(error),
+    deviceLabel,
+    load,
+    add,
+    refresh,
+    credentials,
+    update,
+    remove,
+    abort,
+  };
 }

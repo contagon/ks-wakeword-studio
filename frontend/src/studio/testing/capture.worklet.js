@@ -21,4 +21,4 @@ class TestingCapture extends AudioWorkletProcessor {
     return true;
   }
 }
-registerProcessor('studio-testing-capture', TestingCapture);
+registerProcessor("studio-testing-capture", TestingCapture);

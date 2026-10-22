@@ -5,8 +5,10 @@ import { resolve } from "node:path";
 
 export default defineConfig({
   // The production server mounts this library and its worker under /static/ui/.
-  base: './',
-  plugins: [vue(), tailwindcss()],
+  base: "./",
+  // Templates are Prettier-formatted, which assumes HTML whitespace rules; Vue's default
+  // "condense" would drop a space that Prettier moved onto a new line between inline tags.
+  plugins: [vue({ template: { compilerOptions: { whitespace: "preserve" } } }), tailwindcss()],
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
   },
@@ -21,8 +23,7 @@ export default defineConfig({
     cssCodeSplit: false,
     rollupOptions: {
       output: {
-        assetFileNames: (assetInfo) =>
-          assetInfo.name?.endsWith(".css") ? "trainer-ui.css" : "[name][extname]",
+        assetFileNames: (assetInfo) => (assetInfo.name?.endsWith(".css") ? "trainer-ui.css" : "[name][extname]"),
       },
     },
   },
