@@ -443,6 +443,16 @@ Also:
     - a stale Deploy assertion that expected a version id instead of "Run #N";
     - `overall-polish.spec.ts` leaving a queued collection job that broke the Automate test in full-suite order.
   - Baseline: pytest 537 passed, 1 skipped; vitest 207 passed; typecheck clean; Playwright 18 passed, 1 skipped (opt-in real-model test).
+- **Phase 2 done:** the legacy inventory on `/data` was empty (0 personal, negative, captured and models), so there was nothing to import.
+- **Phase 3 done (commits `88d82fc`, `692fa54`, `014d964`, `4d93eef`):**
+  - §2 legacy removal.
+  - §3 all 17 routes.
+  - §4 `static/ui` is built in Docker; the full image build was verified locally.
+  - §6.3.5 dead TTS code: about 11,600 lines deleted in total.
+  - After this phase: pytest 449 passed, 1 skipped; vitest 204 passed; Playwright 18 passed, 1 skipped. A pixel diff of every page before and after the frontend deletions showed only timing noise.
+  - Deferred:
+    - **The `:not(.legacy-scope *)` qualifiers in `studio.css`.** Removing them lowers selector specificity, and a pixel diff showed 1px shifts on checkboxes and a changed corner on the selected wakeword card. Handle them in §5 along with the B1 trim-dialog rebuild; `AudioTrimModal.vue` still wraps itself in `legacy-scope`.
+    - **Service methods that are now test-only.** `GenerationService.enqueue/save_recipe/get_batch`, `TrainingService.get_manifest`, `ScheduleService.save`, `WorkspaceService.update/source_mappings`, and `StudioRuntime.health` (plus the WorkerPool health bookkeeping) are kept because many tests use them for setup. `publication_history` is still written but no longer read. Tidy these in phase 8.
 
 ## 11. Order of work
 
