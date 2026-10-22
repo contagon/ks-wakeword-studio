@@ -467,7 +467,7 @@ Also:
 - **Phase 6 done (commits `adf7274`, `c3a7b61`, `698bba5`, plus the mobile commit):** UI polish in §5.
   - Added shared pieces: row, note, danger and section-header styles, `PageHeader`, `ConfirmDialog` and `format.ts`.
   - Every change was checked with screenshots (light, dark, 390px).
-  - On request, the items first kept as-is were reworked too: Samples stacks as cards on phones, Testing sensitivity is a native select, Manual uses one label toggle, the theme toggle's visible text matches its name, and Automate deployment has an Enabled checkbox like the other cards.
+  - On request, the items first kept as-is were reworked too: Samples stacks as cards on phones, Testing sensitivity is a native select, and Manual uses one label toggle. The theme-toggle and Automate deployment changes were tried, then reverted at the user's request.
   - Only the job ids in the expanded queue logs remain, for debugging.
   - Focus restoration and trapping in dialogs was dropped at the user's request; the native `showModal()` handles focus.
 
