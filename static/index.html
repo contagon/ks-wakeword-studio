@@ -3,9 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#070b15" />
+    <meta name="theme-color" content="#142330" />
     <title>Wake Word Studio</title>
-    <script src="/static/studio-theme.js"></script>
+    <script>
+      // Runs before CSS/Vue so the first painted Studio frame uses the chosen theme.
+      (() => {
+        let saved;
+        try { saved = localStorage.getItem('studio.theme'); } catch { /* Optional storage. */ }
+        const dark = saved === 'dark' || (saved !== 'light' && typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.studioTheme = dark ? 'dark' : 'light';
+      })();
+    </script>
     <style>#trainer-app:empty{min-height:100vh;background:#f5f7fa}html[data-studio-theme="dark"] #trainer-app:empty{background:#101923}</style>
     <link rel="stylesheet" href="/static/ui/trainer-ui.css" />
   </head>
