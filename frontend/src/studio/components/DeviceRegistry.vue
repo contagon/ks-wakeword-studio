@@ -4,8 +4,6 @@ import { onBeforeUnmount, onMounted, ref, type ComponentPublicInstance } from "v
 import { useDeviceRegistry } from "../devices";
 import type { Device } from "../types";
 
-const props = defineProps<{ surface: "scrape" | "deploy" | "kiosks" }>();
-const emit = defineEmits<{ changed: [Device[]] }>();
 const registry = useDeviceRegistry();
 const url = ref("");
 const role = ref<"leader" | "standalone">("standalone");
@@ -28,7 +26,6 @@ async function saveAddress(device: Device): Promise<void> {
     await registry.update(device.id, editUrl.value);
     editing.value = "";
     notice.value = "Connection address saved.";
-    sync();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Address was not saved.";
   } finally {
@@ -49,7 +46,6 @@ async function remove(): Promise<void> {
     await registry.remove(deleting.value.id);
     closeDelete();
     notice.value = "Kiosk removed from Studio. Saved recordings and models are kept.";
-    sync();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Kiosk was not removed.";
   } finally {
@@ -67,9 +63,6 @@ function roleLabel(role: string): string {
 function parent(device: Device): string {
   return device.leader_id ? `Parent ${registry.deviceLabel(device.leader_id)}` : "Direct registry target";
 }
-function sync(): void {
-  emit("changed", [...registry.devices.value]);
-}
 async function add(): Promise<void> {
   const password = passwordInput.value?.value ?? "";
   // Clear the DOM field before awaiting so a slow network request never retains a submitted secret.
@@ -82,7 +75,6 @@ async function add(): Promise<void> {
     url.value = "";
     notice.value =
       role.value === "leader" ? "Leader added; follower membership was refreshed." : "Standalone kiosk added.";
-    sync();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Device could not be added.";
   } finally {
@@ -95,7 +87,6 @@ async function refresh(device: Device): Promise<void> {
   try {
     await registry.refresh(device.id);
     notice.value = "Fleet membership refreshed.";
-    sync();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Fleet refresh failed.";
   } finally {
@@ -112,7 +103,6 @@ async function setCredentials(device: Device): Promise<void> {
   try {
     await registry.credentials(device.id, password);
     notice.value = "Kiosk authenticated; token saved server-side.";
-    sync();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Credentials were not saved.";
   } finally {
@@ -121,7 +111,6 @@ async function setCredentials(device: Device): Promise<void> {
 }
 onMounted(async () => {
   await registry.load();
-  sync();
 });
 onBeforeUnmount(() => registry.abort());
 </script>
@@ -140,27 +129,9 @@ onBeforeUnmount(() => registry.abort());
           Refresh registry
         </button>
       </div>
-      <p v-if="props.surface !== 'kiosks'" class="studio-muted mt-3">Register a fleet leader or standalone kiosks.</p>
-      <details v-if="props.surface !== 'kiosks'" class="mt-3">
-        <summary>Fleet safety details</summary>
-        <p class="studio-muted">
-          Register one fleet leader or standalone kiosks. A leader is authoritative: its existing mirror can propagate
-          selections and remove follower-only models. This studio never edits enabled selections or uploads directly to
-          followers.
-        </p>
-        <p v-if="props.surface === 'deploy'" class="studio-muted text-xs mt-3">
-          Publication staging prerequisite: upload staging must start clean and no concurrent manual uploads may occur
-          while the trainer owns a publication. This condition cannot be checked automatically.
-        </p>
-      </details>
       <p v-if="notice" class="studio-note" role="status">{{ notice }}</p>
       <p v-if="error || registry.error.value" class="studio-note" role="alert">{{ error || registry.error.value }}</p>
-      <component
-        :is="props.surface === 'kiosks' ? 'div' : 'details'"
-        data-device-registration
-        class="mt-3"
-        :open="props.surface !== 'kiosks' && !registry.devices.value.length ? true : undefined"
-        ><summary v-if="props.surface !== 'kiosks'">Add device</summary>
+      <div data-device-registration class="mt-3">
         <form data-device-add class="studio-registration-row" @submit.prevent="add">
           <label
             >Address<input v-model="url" required name="url" autocomplete="url" placeholder="http://kiosk.local:2324"
@@ -180,7 +151,7 @@ onBeforeUnmount(() => registry.abort());
           Use the kiosk's Remote Administration password. Studio saves only the resulting 10-year token, not your
           password. Submit only over a trusted connection.
         </p>
-      </component>
+      </div>
       <p v-if="registry.loading.value" class="studio-muted mt-3">Loading registered devices…</p>
       <div v-else class="mt-4 grid gap-2">
         <article

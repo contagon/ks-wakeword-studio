@@ -65,7 +65,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("shared fleet registry", () => {
   it("keeps kiosk registration inline before and after adding a device", async () => {
-    const ui = mount(DeviceRegistry, { props: { surface: "kiosks" } });
+    const ui = mount(DeviceRegistry);
     await flushPromises();
     expect(ui.get("form[data-device-add]").element.closest("details")).toBeNull();
     expect(ui.text()).not.toContain("Fleet safety details");
@@ -85,7 +85,7 @@ describe("shared fleet registry", () => {
       { ...follower, name: "Kitchen satellite" },
     ];
     await useDeviceRegistry().load(true);
-    const ui = mount(DeviceRegistry, { props: { surface: "kiosks" } });
+    const ui = mount(DeviceRegistry);
     await flushPromises();
     const row = () => ui.get('[data-device-id="follower"]');
     expect(row().get("strong").text()).toBe("Kitchen satellite");
@@ -111,7 +111,7 @@ describe("shared fleet registry", () => {
   it("confirms removal in a modal dialog and disables it while busy", async () => {
     devices = [leader, follower];
     await useDeviceRegistry().load(true);
-    const ui = mount(DeviceRegistry, { attachTo: document.body, props: { surface: "kiosks" } });
+    const ui = mount(DeviceRegistry, { attachTo: document.body });
     await flushPromises();
     await ui.get('[data-device-id="follower"] [data-action="delete-device"]').trigger("click");
     await flushPromises();
@@ -134,7 +134,7 @@ describe("shared fleet registry", () => {
   });
   it("edits follower addresses, cancels edits, and confirms local removal", async () => {
     devices = [leader, follower];
-    const ui = mount(DeviceRegistry, { props: { surface: "kiosks" } });
+    const ui = mount(DeviceRegistry);
     await flushPromises();
     await ui.get('button[data-action="refresh-registry"]').trigger("click");
     await flushPromises();
@@ -163,7 +163,7 @@ describe("shared fleet registry", () => {
 
   it("retains an edit and reports rejected saves without showing upstream secrets", async () => {
     devices = [leader];
-    const ui = mount(DeviceRegistry, { props: { surface: "kiosks" } });
+    const ui = mount(DeviceRegistry);
     await flushPromises();
     await ui.get('[data-action="refresh-registry"]').trigger("click");
     await flushPromises();
@@ -179,52 +179,36 @@ describe("shared fleet registry", () => {
     expect(ui.get('[role="alertdialog"]').text()).toContain("discovered followers");
     ui.unmount();
   });
-  it("opens registration for an empty fleet and collapses it once configured", async () => {
-    const ui = mount(DeviceRegistry, { props: { surface: "scrape" } });
+  it("shares a leader added in one registry view with another and never offers follower deploy", async () => {
+    const first = mount(DeviceRegistry);
     await flushPromises();
-    expect(ui.get("details[data-device-registration]").attributes("open")).toBeDefined();
-    await ui.get('input[name="url"]').setValue("http://leader");
-    await ui.get('input[name="password"]').setValue("admin-password");
-    await ui.get("form[data-device-add]").trigger("submit");
+    await first.get('input[name="url"]').setValue("http://leader");
+    await first.get('input[name="password"]').setValue("super-secret-password");
+    await first.get("form[data-device-add]").trigger("submit");
     await flushPromises();
-    expect(ui.get("details[data-device-registration]").attributes("open")).toBeUndefined();
-    expect(ui.get("[data-device-registration] summary").text()).toContain("Add device");
-    ui.unmount();
-  });
-  it.each(["scrape", "deploy"] as const)(
-    "shares a leader added from the %s surface with the other surface and never offers follower deploy",
-    async (surface) => {
-      const other = surface === "scrape" ? "deploy" : "scrape";
-      const first = mount(DeviceRegistry, { props: { surface } });
-      await flushPromises();
-      await first.get('input[name="url"]').setValue("http://leader");
-      await first.get('input[name="password"]').setValue("super-secret-password");
-      await first.get("form[data-device-add]").trigger("submit");
-      await flushPromises();
 
-      expect((first.get('input[name="password"]').element as HTMLInputElement).value).toBe("");
-      const sent = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === "POST");
-      expect(JSON.parse(sent?.[1]?.body as string)).toEqual({
-        url: "http://leader",
-        password: "super-secret-password",
-        role: "standalone",
-      });
-      expect(first.text()).toContain("Follower");
-      const second = mount(DeviceRegistry, { props: { surface: other } });
-      await flushPromises();
-      expect(second.text()).toContain("Follower");
-      expect(second.text()).toContain("Parent http://leader");
-      expect(second.find('[data-action="upload-follower"]').exists()).toBe(false);
-      expect(second.text()).not.toContain("super-secret-password");
-      first.unmount();
-      second.unmount();
-    },
-  );
+    expect((first.get('input[name="password"]').element as HTMLInputElement).value).toBe("");
+    const sent = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(sent?.[1]?.body as string)).toEqual({
+      url: "http://leader",
+      password: "super-secret-password",
+      role: "standalone",
+    });
+    expect(first.text()).toContain("Follower");
+    const second = mount(DeviceRegistry);
+    await flushPromises();
+    expect(second.text()).toContain("Follower");
+    expect(second.text()).toContain("Parent http://leader");
+    expect(second.find('[data-action="upload-follower"]').exists()).toBe(false);
+    expect(second.text()).not.toContain("super-secret-password");
+    first.unmount();
+    second.unmount();
+  });
 
   it.each([200, 403])("clears a follower password while pending and after status %s", async (status) => {
     devices = [leader, follower];
     await useDeviceRegistry().load(true);
-    const ui = mount(DeviceRegistry, { props: { surface: "scrape" } });
+    const ui = mount(DeviceRegistry);
     await flushPromises();
     const credential = ui.get('input[name="credentials-follower"]');
     await credential.setValue("pending-secret");
@@ -243,7 +227,7 @@ describe("shared fleet registry", () => {
   });
 
   it.each([201, 403])("clears registration password before the login finishes with status %s", async (status) => {
-    const ui = mount(DeviceRegistry, { props: { surface: "scrape" } });
+    const ui = mount(DeviceRegistry);
     await flushPromises();
     let finish: ((response: Response) => void) | undefined;
     vi.mocked(fetch).mockImplementationOnce(
@@ -261,7 +245,7 @@ describe("shared fleet registry", () => {
     await flushPromises();
     expect((password.element as HTMLInputElement).value).toBe("");
     expect(ui.text()).not.toContain("registration-secret");
-    const other = mount(DeviceRegistry, { props: { surface: "deploy" } });
+    const other = mount(DeviceRegistry);
     await flushPromises();
     expect(other.text()).not.toContain("registration-secret");
     ui.unmount();

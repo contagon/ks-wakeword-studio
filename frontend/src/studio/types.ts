@@ -291,11 +291,6 @@ export interface TrainingCounts {
   negative: number;
   artificial: number;
 }
-export interface AugmentationInput {
-  id: string;
-  path: string;
-  fingerprint: string;
-}
 /** Calibration metrics narrowed from opaque `ModelVersion.metrics`; absent or malformed values are null. */
 export interface ModelMetrics {
   recall: number | null;

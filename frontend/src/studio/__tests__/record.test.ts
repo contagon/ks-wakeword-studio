@@ -5,7 +5,6 @@ import { fakeMedia, fakeStudio, json, press, wav } from "./fakeStudio";
 
 let ui: VueWrapper | undefined;
 let server: ReturnType<typeof fakeStudio>;
-let media: ReturnType<typeof fakeMedia>;
 let tracks: { stop: ReturnType<typeof vi.fn> }[];
 let getUserMedia: ReturnType<typeof vi.fn>;
 let recorders: FakeRecorder[];
@@ -37,7 +36,7 @@ beforeEach(() => {
   localStorage.clear();
   history.replaceState(null, "", "/#/manual?word=a");
   server = fakeStudio();
-  media = fakeMedia();
+  fakeMedia();
   tracks = [{ stop: vi.fn() }];
   recorders = [];
   empty = false;

@@ -30,14 +30,12 @@ export function createThemeController() {
     }
   }
   apply();
-  if (media?.addEventListener) media.addEventListener("change", onSystemChange);
-  else media?.addListener?.(onSystemChange);
+  media?.addEventListener("change", onSystemChange);
   return {
     dark,
     toggle,
     dispose() {
-      if (media?.removeEventListener) media.removeEventListener("change", onSystemChange);
-      else media?.removeListener?.(onSystemChange);
+      media?.removeEventListener("change", onSystemChange);
     },
   };
 }

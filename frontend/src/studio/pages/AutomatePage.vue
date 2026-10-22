@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import PageHeader from "../components/PageHeader.vue";
 import { absoluteTime } from "../time";
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, toRaw, watch } from "vue";
 import { studioApi } from "../api";
 import type { AutomationSettings, AutomationStatus } from "../types";
 import { useWorkspace } from "../workspace";
@@ -69,7 +69,7 @@ async function save() {
   mutation = controller;
   const id = wordId.value,
     token = generation;
-  const snapshot = JSON.parse(JSON.stringify(settings.value)) as AutomationSettings;
+  const snapshot = structuredClone(toRaw(settings.value));
   saving.value = true;
   error.value = "";
   notice.value = "";

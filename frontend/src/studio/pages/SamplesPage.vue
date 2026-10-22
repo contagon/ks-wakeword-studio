@@ -312,7 +312,6 @@ onBeforeUnmount(() => {
         :offset="offset"
         :limit="limit"
         :loading="loading"
-        noun="samples"
         @page="
           offset = $event;
           load();

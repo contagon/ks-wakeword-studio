@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { fetchAll, studioApi } from "../api";
 import { latestRequest } from "../requests";
 import { useWorkspace } from "../workspace";
-import type { Dataset, Job, Page, TrainingCounts, TrainingSettings } from "../types";
+import type { Dataset, Job, TrainingCounts, TrainingSettings } from "../types";
 import { isActiveJob, useJobQueue, statusClass } from "../jobs";
 import type { AugmentationCatalog } from "../types";
 import { jobError } from "../errors";

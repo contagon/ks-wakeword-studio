@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { fetchAll, studioApi } from "../api";
 import { latestRequest } from "../requests";
 import { useWorkspace } from "../workspace";
-import type { AugmentationCatalog, Dataset, Page } from "../types";
+import type { AugmentationCatalog, Dataset } from "../types";
 import { datasetBytes, datasetSamples } from "../format";
 import PaginatedTable from "../components/PaginatedTable.vue";
 import { isActiveStatus, useJobQueue, statusClass } from "../jobs";

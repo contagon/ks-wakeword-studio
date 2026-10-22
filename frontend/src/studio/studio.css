@@ -172,11 +172,6 @@
   margin-top: 10px;
 }
 
-@theme {
-  --color-studio-green: #246449;
-  --color-studio-surface: #ffffff;
-}
-
 html[data-studio-theme="dark"]:has(.studio-app) {
   background: #101923;
 }
@@ -298,7 +293,7 @@ html[data-studio-theme="dark"] .studio-app {
   flex: 0 0 16px;
   padding: 0;
   margin: 0;
-  accent-color: var(--color-studio-green);
+  accent-color: var(--studio-primary);
   cursor: pointer;
 }
 .studio-app input[readonly] {

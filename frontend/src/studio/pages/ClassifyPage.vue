@@ -240,11 +240,6 @@ async function load(): Promise<void> {
     if (!controller.signal.aborted && current === generation) loading.value = false;
   }
 }
-function next(): void {
-  player.value?.stop();
-  position.value = Math.min(position.value + 1, Math.max(0, visible.value.length - 1));
-  autoplayNext.value = hasGesture.value;
-}
 function removeCurrent(): void {
   const item = active.value;
   if (!item) return;

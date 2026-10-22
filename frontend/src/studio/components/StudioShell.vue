@@ -36,7 +36,7 @@ const workspace = createWorkspace(routes);
 provide(workspaceKey, workspace);
 const queue = createJobQueue();
 provide(jobQueueKey, queue);
-const { wakewords, selectedId, selected, loading, error, notice } = workspace;
+const { wakewords, selectedId, loading, error, notice } = workspace;
 const navigationOpen = ref(false);
 const narrow = ref(false);
 const toggle = ref<HTMLButtonElement>();
@@ -63,8 +63,7 @@ watch(narrow, (isNarrow) => {
   if (!isNarrow) navigationOpen.value = false;
 });
 updateNarrow();
-if (narrowQuery?.addEventListener) narrowQuery.addEventListener("change", updateNarrow);
-else narrowQuery?.addListener(updateNarrow);
+narrowQuery?.addEventListener("change", updateNarrow);
 onMounted(() => {
   document.addEventListener("keydown", onKeydown);
   void workspace.load();
@@ -73,8 +72,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", onKeydown);
   queue.stop();
-  if (narrowQuery?.removeEventListener) narrowQuery.removeEventListener("change", updateNarrow);
-  else narrowQuery?.removeListener(updateNarrow);
+  narrowQuery?.removeEventListener("change", updateNarrow);
 });
 </script>
 

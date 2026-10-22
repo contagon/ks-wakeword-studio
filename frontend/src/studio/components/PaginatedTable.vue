@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const props = defineProps<{ total: number; offset: number; limit: number; loading?: boolean; noun?: string }>();
+const props = defineProps<{ total: number; offset: number; limit: number; loading?: boolean }>();
 const emit = defineEmits<{ page: [offset: number] }>();
 const first = () => (props.offset >= props.total ? 0 : props.offset + 1);
 const last = () => (props.offset >= props.total ? 0 : Math.min(props.offset + props.limit, props.total));

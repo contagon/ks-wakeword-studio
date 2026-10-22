@@ -5,6 +5,6 @@ import DeviceRegistry from "../components/DeviceRegistry.vue";
 <template>
   <section>
     <PageHeader title="Kiosks" description="Connect and manage your kiosk fleet." />
-    <DeviceRegistry surface="kiosks" />
+    <DeviceRegistry />
   </section>
 </template>
