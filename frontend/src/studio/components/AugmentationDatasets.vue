@@ -160,18 +160,21 @@ onBeforeUnmount(() => {
 
 <template>
   <section data-augmentation-datasets class="studio-card mt-4">
-    <div class="studio-toolbar">
+    <div class="studio-section-header">
       <h2>Augmentation datasets</h2>
-      <button type="button" :disabled="loading" @click="load()">Refresh status</button
-      ><button
-        type="button"
-        data-action="save-augmentation"
-        class="studio-primary studio-selection-action"
-        :disabled="saving || loading || !activeId || !catalog"
-        @click="save"
-      >
-        {{ saving ? "Saving…" : "Save selection" }}
-      </button>
+      <div class="studio-section-actions">
+        <button type="button" :disabled="loading" @click="load()">Refresh status</button
+        ><button
+          type="button"
+          data-action="save-augmentation"
+          class="studio-primary"
+          :aria-busy="saving"
+          :disabled="saving || loading || !activeId || !catalog"
+          @click="save"
+        >
+          {{ saving ? "Saving…" : "Save selection" }}
+        </button>
+      </div>
     </div>
     <p class="studio-muted mt-3">
       Downloads are shared; select usage per wakeword. All are enabled by default. Training mixes selected backgrounds

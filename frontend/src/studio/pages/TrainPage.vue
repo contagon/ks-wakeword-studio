@@ -301,7 +301,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             data-action="save-training-settings"
-            class="studio-primary"
+            :aria-busy="saving"
             :disabled="saving"
             @click="save"
           >
@@ -309,6 +309,7 @@ onBeforeUnmount(() => {
           ><button
             type="button"
             data-action="start-training"
+            class="studio-primary"
             :aria-busy="trainingBusy"
             :disabled="
               !activeId ||

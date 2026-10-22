@@ -125,7 +125,7 @@ onBeforeUnmount(() => {
               type="button"
               class="studio-queue-toggle"
               data-action="open-job-queue"
-              aria-label="Open global job queue"
+              :aria-label="queue.error.value ? 'Open global job queue (queue unavailable)' : 'Open global job queue'"
               aria-controls="studio-job-queue"
               :aria-expanded="queue.open.value"
               @click="queue.show()"
@@ -133,7 +133,7 @@ onBeforeUnmount(() => {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
                 <path d="M8 6h13M8 12h13M8 18h13M3 6h1M3 12h1M3 18h1" /></svg
               ><span v-if="queue.activeCount.value" class="studio-queue-badge">{{ queue.activeCount.value }}</span
-              ><span v-if="queue.error.value" title="Job queue unavailable" aria-label="Job queue unavailable">!</span>
+              ><span v-if="queue.error.value" title="Job queue unavailable" aria-hidden="true">!</span>
             </button>
           </div>
         </header>

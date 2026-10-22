@@ -204,6 +204,7 @@ onBeforeUnmount(() => {
         ><button
           type="submit"
           class="studio-primary"
+          :aria-busy="uploading"
           :disabled="!workspace.selectedId.value || !importFile || busy || state === 'recording'"
         >
           {{ uploading ? "Uploading…" : "Upload audio" }}
@@ -283,6 +284,7 @@ onBeforeUnmount(() => {
             data-action="save-capture"
             class="studio-primary"
             aria-keyshortcuts="K Enter"
+            :aria-busy="saving"
             :disabled="busy || !selection"
             @click="saveCapture"
           >

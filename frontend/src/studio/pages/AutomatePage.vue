@@ -115,7 +115,7 @@ onBeforeUnmount(() => {
     <p v-if="notice" class="studio-note" role="status">{{ notice }}</p>
     <form v-if="settings" class="grid gap-4" @submit.prevent="save">
       <section class="studio-card">
-        <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="studio-section-header mb-2">
           <h2>Automatic collection</h2>
           <label class="studio-checkbox-label"
             ><input v-model="settings.collection.enabled" name="collection-enabled" type="checkbox" />Enabled</label
@@ -129,7 +129,7 @@ onBeforeUnmount(() => {
         <p class="studio-muted text-xs mt-3">{{ stageStatus("scrape") }}</p>
       </section>
       <section class="studio-card">
-        <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="studio-section-header mb-2">
           <h2>Automatic classification</h2>
           <label class="studio-checkbox-label"
             ><input
@@ -160,12 +160,12 @@ onBeforeUnmount(() => {
           v-model="settings.classification_schedule"
           prefix="classification"
         />
-        <details class="mt-3">
-          <summary>Classification rules</summary>
-          <label class="studio-checkbox-label my-3"
+        <div class="grid gap-2 mt-4">
+          <h3>Classification rules</h3>
+          <label class="studio-checkbox-label"
             ><input v-model="settings.classification.auto_negatives" type="checkbox" />Label clear non-wake activations
             as negatives</label
-          ><label class="studio-checkbox-label my-3"
+          ><label class="studio-checkbox-label"
             ><input v-model="settings.classification.promote_close_misses" type="checkbox" />Promote confirmed close
             misses to positives</label
           >
@@ -173,12 +173,12 @@ onBeforeUnmount(() => {
             Empty or ambiguous transcripts stay pending. Close misses are never automatic negatives. No audio is
             automatically deleted.
           </p>
-        </details>
+        </div>
         <p class="studio-muted text-xs mt-3">{{ stageStatus("classify") }}</p>
       </section>
       <div class="grid gap-4 lg:grid-cols-2">
         <section class="studio-card">
-          <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="studio-section-header mb-2">
             <h2>Automatic training</h2>
             <label class="studio-checkbox-label"
               ><input v-model="settings.training.enabled" name="training-enabled" type="checkbox" />Enabled</label
@@ -192,10 +192,10 @@ onBeforeUnmount(() => {
           <p class="studio-note text-xs">
             Training and deployment are separate. Training alone does not publish a model.
           </p>
-          <p class="studio-muted text-xs">{{ stageStatus("train") }}</p>
+          <p class="studio-muted text-xs mt-3">{{ stageStatus("train") }}</p>
         </section>
         <section class="studio-card">
-          <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="studio-section-header mb-2">
             <h2>Automatic deployment</h2>
             <span class="studio-status studio-status-muted">{{ deploymentMode }}</span>
           </div>
@@ -217,12 +217,14 @@ onBeforeUnmount(() => {
             Publish the latest new eligible archive; skip if there is nothing new. Manual rollbacks are retained until a
             new archive is available.
           </p>
-          <p class="studio-muted text-xs">{{ stageStatus("deploy") }}</p>
+          <p class="studio-muted text-xs mt-3">{{ stageStatus("deploy") }}</p>
         </section>
       </div>
-      <button type="submit" class="studio-primary" :disabled="saving || loading">
-        {{ saving ? "Saving…" : "Save automation settings" }}
-      </button>
+      <div class="studio-form-footer">
+        <button type="submit" class="studio-primary" :aria-busy="saving" :disabled="saving || loading">
+          {{ saving ? "Saving…" : "Save automation settings" }}
+        </button>
+      </div>
     </form>
   </section>
 </template>

@@ -61,6 +61,9 @@ function recordInput(id: string, element: Element | ComponentPublicInstance | nu
   if (element instanceof HTMLInputElement) credentialInputs.set(id, element);
   else credentialInputs.delete(id);
 }
+function roleLabel(role: string): string {
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
 function parent(device: Device): string {
   return device.leader_id ? `Parent ${registry.deviceLabel(device.leader_id)}` : "Direct registry target";
 }
@@ -126,11 +129,8 @@ onBeforeUnmount(() => registry.abort());
 <template>
   <section class="studio-card" data-device-registry>
     <div>
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2>Fleet setup</h2>
-          <p v-if="props.surface !== 'kiosks'" class="studio-muted">Register a fleet leader or standalone kiosks.</p>
-        </div>
+      <div class="studio-section-header">
+        <h2>Fleet setup</h2>
         <button
           type="button"
           data-action="refresh-registry"
@@ -140,6 +140,7 @@ onBeforeUnmount(() => registry.abort());
           Refresh registry
         </button>
       </div>
+      <p v-if="props.surface !== 'kiosks'" class="studio-muted mt-3">Register a fleet leader or standalone kiosks.</p>
       <details v-if="props.surface !== 'kiosks'" class="mt-3">
         <summary>Fleet safety details</summary>
         <p class="studio-muted">
@@ -188,37 +189,19 @@ onBeforeUnmount(() => registry.abort());
           class="studio-device-row"
           :data-device-id="device.id"
         >
-          <div>
+          <div class="studio-device-main">
             <strong>{{ registry.deviceLabel(device.id) }}</strong>
             <span
-              class="studio-status"
+              class="studio-status ml-2"
               :class="device.role === 'follower' ? 'studio-status-muted' : 'studio-status-neutral'"
-              >{{ device.role === "follower" ? "Follower" : device.role }}</span
+              >{{ roleLabel(device.role) }}</span
             >
             <p class="studio-muted text-xs">
               {{ parent(device) }} · {{ device.url }}{{ device.active ? "" : " · Inactive member" }}
             </p>
-          </div>
-          <div class="flex flex-wrap gap-2 items-center">
-            <span
-              class="studio-status"
-              :class="device.credentials_status === 'ready' ? 'studio-status-neutral' : 'studio-status-warning'"
-              >{{ device.credentials_status === "ready" ? "Credentials ready" : "Credentials required" }}</span
-            ><span
-              class="studio-status"
-              :class="device.model_eligible ? 'studio-status-neutral' : 'studio-status-warning'"
-              >{{ device.model_eligible ? "Profile covered" : "Not covered" }}</span
-            ><button
-              v-if="device.role === 'leader'"
-              type="button"
-              :disabled="busy === `refresh:${device.id}`"
-              @click="refresh(device)"
-            >
-              Refresh followers
-            </button>
             <form
               v-if="device.role === 'follower' && device.credentials_status !== 'ready'"
-              class="flex gap-2"
+              class="flex gap-2 mt-2"
               @submit.prevent="setCredentials(device)"
             >
               <input
@@ -231,8 +214,26 @@ onBeforeUnmount(() => registry.abort());
               /><button type="submit" :disabled="busy === `credentials:${device.id}`">Authenticate</button>
             </form>
           </div>
-          <div class="flex gap-2">
-            <button type="button" data-action="edit-device" :disabled="!!busy" @click="edit(device)">Edit</button
+          <div class="studio-device-badges">
+            <span
+              class="studio-status"
+              :class="device.credentials_status === 'ready' ? 'studio-status-neutral' : 'studio-status-warning'"
+              >{{ device.credentials_status === "ready" ? "Credentials ready" : "Credentials required" }}</span
+            ><span
+              class="studio-status"
+              :class="device.model_eligible ? 'studio-status-neutral' : 'studio-status-warning'"
+              >{{ device.model_eligible ? "Profile covered" : "Not covered" }}</span
+            >
+          </div>
+          <div class="studio-device-actions">
+            <button
+              v-if="device.role === 'leader'"
+              type="button"
+              :disabled="busy === `refresh:${device.id}`"
+              @click="refresh(device)"
+            >
+              Refresh followers</button
+            ><button type="button" data-action="edit-device" :disabled="!!busy" @click="edit(device)">Edit</button
             ><button type="button" data-action="delete-device" :disabled="!!busy" @click="confirmDelete(device)">
               Delete
             </button>

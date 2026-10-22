@@ -13,7 +13,7 @@ const undoStack = (word: string) => {
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import PageHeader from "../components/PageHeader.vue";
 import { absoluteTime } from "../time";
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { StudioApiError, studioApi } from "../api";
 import { shortcutTarget } from "../shortcuts";
 import AudioPlayer from "../components/AudioPlayer.vue";
@@ -395,6 +395,16 @@ async function assign(recording: Recording): Promise<void> {
     }
   }
 }
+const TABS = ["review", "collect", "unmapped"] as const;
+/** Left/Right move between tabs, as for any tablist. */
+function tabKey(event: KeyboardEvent): void {
+  const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+  if (!step) return;
+  event.preventDefault();
+  const next = TABS[(TABS.indexOf(tab.value) + step + TABS.length) % TABS.length]!;
+  workspace.routes.selectClassifyTab(next);
+  void nextTick(() => document.getElementById(`classify-tab-${next}`)?.focus());
+}
 function shortcut(event: KeyboardEvent): void {
   if (jobs.open.value || tab.value !== "review") return;
   const { typing, onControl } = shortcutTarget(event);
@@ -474,14 +484,15 @@ onBeforeUnmount(() => {
         {{ collecting ? "Starting…" : collectionBusy ? "Collecting…" : "Collect" }}
       </button>
     </PageHeader>
-    <div class="studio-tabs" role="tablist" aria-label="Classification sections">
+    <div class="studio-tabs" role="tablist" aria-label="Classification sections" @keydown="tabKey">
       <button
-        v-for="entry in ['review', 'collect', 'unmapped'] as const"
+        v-for="entry in TABS"
         :id="`classify-tab-${entry}`"
         :key="entry"
         role="tab"
         :aria-selected="tab === entry"
-        :aria-controls="`classify-panel-${entry}`"
+        :aria-controls="tab === entry ? `classify-panel-${entry}` : undefined"
+        :tabindex="tab === entry ? 0 : -1"
         :class="{ active: tab === entry }"
         @click="workspace.routes.selectClassifyTab(entry)"
       >
@@ -527,7 +538,6 @@ onBeforeUnmount(() => {
               {{ absoluteTime(active.recording?.timestamp ?? active.created_at) }}
             </p>
           </div>
-          <span class="studio-muted">Revision {{ active.revision }}</span>
         </div>
         <AudioPlayer
           ref="player"

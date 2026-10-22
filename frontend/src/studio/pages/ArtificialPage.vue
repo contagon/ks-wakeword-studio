@@ -501,6 +501,7 @@ onBeforeUnmount(() => {
               <button
                 v-if="previews[model.engine] && previews[model.engine].status !== 'complete'"
                 type="button"
+                class="mt-3"
                 @click="queue.show(previews[model.engine].id)"
               >
                 View preview in queue
@@ -517,8 +518,8 @@ onBeforeUnmount(() => {
             </article>
           </div>
         </fieldset>
-        <fieldset v-if="mossEnabled" class="studio-history">
-          <legend>MOSS references</legend>
+        <fieldset v-if="mossEnabled" class="studio-history grid gap-3">
+          <legend class="font-semibold px-1">MOSS references</legend>
           <label
             >MOSS samples<input name="moss-samples" v-model.number="recipe.moss_samples" type="number" min="1" required
           /></label>
@@ -534,12 +535,12 @@ onBeforeUnmount(() => {
             Uses only this submission’s direct providers after all succeed. Select completed sources instead to preview
             MOSS.
           </p>
-          <div v-else data-source-picker>
+          <div v-else data-source-picker class="grid gap-2">
             <p class="studio-muted">
               Select completed direct-provider datasets. Training selection is independent. MOSS needs at least one
               distinct reference clip per requested sample; duplicate clips count once.
             </p>
-            <p v-if="sourceError" role="alert">{{ sourceError }}</p>
+            <p v-if="sourceError" class="studio-note" role="alert">{{ sourceError }}</p>
             <label v-for="source in sources" :key="source.id" class="studio-checkbox-label"
               ><input
                 type="checkbox"
@@ -550,8 +551,8 @@ onBeforeUnmount(() => {
                   (recipe.moss_source_batch_ids?.length ?? 0) >= 100
                 "
                 @change="toggleSource(source.id, ($event.target as HTMLInputElement).checked)"
-              />{{ source.providers.map((p) => engineNames[p] ?? p).join(", ") }} · {{ source.sample_count }} clips ·
-              {{ source.id }}</label
+              />{{ source.providers.map((p) => engineNames[p] ?? p).join(", ") }} ·
+              {{ plural(source.sample_count, "clip") }} · {{ absoluteTime(source.created_at) }}</label
             >
             <p v-if="!sourceLoading && !sources.length">No eligible completed sources for this language.</p>
             <p>{{ recipe.moss_source_batch_ids?.length ?? 0 }} sources selected (maximum 100).</p>
@@ -582,19 +583,22 @@ onBeforeUnmount(() => {
       <button v-if="job" type="button" class="mt-3" @click="queue.show(job.id)">View generation in queue</button>
     </div>
     <div class="studio-card mt-4">
-      <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="studio-section-header">
         <h2>Generated datasets</h2>
-        <button
-          type="button"
-          data-action="save-batches"
-          class="studio-selection-action"
-          :disabled="saving || loading || !activeId"
-          @click="saveBatches"
-        >
-          Save selection
-        </button>
+        <div class="studio-section-actions">
+          <button
+            type="button"
+            data-action="save-batches"
+            class="studio-primary"
+            :aria-busy="saving"
+            :disabled="saving || loading || !activeId"
+            @click="saveBatches"
+          >
+            Save selection
+          </button>
+        </div>
       </div>
-      <p class="studio-muted text-xs">Select completed datasets to include in this wakeword’s training.</p>
+      <p class="studio-muted mt-3">Select completed datasets to include in this wakeword’s training.</p>
       <p v-if="loading" class="studio-muted mt-3">Loading datasets…</p>
       <article v-for="batch in batches" :key="batch.id" class="studio-history mt-3">
         <div class="studio-dataset-row">

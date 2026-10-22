@@ -67,7 +67,8 @@ function drawWaveform(): void {
   target.width = width;
   target.height = height;
   context.clearRect(0, 0, width, height);
-  context.fillStyle = "rgba(222, 218, 212, .2)";
+  // Bars use the canvas CSS colour so they read in both themes.
+  context.fillStyle = getComputedStyle(target).color || "#649c80";
   const barWidth = width / peaks.length;
   peaks.forEach((peak, index) => {
     const barHeight = Math.max(2, peak * (height - 8));
@@ -229,6 +230,7 @@ defineExpose({ play, pause, toggle, replay, stop });
     />
     <canvas
       ref="canvas"
+      class="studio-waveform"
       data-waveform
       :data-ready="waveformReady"
       role="img"

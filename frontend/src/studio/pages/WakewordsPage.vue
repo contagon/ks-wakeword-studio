@@ -108,7 +108,7 @@ async function save() {
       {{ selectedError }} <button @click="workspace.refreshSelected()">Retry workspace</button>
     </div>
     <div v-if="summary && selected" class="studio-card mb-4">
-      <div class="flex items-start justify-between gap-3">
+      <div class="studio-section-header mb-3">
         <h2 class="min-w-0 break-words">{{ selected.phrase }} · Overview</h2>
         <button
           class="shrink-0"
@@ -156,7 +156,9 @@ async function save() {
           >Display phrase<input v-model="create.phrase" name="phrase" required maxlength="200" autocomplete="off"
         /></label>
         <label>Language<input v-model="create.language" name="language" required autocomplete="off" /></label>
-        <button class="studio-primary justify-self-start" :disabled="saving" type="submit">Create wakeword</button>
+        <button class="studio-primary justify-self-start" :aria-busy="saving" :disabled="saving" type="submit">
+          Create wakeword
+        </button>
       </form>
     </div>
     <ConfirmDialog

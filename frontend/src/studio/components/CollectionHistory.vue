@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { absoluteTime } from "../time";
+import { statusClass } from "../jobs";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useDeviceRegistry } from "../devices";
 const registry = useDeviceRegistry();
@@ -44,7 +45,7 @@ onBeforeUnmount(() => request?.abort());
 </script>
 <template>
   <section class="studio-card">
-    <div class="flex justify-between gap-3">
+    <div class="studio-section-header mb-3">
       <h2>Collection history · Fleet-wide</h2>
       <button :disabled="loading" @click="load">Refresh history</button>
     </div>
@@ -58,8 +59,15 @@ onBeforeUnmount(() => request?.abort());
         class="studio-history"
         :class="{ 'studio-selected': run.id === activeRunId }"
       >
-        <strong>{{ run.id }}</strong> · {{ run.status }} · {{ absoluteTime(run.started_at) }}
-        <p class="studio-muted text-xs">New {{ run.new }} · Unmapped {{ run.unmapped }} · Failed {{ run.failed }}</p>
+        <div class="studio-list-row">
+          <div class="studio-list-main">
+            <strong :title="`Run ${run.id}`">{{ absoluteTime(run.started_at) }}</strong>
+            <p class="studio-muted text-xs">
+              New {{ run.new }} · Unmapped {{ run.unmapped }} · Failed {{ run.failed }}
+            </p>
+          </div>
+          <span class="studio-status" :class="statusClass(run.status)">{{ run.status }}</span>
+        </div>
         <ul>
           <li v-for="device in run.devices" :key="device.device_id">
             {{ registry.deviceLabel(device.device_id) }} · {{ device.status }} · new {{ device.new }} · failed

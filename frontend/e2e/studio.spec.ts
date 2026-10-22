@@ -318,10 +318,10 @@ test("all pages have compact controls and no narrow-screen overflow", async ({ p
       if (route === "negative-datasets" && width === 1280) {
         const row = page.locator(".studio-dataset-row").first();
         const checkbox = await row.locator("input").boundingBox();
-        const button = await row.getByRole("button", { name: "Download" }).boundingBox();
+        const actions = await row.locator(".studio-dataset-actions").boundingBox();
         const bounds = await row.boundingBox();
         expect(checkbox!.x - bounds!.x).toBeLessThan(5);
-        expect(bounds!.x + bounds!.width - button!.x - button!.width).toBeLessThan(5);
+        expect(bounds!.x + bounds!.width - actions!.x - actions!.width).toBeLessThan(5);
       }
       if (route === "samples" && width === 390) {
         expect((await page.locator("table").boundingBox())!.width).toBeGreaterThanOrEqual(680);

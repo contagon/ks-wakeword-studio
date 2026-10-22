@@ -46,13 +46,13 @@ onBeforeUnmount(() => mutation?.abort());
 </script>
 <template>
   <section class="studio-card">
-    <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="studio-section-header">
       <h2>Unmapped recordings · Fleet-wide</h2>
       <button data-action="refresh-unmapped" :disabled="refreshing || busy" @click="emit('refresh')">
         {{ refreshing ? "Refreshing…" : "Refresh inbox" }}
       </button>
     </div>
-    <p class="studio-muted">
+    <p class="studio-muted mt-3">
       Collection automatically matches unique wake phrases and model identifiers. Unknown or ambiguous matches stay
       here, never assigned just because a workspace is selected. Assign a recording now, or save an exact kiosk + engine
       + source-phrase mapping to override future matching.
@@ -67,7 +67,12 @@ onBeforeUnmount(() => mutation?.abort());
       <div>
         <strong>{{ recording.phrase }}</strong>
         <p class="studio-muted text-xs">{{ registry.deviceLabel(recording.device_id) }} · {{ recording.engine }}</p>
-        <button data-action="assign" :disabled="busy || !workspace.selectedId.value" @click="emit('assign', recording)">
+        <button
+          data-action="assign"
+          class="mt-2"
+          :disabled="busy || !workspace.selectedId.value"
+          @click="emit('assign', recording)"
+        >
           Assign to this wakeword
         </button>
       </div>
@@ -87,6 +92,6 @@ onBeforeUnmount(() => mutation?.abort());
         </button>
       </div>
     </article>
-    <p v-if="!recordings.length && !refreshing" class="studio-muted">No unmapped recordings.</p>
+    <p v-if="!recordings.length && !refreshing" class="studio-muted mt-3">No unmapped recordings.</p>
   </section>
 </template>

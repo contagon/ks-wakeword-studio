@@ -571,9 +571,6 @@ html[data-studio-theme="dark"] .studio-app {
   flex: 1 1 180px;
   min-width: 0;
 }
-.studio-selection-action {
-  margin-left: auto;
-}
 .studio-schedule-row {
   display: grid;
   grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) auto auto;
@@ -787,4 +784,86 @@ html[data-studio-theme="dark"] :is(.studio-status-failed, .studio-status-interru
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
+}
+/* A card's heading with its actions on the right (Save selection, Refresh, ...). */
+.studio-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  /* Baseline: actions line up with the title's first line, also when it wraps. */
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+.studio-app .studio-section-header > h2 {
+  margin: 0;
+  /* Shrink and wrap the title rather than pushing the actions onto their own line. */
+  flex: 1 1 0%;
+  min-width: 0;
+}
+.studio-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+/* Status last, so pills share a right edge whether or not a row has buttons. */
+.studio-dataset-actions > .studio-status {
+  order: 1;
+}
+.studio-device-main {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+/* Fixed column so badges line up between leader, follower and standalone rows. */
+.studio-device-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 260px;
+}
+.studio-device-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+/* Wide screens: name | badges | actions as fixed columns, so badges line up across rows. */
+@media (min-width: 1100px) {
+  .studio-app .studio-device-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 260px 300px;
+    align-items: center;
+  }
+  .studio-device-row > [data-device-edit] {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 650px) {
+  .studio-device-badges {
+    width: auto;
+  }
+  .studio-device-actions {
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+}
+/* One save button for a long form: stays reachable at the bottom of the viewport. */
+.studio-form-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 0;
+  background: var(--studio-bg);
+  border-top: 1px solid var(--studio-border);
+}
+.studio-waveform {
+  color: var(--studio-selected);
+  background: var(--studio-bg);
+  border-radius: 6px;
+  max-width: 100%;
 }

@@ -202,19 +202,22 @@ onBeforeUnmount(() => {
       or starting training.
     </p>
     <div class="studio-card">
-      <h2>Negative &amp; evaluation datasets</h2>
-      <p class="studio-muted mb-3">Downloads are shared. Save a separate classifier selection for each wakeword.</p>
-      <div class="studio-toolbar">
-        <button
-          type="button"
-          data-action="save-datasets"
-          class="studio-primary studio-selection-action"
-          :disabled="saving || !activeId"
-          @click="save"
-        >
-          {{ saving ? "Saving…" : "Save selection" }}
-        </button>
+      <div class="studio-section-header">
+        <h2>Negative &amp; evaluation datasets</h2>
+        <div class="studio-section-actions">
+          <button
+            type="button"
+            data-action="save-datasets"
+            class="studio-primary"
+            :aria-busy="saving"
+            :disabled="saving || !activeId"
+            @click="save"
+          >
+            {{ saving ? "Saving…" : "Save selection" }}
+          </button>
+        </div>
       </div>
+      <p class="studio-muted mt-3">Downloads are shared. Save a separate classifier selection for each wakeword.</p>
       <p v-if="loading" class="studio-muted mt-3">Loading catalog…</p>
       <p v-if="error" class="studio-note mt-3" role="alert">{{ error }}</p>
       <div v-if="rows.length" class="studio-table mt-3 grid gap-3">

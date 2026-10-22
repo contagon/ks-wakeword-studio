@@ -172,7 +172,8 @@ onBeforeUnmount(() => {
               {{ loading ? "Loading versions…" : "No versions available" }}
             </option>
             <option v-for="version in versions" :key="version.id" :value="version.id">
-              {{ absoluteTime(version.trained_at) }} · {{ version.id.slice(0, 8) }}
+              {{ version.run_number ? `Run #${version.run_number}` : "Imported model" }} ·
+              {{ absoluteTime(version.trained_at) }}
             </option>
           </select>
         </label>
