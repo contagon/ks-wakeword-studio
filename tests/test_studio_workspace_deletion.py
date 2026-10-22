@@ -85,10 +85,10 @@ class WorkspaceDeletionTests(unittest.TestCase):
         samples = self.runtime.samples
         owned = samples.import_audio(self.word.id, 'positive', wav(1))
         prepared, release, deleted = threading.Event(), threading.Event(), threading.Event()
-        prepare = samples._prepare
+        publish = samples._publish
 
-        def pause(audio):
-            result = prepare(audio)
+        def pause(data, normalized):
+            result = publish(data, normalized)
             prepared.set()
             if not release.wait(3):
                 raise RuntimeError('test writer was not released')
@@ -98,7 +98,7 @@ class WorkspaceDeletionTests(unittest.TestCase):
             self.words.delete(self.word.id)
             deleted.set()
 
-        with ThreadPoolExecutor(max_workers=2) as pool, patch.object(samples, '_prepare', side_effect=pause):
+        with ThreadPoolExecutor(max_workers=2) as pool, patch.object(samples, '_publish', side_effect=pause):
             writer = pool.submit(samples.import_audio, self.other.id, 'positive', wav(1))
             self.assertTrue(prepared.wait(3))
             deletion = pool.submit(remove)

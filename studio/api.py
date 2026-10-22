@@ -21,6 +21,12 @@ from studio.models import CapturePreview
 from studio.errors import OperationError
 
 
+def require_audio_mime(upload: UploadFile) -> None:
+    """Accept media types with parameters, e.g. `audio/webm;codecs=opus`."""
+    if (upload.content_type or '').split(';', 1)[0].strip().lower() not in AUDIO_MIMES:
+        raise ValidationError('Unsupported audio MIME')
+
+
 class StudioRoute(APIRoute):
     def get_route_handler(self) -> Callable:
         handler = super().get_route_handler()
@@ -411,23 +417,20 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.post("/wakewords/{word_id}/samples/import", response_model=Sample, status_code=201)
     def import_audio(word_id: str, label: str = Form(...), audio: UploadFile = File(...)) -> Sample:
         # Filenames are neither paths nor metadata: content determines decoding.
-        if audio.content_type not in AUDIO_MIMES:
-            raise ValidationError("Unsupported audio MIME")
+        require_audio_mime(audio)
         return runtime.samples.import_audio(word_id, label, audio.file)
 
     @router.post('/wakewords/{word_id}/samples/capture/preview', response_model=CapturePreview)
     def preview_capture(word_id: str, audio: UploadFile = File(...)) -> CapturePreview:
         runtime.workspaces.get(word_id)
-        if (audio.content_type or '').split(';', 1)[0].strip().lower() not in AUDIO_MIMES:
-            raise ValidationError('Unsupported audio MIME')
+        require_audio_mime(audio)
         return analyze_capture(audio.file.read(runtime.blobs.max_bytes + 1), runtime.blobs.max_bytes)
 
     @router.post('/wakewords/{word_id}/samples/capture', response_model=Sample, status_code=201)
     def save_capture(word_id: str, label: str = Form(...), start_s: float = Form(...),
                      end_s: float = Form(...), trim_method: str = Form(...),
                      audio: UploadFile = File(...)) -> Sample:
-        if (audio.content_type or '').split(';', 1)[0].strip().lower() not in AUDIO_MIMES:
-            raise ValidationError('Unsupported audio MIME')
+        require_audio_mime(audio)
         return runtime.samples.capture_audio(word_id, label, audio.file, start_s, end_s, trim_method)
 
     @router.get("/wakewords/{word_id}/samples/{sample_id}", response_model=Sample)

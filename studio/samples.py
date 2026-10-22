@@ -108,11 +108,14 @@ class SampleService:
         except (TypeError, ValueError) as exc:
             raise ValidationError("Invalid timestamp") from exc
 
-    def _prepare(self, audio: BinaryIO, *, truncate: bool = False) -> tuple[str, str]:
+    def _normalize(self, audio: BinaryIO, *, truncate: bool = False) -> tuple[bytes, bytes]:
+        """Read and convert outside any transaction; ffmpeg must not hold the store lock."""
         data = audio.read(self.blobs.max_bytes + 1)
         if not isinstance(data, bytes):
             raise ValidationError("Invalid audio stream")
-        normalized = normalize_audio(data, self.blobs.max_bytes, truncate=truncate)
+        return data, normalize_audio(data, self.blobs.max_bytes, truncate=truncate)
+
+    def _publish(self, data: bytes, normalized: bytes) -> tuple[str, str]:
         original = self.blobs.put(io.BytesIO(data))
         training = self.blobs.put(io.BytesIO(normalized))
         return original.sha256, training.sha256
@@ -156,6 +159,13 @@ class SampleService:
         timestamp = self._date(clip.timestamp)
         if word_id is not None:
             WorkspaceService(self.store).get(word_id)
+        if scoped_word_id is not None:
+            # Skip converting clips that belong to another workspace; rechecked below.
+            with self.store.transaction() as db:
+                mapped = WorkspaceService._resolve_source(db, device_id, clip.engine, clip.phrase)
+            if mapped is not None and mapped != scoped_word_id:
+                return None
+        data, converted = self._normalize(audio)
         with self.store.transaction() as db:
             if source_deleted(self.store, device_id, clip_id, db):
                 raise Conflict('Source recording was permanently deleted')
@@ -164,7 +174,7 @@ class SampleService:
                 if scoped_word_id is not None and word_id is not None and word_id != scoped_word_id:
                     return None
             # Serialize durable blob publication plus reference admission with GC.
-            original, normalized = self._prepare(audio)
+            original, normalized = self._publish(data, converted)
             existing = db.execute(RECORDING_SELECT + " WHERE r.device_id=? AND r.clip_id=?", (device_id, clip_id)).fetchone()
             if existing:
                 if existing["original_hash"] != original:
@@ -208,9 +218,10 @@ class SampleService:
     def import_audio(self, word_id: str, label: str, audio: BinaryIO) -> Sample:
         self._label(label)
         WorkspaceService(self.store).get(word_id)
+        data, converted = self._normalize(audio)
         with self.store.transaction() as db:
             self._word(db, word_id)
-            original, normalized = self._prepare(audio)
+            original, normalized = self._publish(data, converted)
             return self._new_sample(db, word_id, None, self._audio(db, original, normalized), label, "import")
 
     def capture_audio(self, word_id: str, label: str, audio: BinaryIO,
@@ -220,9 +231,10 @@ class SampleService:
         if any(type(v) not in (int, float) or not math.isfinite(v) for v in (start_s, end_s)) or not 0 <= start_s < end_s:
             raise ValidationError('Invalid trim interval')
         WorkspaceService(self.store).get(word_id)
+        data, converted = self._normalize(audio, truncate=True)
         with self.store.transaction() as db:
             self._word(db, word_id)
-            original, normalized = self._prepare(audio, truncate=True)
+            original, normalized = self._publish(data, converted)
             with wave.open(io.BytesIO(self.blobs.read(normalized)), 'rb') as source:
                 duration = source.getnframes() / 16000
             if end_s > duration or int(end_s * 16000) <= int(start_s * 16000):
@@ -314,7 +326,7 @@ class SampleService:
         audio_id = self._audio(db, row["original_hash"], normalized, row, start_s, end_s)
         return self._change(db, row, row["label"], audio_id, "trim")
 
-    def _query(self, query: SampleQuery) -> tuple[list[str], list[object]]:
+    def _query(self, query: SampleQuery, created_at: str = "r.created_at") -> tuple[list[str], list[object]]:
         if type(query.offset) is not int or query.offset < 0 or type(query.limit) is not int or not 1 <= query.limit <= 100:
             raise ValidationError("Invalid pagination")
         if query.label not in (None, "pending", "positive", "negative", "discarded") or query.source not in (None, "diagnostic", "import", "legacy", "microphone"):
@@ -328,7 +340,7 @@ class SampleService:
                 params.append(value)
         for op, value in ((">=", query.after), ("<=", query.before)):
             if value is not None:
-                clauses.append("COALESCE(r.timestamp,r.created_at)" + op + "?")
+                clauses.append(f"COALESCE(r.timestamp,{created_at})" + op + "?")
                 params.append(self._date(value))
         if query.search:
             clauses.append("instr(lower(r.phrase),lower(?))>0")
@@ -336,8 +348,7 @@ class SampleService:
         return clauses, params
 
     def list(self, word_id: str, query: SampleQuery) -> Page[Sample]:
-        clauses, params = self._query(query)
-        clauses = [clause.replace("r.created_at", "s.created_at") for clause in clauses]
+        clauses, params = self._query(query, created_at="s.created_at")
         clauses += ["s.word_id=?", "s.deleted=0", "COALESCE(r.quarantined,0)=0"]
         params.append(word_id)
         if query.label is not None:

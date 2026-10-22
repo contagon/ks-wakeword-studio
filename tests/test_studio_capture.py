@@ -191,3 +191,5 @@ class CaptureAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         response = self.client.post(self.base, data={'label': 'positive', 'start_s': 0, 'end_s': 1, 'trim_method': 'none'}, files=files)
         self.assertEqual(response.status_code, 201, response.text)
+        upload = self.client.post(f'/api/studio/wakewords/{self.word.id}/samples/import', data={'label': 'positive'}, files=files)
+        self.assertEqual(upload.status_code, 201, upload.text)

@@ -46,6 +46,19 @@ class SampleTests(unittest.TestCase):
             engine='mww', near_miss=True, scores={'score': 0.3}, metadata={'duration': 1}),
             io.BytesIO(content or wav()), self.word.id if word else None)
 
+    def test_audio_conversion_never_holds_a_write_transaction(self):
+        from unittest.mock import patch
+        import studio.samples
+        original = studio.samples.normalize_audio
+        def checked(*args, **kwargs):
+            self.assertFalse(self.store._connection.in_transaction, 'ffmpeg ran inside a store transaction')
+            return original(*args, **kwargs)
+        with patch.object(studio.samples, 'normalize_audio', side_effect=checked) as convert:
+            self.ingest()
+            self.service.import_audio(self.word.id, 'positive', io.BytesIO(wav()))
+            self.service.capture_audio(self.word.id, 'negative', io.BytesIO(wav()), 0, 0.05, 'none')
+        self.assertEqual(convert.call_count, 3)
+
     def test_source_identity_device_scope_and_tombstones(self):
         first = self.ingest()
         self.assertEqual(first.id, self.ingest().id)
