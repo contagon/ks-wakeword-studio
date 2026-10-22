@@ -1,5 +1,4 @@
 """Shared raw augmentation downloads, separate from classifier selections."""
-import fcntl
 import json
 import os
 import shutil
@@ -8,10 +7,10 @@ import sys
 import wave
 from pathlib import Path
 
-from studio.augmentation import RESOURCES, tree_fingerprint
+from studio.augmentation import tree_fingerprint
 from studio.errors import OperationError
 from studio.models import Conflict, NotFound, ValidationError
-from studio.storage import open_directory
+from studio.storage import ensure_directory, flock, open_directory
 from studio.workspaces import WorkspaceService
 
 CATALOG = {
@@ -166,8 +165,7 @@ class AugmentationDatasetService:
             raise Conflict('Augmentation corpus already installed')
         root = self.store.scoped_directory('jobs', job.id)
         stage = root / 'augmentation-install'
-        with open_directory(stage):
-            pass
+        ensure_directory(stage)
         context.log('Preparing training dependencies, downloading and converting augmentation audio to 16 kHz. This can take a long time; detailed output is retained privately.')
         try:
             context.run([sys.executable, str(Path(__file__).resolve().parents[1] / 'cli/setup_augmentation.py'),
@@ -186,14 +184,10 @@ class AugmentationDatasetService:
             context.log('Validating converted augmentation audio')
             size, count = audio_metrics(source, validate=True, cancelled=context.cancelled)
             fingerprint = tree_fingerprint(source)
-            with open_directory(self.store.root) as directory:
-                fd = os.open('augmentation.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600, dir_fd=directory)
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX)
+            with flock(self.store.root, 'augmentation.lock'):
                 if context.cancelled():
                     raise Conflict('Dataset preparation cancelled')
-                with open_directory(target.parent):
-                    pass
+                ensure_directory(target.parent)
                 # Never overwrite pre-existing operator-managed corpora.
                 if target.exists() or target.is_symlink():
                     audio_metrics(target, validate=True, cancelled=context.cancelled)
@@ -201,8 +195,6 @@ class AugmentationDatasetService:
                 source.rename(target)
                 with open_directory(target.parent) as directory:
                     os.fsync(directory)
-            finally:
-                os.close(fd)
             context.log(f'Augmentation dataset installed: {count} WAV files; automatically used by training')
             return dict(augmentation_id=key, fingerprint=fingerprint, installed_bytes=size, file_count=count)
         except (ValidationError, FileNotFoundError, ValueError) as exc:

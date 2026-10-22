@@ -7,7 +7,6 @@ import sys
 
 from studio.models import Conflict, NotFound, ValidationError
 from studio.speech import classify_transcript
-from studio.storage import open_directory
 
 
 class ClassificationService:

@@ -103,7 +103,7 @@ class GenerationTests(unittest.TestCase):
     def test_delete_batch_cleanup_recovers_after_crash_and_preserves_shared_blobs(self):
         imported = self.runtime.samples.import_audio(self.other.id, 'positive', io.BytesIO(wav()))
         job, batch = self.generate()
-        with patch('studio.batch_deletion._finish_cleanup', side_effect=OSError('fixture crash')):
+        with patch('studio.deletion._finish_batch_cleanup', side_effect=OSError('fixture crash')):
             with self.assertRaises(OSError):
                 self.service.delete_batch(self.word.id, batch.id)
         self.runtime.shutdown()

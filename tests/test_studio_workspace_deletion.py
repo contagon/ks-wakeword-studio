@@ -54,7 +54,7 @@ class WorkspaceDeletionTests(unittest.TestCase):
         from unittest.mock import patch
         clip = DiagnosticClip('clip-rollback', None, 'Delete me', 'mww', False, {}, {})
         original = self.runtime.samples.ingest('device', clip, wav(1), self.word.id)
-        with patch('studio.workspace_deletion._audio_gc', side_effect=RuntimeError('rollback')):
+        with patch('studio.deletion._audio_gc', side_effect=RuntimeError('rollback')):
             with self.assertRaises(RuntimeError):
                 self.words.delete(self.word.id)
         self.assertEqual(self.runtime.samples.ingest('device', clip, wav(1), self.word.id).id, original.id)
@@ -199,7 +199,7 @@ class WorkspaceDeletionTests(unittest.TestCase):
         directory = self.store.root / 'models' / self.word.id
         directory.mkdir(parents=True)
         (directory / 'owned').write_bytes(b'owned')
-        with patch('studio.workspace_deletion._remove_tree', side_effect=OSError('interrupted')):
+        with patch('studio.deletion._remove_tree', side_effect=OSError('interrupted')):
             with self.assertRaises(OSError):
                 self.words.delete(self.word.id)
         self.runtime.shutdown()
@@ -210,7 +210,7 @@ class WorkspaceDeletionTests(unittest.TestCase):
 
     def test_deletion_waits_for_publication_intent_gate(self):
         import threading
-        from studio.deployment import DeploymentService
+        from studio.deployment import publication_lock
         started, done = threading.Event(), threading.Event()
         errors = []
         def delete():
@@ -221,7 +221,7 @@ class WorkspaceDeletionTests(unittest.TestCase):
                 errors.append(exc)
             finally:
                 done.set()
-        with DeploymentService(self.store, None, None)._lock('intent'):
+        with publication_lock(self.store, 'intent'):
             thread = threading.Thread(target=delete)
             thread.start()
             self.assertTrue(started.wait(1))

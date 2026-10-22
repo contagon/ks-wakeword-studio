@@ -137,7 +137,7 @@ class SampleService:
 
     def ingest(self, device_id: str, clip: DiagnosticClip, audio: BinaryIO, word_id: str | None,
                *, scoped_word_id: str | None = None, resolve_source: bool = False) -> Recording | None:
-        from studio.workspace_deletion import source_deleted
+        from studio.deletion import source_deleted
         device_id = WorkspaceService._text(device_id, 200)
         clip_id = WorkspaceService._text(clip.id, 200)
         if source_deleted(self.store, device_id, clip_id):

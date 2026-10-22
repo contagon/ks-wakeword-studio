@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Iterator
 
 from studio.models import ValidationError
-from studio.storage import open_directory
+from studio.storage import ensure_directory, open_directory
 
 
 class Store:
@@ -136,8 +136,7 @@ class Store:
         if category not in ("jobs", "runs") or not re.fullmatch(r"[0-9a-f]{32}", opaque_id):
             raise ValidationError("Invalid studio directory identifier")
         path = self.root / category / opaque_id
-        with open_directory(path):
-            pass
+        ensure_directory(path)
         return path
 
     def close(self) -> None:

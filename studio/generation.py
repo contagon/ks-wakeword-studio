@@ -4,7 +4,6 @@ import io
 import json
 import os
 import re
-import stat
 import sys
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -12,7 +11,7 @@ from uuid import uuid4
 
 import tts_config as tts
 from studio.models import Batch, BatchAudio, Conflict, GenerationRecipe, NotFound, Page, ValidationError
-from studio.storage import canonical_wav, open_directory
+from studio.storage import canonical_wav, ensure_directory, open_directory, read_regular
 from studio.jobs import aware_utc
 
 
@@ -145,11 +144,7 @@ class GenerationService:
                 raise NotFound('Preview not ready')
             with open_directory(self.store.scoped_directory('jobs', job_id)) as directory:
                 try:
-                    fd = os.open('preview.wav', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
-                    with os.fdopen(fd, 'rb') as source:
-                        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                            raise ValidationError('Unsafe preview')
-                        data = source.read(self.blobs.max_bytes + 1)
+                    data = read_regular(directory, 'preview.wav', self.blobs.max_bytes, 'Unsafe preview')
                 except FileNotFoundError as exc:
                     raise NotFound('Preview unavailable') from exc
                 if len(data) > self.blobs.max_bytes:
@@ -218,7 +213,7 @@ class GenerationService:
             return self._batch(db, word_id, batch_id)
 
     def delete_batch(self, word_id: str, batch_id: str) -> None:
-        from studio.batch_deletion import delete_batch
+        from studio.deletion import delete_batch
         delete_batch(self.store, self.blobs, word_id, batch_id)
 
     def list(self, word_id, offset=0, limit=50):
@@ -309,8 +304,7 @@ class GenerationService:
     def _run_generator(self, job, context, phrase, recipe, *, reference_manifest=None):
         root = self.store.scoped_directory('jobs', job.id)
         output = root / 'generation' / 'samples'
-        with open_directory(output.parent):
-            pass
+        ensure_directory(output.parent)
         if output.exists() or output.is_symlink():
             raise Conflict('Generation output already exists')
         command = [sys.executable, str(Path(__file__).resolve().parent.parent / 'cli/tts_generate_samples.py'),
@@ -332,11 +326,7 @@ class GenerationService:
             if len(names) != samples:
                 raise ValidationError('Incomplete batch')
             for name in names:
-                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
-                with os.fdopen(fd, 'rb') as source:
-                    if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                        raise ValidationError('Unsafe generated audio')
-                    data = source.read(self.blobs.max_bytes + 1)
+                data = read_regular(directory, name, self.blobs.max_bytes, 'Unsafe generated audio')
                 if len(data) > self.blobs.max_bytes:
                     raise ValidationError('Generated audio too large')
                 normalized = canonical_wav(data)

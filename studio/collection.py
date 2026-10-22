@@ -7,15 +7,12 @@ on process death. SQLite transactions never span a network request.
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
 from collections.abc import Callable
-from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
-from typing import Iterator
 from uuid import uuid4
 
 from studio.db import Store
@@ -24,7 +21,7 @@ from studio.models import (CollectionCounters, CollectionRun, CredentialsRequire
                            DeviceCollectionResult, IdentityMismatch, Page, RemoteRejected,
                            RemoteUnavailable, ValidationError)
 from studio.samples import SampleService
-from studio.storage import open_directory
+from studio.storage import flock, open_directory
 from studio.workspaces import WorkspaceService, utc_now
 
 
@@ -55,21 +52,9 @@ class CollectionService:
     def _now(self) -> str:
         return self.clock().astimezone(timezone.utc).isoformat()
 
-    @contextmanager
-    def _lock(self, identity: str, *, blocking: bool = True) -> Iterator[bool]:
-        name = hashlib.sha256(identity.encode()).hexdigest()
-        with open_directory(self.store.root / "collection-locks") as directory:
-            fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
-                         0o600, dir_fd=directory)
-            try:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
-                except BlockingIOError:
-                    yield False
-                else:
-                    yield True
-            finally:
-                os.close(fd)
+    def _lock(self, identity: str, *, blocking: bool = True):
+        return flock(self.store.root / "collection-locks", hashlib.sha256(identity.encode()).hexdigest(),
+                     blocking=blocking)
 
     def _save(self, run_id: str, result: DeviceCollectionResult) -> None:
         result.errors = list(dict.fromkeys(result.errors))
@@ -182,7 +167,7 @@ class CollectionService:
                        (device_id, clip_id, run_id, state, attempts, retry, code, self._now()))
 
     def _seen(self, device_id: str, clip_id: str) -> bool:
-        from studio.workspace_deletion import source_deleted
+        from studio.deletion import source_deleted
         if source_deleted(self.store, device_id, clip_id):
             return True
         with self.store.transaction() as db:

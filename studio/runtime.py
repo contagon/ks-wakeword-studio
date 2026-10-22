@@ -51,10 +51,8 @@ class StudioRuntime:
             try:
                 blobs = BlobStore(store.root / "blobs")
                 blobs.recover()
-                from studio.workspace_deletion import recover_workspace_deletions
-                recover_workspace_deletions(store, blobs)
-                from studio.batch_deletion import recover_batch_deletions
-                recover_batch_deletions(store, blobs)
+                from studio.deletion import recover_deletions
+                recover_deletions(store, blobs)
                 self._blobs = blobs
                 self._workspaces = WorkspaceService(store, blobs=blobs)
                 self._samples = SampleService(store, blobs)

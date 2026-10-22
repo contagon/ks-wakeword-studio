@@ -4,12 +4,11 @@ import json
 import os
 import shutil
 import stat
-import fcntl
 from pathlib import Path
 from uuid import uuid4
 
 from studio.models import AugmentationInput, ValidationError
-from studio.storage import open_directory
+from studio.storage import ensure_directory, flock, open_directory
 
 
 RESOURCES = {'mit_rirs_16k': 'setup_mit_audio', 'audioset_16k': 'setup_audioset',
@@ -20,19 +19,15 @@ def tree_fingerprint(root):
     files = []
     if root.is_symlink() or not root.is_dir():
         raise ValidationError('Missing or unsafe augmentation corpus')
-    with open_directory(root):
-        pass
+    ensure_directory(root)
     for path in sorted(root.rglob('*')):
         mode = path.lstat().st_mode
         if stat.S_ISDIR(mode):
             continue
         if not stat.S_ISREG(mode):
             raise ValidationError('Augmentation corpora must contain only real directories and regular files')
-        digest = hashlib.sha256()
         with path.open('rb') as handle:
-            for block in iter(lambda: handle.read(1024 * 1024), b''):
-                digest.update(block)
-        files.append((str(path.relative_to(root)), digest.hexdigest()))
+            files.append((str(path.relative_to(root)), hashlib.file_digest(handle, 'sha256').hexdigest()))
     if not files:
         raise ValidationError('Empty augmentation corpus; complete its setup before training')
     return hashlib.sha256(json.dumps(files, separators=(',', ':')).encode()).hexdigest()
@@ -42,20 +37,14 @@ def snapshot(store, selected_ids=None):
     selected = list(RESOURCES) if selected_ids is None else list(selected_ids)
     if any(name not in RESOURCES for name in selected) or len(set(selected)) != len(selected):
         raise ValidationError('Invalid augmentation selection')
-    with open_directory(store.root) as directory:
-        fd = os.open('augmentation.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600, dir_fd=directory)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+    with flock(store.root, 'augmentation.lock'):
         return _snapshot(store, selected)
-    finally:
-        os.close(fd)
 
 
 def _snapshot(store, selected):
     result = []
     parent = store.root / 'augmentation'
-    with open_directory(parent):
-        pass
+    ensure_directory(parent)
     for name, setup in RESOURCES.items():
         if name not in selected:
             continue

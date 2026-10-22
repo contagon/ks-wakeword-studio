@@ -94,7 +94,7 @@ class WorkspaceService:
         return word
 
     def delete(self, word_id: str) -> None:
-        from studio.workspace_deletion import delete_workspace
+        from studio.deletion import delete_workspace
         delete_workspace(self.store, word_id, self.blobs)
 
     def get(self, word_id: str) -> Wakeword:

@@ -4,10 +4,9 @@ import math
 import os
 import re
 from itertools import zip_longest
-from pathlib import Path
 
 from studio.models import Conflict, GenerationSource, Page, ValidationError
-from studio.storage import open_directory
+from studio.storage import open_directory, read_regular
 
 DIRECT_PROVIDERS = frozenset(('omnivoice', 'qwen3', 'piper'))
 
@@ -105,14 +104,8 @@ def materialize_references(service, job, recipe, phrase, required, *, cancelled=
 def output_parents(output, approved, count):
     try:
         with open_directory(output) as directory:
-            fd = os.open('.generation_manifest.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
-                         dir_fd=directory)
-            with os.fdopen(fd, 'rb') as source:
-                import stat
-                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                    raise ValidationError('Unsafe MOSS output manifest')
-                limit = min(64 * 1024 * 1024, count * 512 + 65536)
-                encoded = source.read(limit + 1)
+            limit = min(64 * 1024 * 1024, count * 512 + 65536)
+            encoded = read_regular(directory, '.generation_manifest.json', limit, 'Unsafe MOSS output manifest')
             if len(encoded) > limit:
                 raise ValidationError('MOSS output manifest too large')
             manifest = json.loads(encoded)

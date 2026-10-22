@@ -303,7 +303,7 @@ class CollectionTests(unittest.TestCase):
             second_thread = threading.get_ident()
             return second.collect_device('a')
 
-        with patch('studio.collection.fcntl.flock', observe_lock), ThreadPoolExecutor(2) as pool:
+        with patch('studio.storage.fcntl.flock', observe_lock), ThreadPoolExecutor(2) as pool:
             first = pool.submit(self.service.collect_device, 'a')
             self.assertTrue(entered.wait(5))
             other = pool.submit(collect_second)

@@ -13,7 +13,7 @@ from uuid import uuid4
 from studio.jobs import utc_now, aware_utc
 from studio.models import (Conflict, DatasetInput, ModelVersion, NotFound, Page, RunManifest,
                            TrainingAudio, TrainingResult, TrainingSettings, ValidationError)
-from studio.storage import open_directory
+from studio.storage import ensure_directory, open_directory
 from studio.workspaces import WorkspaceService
 
 
@@ -190,8 +190,7 @@ class TrainingService:
         self.datasets.require_installed(job.word_id)
         manifest = self.snapshot(job.word_id, job.id)
         root = self.store.scoped_directory('jobs', job.id) / 'training'
-        with open_directory(root):
-            pass
+        ensure_directory(root)
         (root / 'run-manifest.json').write_text(encode(asdict(manifest)), encoding='utf-8')
         previous = [version for version in self.versions(job.word_id).items if version.origin == 'training']
         with self.store.transaction() as db:
@@ -217,8 +216,7 @@ class TrainingService:
         from studio.legacy_training import checked_file, sha256
         version_id = uuid4().hex
         parent = self.store.root / 'models' / manifest.word_id
-        with open_directory(parent):
-            pass
+        ensure_directory(parent)
         stage, destination = parent / ('.partial-' + version_id), parent / version_id
         stage.mkdir()
         # Validate again at the trust boundary, including injected adapter results.

@@ -19,7 +19,7 @@ from pathlib import Path, PurePosixPath
 
 from studio.jobs import JobQueue
 from studio.models import Conflict, Dataset, DatasetInput, Job, NotFound, Page, ValidationError
-from studio.storage import open_directory
+from studio.storage import ensure_directory, open_directory
 from studio.workspaces import WorkspaceService
 
 
@@ -184,8 +184,7 @@ class DatasetService:
         entry = self._entry(job.payload.get('dataset_id'))
         if context.cancelled():
             return {}
-        with open_directory(self.store.root / 'datasets' / 'staging'):
-            pass
+        ensure_directory(self.store.root / 'datasets' / 'staging')
         with tempfile.TemporaryDirectory(prefix='download-', dir=self.store.root / 'datasets' / 'staging') as directory:
             archive = Path(directory) / 'archive.zip'
             context.log('Downloading classifier dataset')
@@ -201,10 +200,8 @@ class DatasetService:
     def install_archive(self, dataset_id: str, archive: Path, *, cancelled=lambda: False) -> DatasetInput:
         entry = self._entry(dataset_id)
         root = self.store.root / 'datasets'
-        with open_directory(root / 'staging'):
-            pass
-        with open_directory(root / 'versions' / dataset_id):
-            pass
+        ensure_directory(root / 'staging')
+        ensure_directory(root / 'versions' / dataset_id)
         with tempfile.TemporaryDirectory(prefix='extract-', dir=root / 'staging') as directory:
             stage = Path(directory) / 'content'
             stage.mkdir()
@@ -280,8 +277,7 @@ class DatasetService:
                             os.fsync(descriptor)
                     # Do not trust an existing fingerprint symlink or escaped input.
                     input_directory = destination / relative
-                    with open_directory(input_directory):
-                        pass
+                    ensure_directory(input_directory)
                     db.execute('INSERT INTO studio_dataset_installations VALUES (?,?,?) ON CONFLICT(dataset_id) DO UPDATE SET fingerprint=excluded.fingerprint,manifest_json=excluded.manifest_json',
                                (dataset_id, fingerprint, manifest))
                 return value
@@ -316,7 +312,6 @@ class DatasetService:
                 path = Path(value.path)
                 if path.is_symlink():
                     raise ValidationError('Unsafe dataset input path')
-                with open_directory(path):
-                    pass
+                ensure_directory(path)
                 result.append(value)
             return result

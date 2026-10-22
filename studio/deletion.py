@@ -1,8 +1,12 @@
-"""Explicit, workspace-scoped destruction. Never follows stored archive paths.
+"""Explicit, reference-aware destruction of workspaces and generated batches.
 
-The deployment intent flock covers the entire operation (including physical
-cleanup). Staged remote bytes are not removed: quarantine their device so a later
-publication cannot accidentally commit deleted workspace bytes.
+Never follows stored archive paths. The deployment intent flock covers each
+entire operation (including physical cleanup). Staged remote bytes are not
+removed: quarantine their device so a later publication cannot accidentally
+commit deleted workspace bytes.
+
+Each deletion fsyncs a journal before its SQL commit. Recovery checks whether
+SQL committed; rolled-back operations never authorize physical cleanup.
 """
 
 import hashlib
@@ -13,8 +17,11 @@ import shutil
 import stat
 from uuid import uuid4
 
+from studio.deployment import publication_lock
 from studio.models import Conflict, NotFound, ValidationError
-from studio.storage import BlobStore, normalize_audio, open_directory
+from studio.storage import BlobStore, ensure_directory, normalize_audio, open_directory, read_regular
+
+IDENTITY = re.compile(r'[0-9a-f]{32}')
 
 
 def source_key(device_id, clip_id):
@@ -27,37 +34,39 @@ def source_deleted(store, device_id, clip_id, db=None):
             return source_deleted(store, device_id, clip_id, connection)
     with open_directory(store.root / 'deleted-sources') as directory:
         try:
-            fd = os.open(source_key(device_id, clip_id), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+            content = read_regular(directory, source_key(device_id, clip_id), 32, 'Unsafe source tombstone')
         except FileNotFoundError:
             return False
-        with os.fdopen(fd, 'r') as marker:
-            if not stat.S_ISREG(os.fstat(marker.fileno()).st_mode):
-                raise ValidationError('Unsafe source tombstone')
-            word_id = marker.read(33)
-        if not re.fullmatch(r'[0-9a-f]{32}', word_id):
-            raise ValidationError('Invalid source tombstone')
-        # A prepared marker only takes effect if the SQL deletion committed.
-        # Rollback/crash-before-commit cannot suppress surviving recordings.
-        return db.execute('SELECT 1 FROM wakewords WHERE id=?', (word_id,)).fetchone() is None
+    word_id = content.decode('ascii', 'replace')
+    if not IDENTITY.fullmatch(word_id):
+        raise ValidationError('Invalid source tombstone')
+    # A prepared marker only takes effect if the SQL deletion committed.
+    # Rollback/crash-before-commit cannot suppress surviving recordings.
+    return db.execute('SELECT 1 FROM wakewords WHERE id=?', (word_id,)).fetchone() is None
+
+
+def _remove_entry(parent, name):
+    """Remove a file or directory tree beneath an open directory fd, if present."""
+    try:
+        mode = os.stat(name, dir_fd=parent, follow_symlinks=False).st_mode
+    except FileNotFoundError:
+        return
+    if stat.S_ISDIR(mode):
+        # Python's fd-based implementation resists nested symlink swaps.
+        if not shutil.rmtree.avoids_symlink_attacks:
+            raise ValidationError('Safe filesystem cleanup unavailable')
+        shutil.rmtree(name, dir_fd=parent)
+    else:
+        os.unlink(name, dir_fd=parent)
+    os.fsync(parent)
 
 
 def _remove_tree(store, category, identity):
     # All identities come from DB primary keys, never manifests or user paths.
-    if not re.fullmatch(r'[0-9a-f]{32}', identity):
+    if not IDENTITY.fullmatch(identity):
         raise ValidationError('Unsafe workspace storage identifier')
     with open_directory(store.root / category) as parent:
-        try:
-            mode = os.stat(identity, dir_fd=parent, follow_symlinks=False).st_mode
-        except FileNotFoundError:
-            return
-        if stat.S_ISDIR(mode):
-            # Python's fd-based implementation resists nested symlink swaps.
-            if not shutil.rmtree.avoids_symlink_attacks:
-                raise ValidationError('Safe filesystem cleanup unavailable')
-            shutil.rmtree(identity, dir_fd=parent)
-        else:
-            os.unlink(identity, dir_fd=parent)
-        os.fsync(parent)
+        _remove_entry(parent, identity)
 
 
 def _audio_gc(db, candidates, hashes):
@@ -106,63 +115,95 @@ def _audio_gc(db, candidates, hashes):
     hashes.difference_update(r[0] for r in db.execute('SELECT original_hash FROM audio_records UNION SELECT normalized_hash FROM audio_records UNION SELECT original_hash FROM recording_conflicts'))
 
 
-def _finish_cleanup(store, blobs, word_id, jobs, hashes):
+def _delete_blobs(store, blobs, hashes):
+    # Never run a global orphan sweep. Only hashes belonging to this deletion.
     with store.transaction() as db:
         for digest in hashes:
-            if not db.execute('SELECT 1 FROM audio_records WHERE original_hash=? OR normalized_hash=? UNION SELECT 1 FROM recording_conflicts WHERE original_hash=?', (digest, digest, digest)).fetchone():
+            if not db.execute('SELECT 1 FROM audio_records WHERE original_hash=? OR normalized_hash=? '
+                              'UNION SELECT 1 FROM recording_conflicts WHERE original_hash=?',
+                              (digest, digest, digest)).fetchone():
                 try:
                     blobs.delete(digest)
                 except FileNotFoundError:
                     pass
+
+
+def _write_journal(store, category, identity, record):
+    with open_directory(store.root / category) as directory:
+        try:
+            os.unlink(identity, dir_fd=directory)
+        except FileNotFoundError:
+            pass
+        fd = os.open(identity, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+        with os.fdopen(fd, 'w') as handle:
+            json.dump(record, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.fsync(directory)
+
+
+def _remove_journal(store, category, identity):
+    with open_directory(store.root / category) as directory:
+        os.unlink(identity, dir_fd=directory)
+        os.fsync(directory)
+
+
+def _recover(store, category, exists_sql, finish):
+    """Complete committed cleanup after a crash; drop journals whose SQL rolled back."""
+    with publication_lock(store, 'intent'):
+        with open_directory(store.root / category) as directory:
+            for identity in os.listdir(directory):
+                if not IDENTITY.fullmatch(identity):
+                    raise ValidationError('Unsafe deletion journal')
+                with store.transaction() as db:
+                    exists = db.execute(exists_sql, (identity,)).fetchone()
+                if exists:
+                    os.unlink(identity, dir_fd=directory)
+                    os.fsync(directory)
+                    continue
+                content = read_regular(directory, identity, 64 * 1024 * 1024, 'Unsafe deletion journal')
+                finish(identity, json.loads(content))
+
+
+def _finish_workspace_cleanup(store, blobs, word_id, jobs, hashes):
+    _delete_blobs(store, blobs, hashes)
     for job_id in jobs:
         _remove_tree(store, 'jobs', job_id)
         _remove_tree(store, 'runs', job_id)
     _remove_tree(store, 'models', word_id)
-    with open_directory(store.root / 'workspace-deletions') as directory:
-        os.unlink(word_id, dir_fd=directory)
-        os.fsync(directory)
+    _remove_journal(store, 'workspace-deletions', word_id)
 
 
-def recover_workspace_deletions(store, blobs):
-    """Complete committed cleanup after a crash; ignore rolled-back deletions."""
-    from studio.deployment import DeploymentService
-    with DeploymentService(store, None, None)._lock('intent'):
-        with open_directory(store.root / 'workspace-deletions') as directory:
-            for word_id in os.listdir(directory):
-                if not re.fullmatch(r'[0-9a-f]{32}', word_id):
-                    raise ValidationError('Unsafe deletion journal')
-                with store.transaction() as db:
-                    exists = db.execute('SELECT 1 FROM wakewords WHERE id=?', (word_id,)).fetchone()
-                if exists:
-                    os.unlink(word_id, dir_fd=directory)
-                    os.fsync(directory)
-                    continue
-                fd = os.open(word_id, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
-                with os.fdopen(fd) as handle:
-                    if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-                        raise ValidationError('Unsafe deletion journal')
-                    record = json.load(handle)
-                _finish_cleanup(store, blobs, word_id, record['jobs'], record['hashes'])
+def _finish_batch_cleanup(store, blobs, batch_id, hashes):
+    _delete_blobs(store, blobs, hashes)
+    # Keep job history and owner.lock. Only the generation scratch tree is ours.
+    with open_directory(store.scoped_directory('jobs', batch_id)) as directory:
+        _remove_entry(directory, 'generation')
+    _remove_journal(store, 'batch-deletions', batch_id)
+
+
+def recover_deletions(store, blobs):
+    _recover(store, 'workspace-deletions', 'SELECT 1 FROM wakewords WHERE id=?',
+             lambda word_id, record: _finish_workspace_cleanup(store, blobs, word_id, record['jobs'], record['hashes']))
+    _recover(store, 'batch-deletions', 'SELECT 1 FROM generation_batches WHERE id=?',
+             lambda batch_id, record: _finish_batch_cleanup(store, blobs, batch_id, record['hashes']))
 
 
 def delete_workspace(store, word_id, blobs=None):
-    from studio.deployment import DeploymentService
-
     blobs = blobs or BlobStore(store.root / 'blobs')
     # Same cross-process gate as publish/reconcile/retry, in the same lock order.
-    with DeploymentService(store, None, None)._lock('intent'):
+    with publication_lock(store, 'intent'):
         with store.transaction() as db:
             if not db.execute('SELECT 1 FROM wakewords WHERE id=?', (word_id,)).fetchone():
                 raise NotFound('Workspace not found')
             if db.execute("SELECT 1 FROM studio_jobs WHERE word_id=? AND status IN ('queued','running','cancelling')", (word_id,)).fetchone():
                 raise Conflict('Cancel active workspace jobs before deleting')
             jobs = {r[0] for r in db.execute('SELECT id FROM studio_jobs WHERE word_id=? UNION SELECT id FROM training_runs WHERE word_id=?', (word_id, word_id))}
-            if any(not re.fullmatch(r'[0-9a-f]{32}', identity) for identity in jobs | {word_id}):
+            if any(not IDENTITY.fullmatch(identity) for identity in jobs | {word_id}):
                 raise ValidationError('Unsafe workspace storage identifier')
             # Refuse symlinked storage parents before any metadata is removed.
             for category in ('jobs', 'runs', 'models'):
-                with open_directory(store.root / category):
-                    pass
+                ensure_directory(store.root / category)
             samples = 'SELECT id FROM samples WHERE word_id=?'
             recordings = 'SELECT id FROM recordings WHERE word_id=?'
             batches = 'SELECT id FROM generation_batches WHERE word_id=?'
@@ -227,18 +268,26 @@ def delete_workspace(store, word_id, blobs=None):
             db.execute('DELETE FROM studio_jobs WHERE word_id=?', (word_id,))
             db.execute('DELETE FROM wakewords WHERE id=?', (word_id,))
             _audio_gc(db, audio, hashes)
-            # Fsync before SQL commit. Recovery checks whether SQL committed;
-            # rolled-back operations never authorize physical cleanup.
-            with open_directory(store.root / 'workspace-deletions') as directory:
-                try:
-                    os.unlink(word_id, dir_fd=directory)
-                except FileNotFoundError:
-                    pass
-                fd = os.open(word_id, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600, dir_fd=directory)
-                with os.fdopen(fd, 'w') as handle:
-                    json.dump({'jobs': sorted(jobs), 'hashes': sorted(hashes)}, handle)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.fsync(directory)
-        # Never run a global orphan sweep. Only hashes belonging to this deletion.
-        _finish_cleanup(store, blobs, word_id, jobs, hashes)
+            _write_journal(store, 'workspace-deletions', word_id, {'jobs': sorted(jobs), 'hashes': sorted(hashes)})
+        _finish_workspace_cleanup(store, blobs, word_id, jobs, hashes)
+
+
+def delete_batch(store, blobs, word_id, batch_id):
+    with publication_lock(store, 'intent'):
+        with store.transaction() as db:
+            if not db.execute('SELECT 1 FROM generation_batches WHERE id=? AND word_id=?', (batch_id, word_id)).fetchone():
+                raise NotFound('Batch not found')
+            if db.execute("SELECT 1 FROM studio_jobs WHERE word_id=? AND status IN ('queued','running','cancelling')",
+                          (word_id,)).fetchone():
+                raise Conflict('Cancel active workspace jobs before deleting a dataset')
+            if not IDENTITY.fullmatch(batch_id):
+                raise ValidationError('Unsafe batch identity')
+            ensure_directory(store.scoped_directory('jobs', batch_id))
+            audio = {row[0] for row in db.execute('SELECT audio_id FROM generation_batch_audio WHERE batch_id=?', (batch_id,))}
+            db.execute('DELETE FROM generation_selection WHERE batch_id=?', (batch_id,))
+            db.execute('DELETE FROM generation_batch_audio WHERE batch_id=?', (batch_id,))
+            db.execute('DELETE FROM generation_batches WHERE id=?', (batch_id,))
+            hashes = set()
+            _audio_gc(db, audio, hashes)
+            _write_journal(store, 'batch-deletions', batch_id, {'hashes': sorted(hashes)})
+        _finish_batch_cleanup(store, blobs, batch_id, hashes)

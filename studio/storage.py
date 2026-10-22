@@ -1,5 +1,6 @@
 """Bounded, content-addressed blobs with atomic durable publication."""
 
+import fcntl
 import hashlib
 import io
 import os
@@ -125,6 +126,37 @@ def open_directory(path: Path) -> Iterator[int]:
         yield fd
     finally:
         os.close(fd)
+
+
+def ensure_directory(path: Path) -> None:
+    """Create a directory (refusing symlinked components) without keeping it open."""
+    with open_directory(path):
+        pass
+
+
+@contextmanager
+def flock(directory: Path, name: str, *, blocking: bool = True) -> Iterator[bool]:
+    """Hold an exclusive flock on directory/name; yields False when non-blocking and contended."""
+    with open_directory(directory) as parent:
+        fd = os.open(name, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+        except BlockingIOError:
+            yield False
+        else:
+            yield True
+    finally:
+        os.close(fd)
+
+
+def read_regular(directory: int, name: str, limit: int, error: str) -> bytes:
+    """Read up to limit + 1 bytes of a regular, non-symlink file; callers check the size."""
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    with os.fdopen(fd, "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise ValidationError(error)
+        return source.read(limit + 1)
 
 
 class BlobStore:

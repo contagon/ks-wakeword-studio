@@ -6,11 +6,9 @@ or a follower refresh from a stale revision. Per-target locks also serialize
 different wakewords sharing the kiosk's single staging directory. No SQL write
 transaction is held across HTTP or credential lookup.
 """
-import fcntl
+import hashlib
 import io
 import json
-import os
-from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import timedelta
 from pathlib import Path
@@ -22,8 +20,13 @@ from studio.legacy_training import checked_file, sha256
 from studio.models import (Conflict, CredentialsRequired, IdentityMismatch, ModelVersion,
                            NotFound, Publication, RemoteRejected, RemoteUnavailable,
                            ValidationError)
-from studio.storage import open_directory
+from studio.storage import flock
 from studio.workspaces import WorkspaceService
+
+
+def publication_lock(store, name):
+    # Device IDs need not be path-safe; hash the entire opaque lock key.
+    return flock(store.root / 'publication-locks', hashlib.sha256(name.encode()).hexdigest())
 
 
 class StagingFailure(Exception):
@@ -35,19 +38,6 @@ class DeploymentService:
 
     def __init__(self, store, devices, training, *, clock=utc_now):
         self.store, self.devices, self.training, self.clock = store, devices, training, clock
-
-    @contextmanager
-    def _lock(self, name):
-        # Device IDs need not be path-safe; hash the entire opaque lock key.
-        import hashlib
-        key = hashlib.sha256(name.encode()).hexdigest()
-        with open_directory(self.store.root / 'publication-locks') as directory:
-            fd = os.open(key, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600, dir_fd=directory)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            yield
-        finally:
-            os.close(fd)
 
     def _now(self):
         return aware_utc(self.clock()).isoformat()
@@ -204,11 +194,11 @@ class DeploymentService:
 
     def reconcile(self):
         """No network: safe on startup, after completion, or on recovery."""
-        with self._lock('intent'):
+        with publication_lock(self.store, 'intent'):
             self._reconcile()
 
     def publish(self, version_id, *, automatic=False):
-        with self._lock('intent'):
+        with publication_lock(self.store, 'intent'):
             # Validation reads/writes archives too; deletion must wait for the
             # entire publication, not just the subsequent network mutation.
             version = self.version(version_id)
@@ -270,7 +260,7 @@ class DeploymentService:
 
     def retry_due(self, now):
         now = aware_utc(now)
-        with self._lock('intent'):
+        with publication_lock(self.store, 'intent'):
             self._reconcile()
             return self._run_due(now)
 
@@ -471,7 +461,7 @@ class DeploymentService:
             # Terminal success/blocked states are not an unbounded polling loop.
             if p.state != 'pending' and (p.next_retry is None or p.next_retry > now.isoformat()):
                 continue
-            with self._lock('target:' + p.device_id):
+            with publication_lock(self.store, 'target:' + p.device_id):
                 if self._current(p):
                     result.append(self._attempt(p, now))
         return result
