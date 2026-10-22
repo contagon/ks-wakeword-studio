@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useDeviceRegistry } from '../devices';
 import { studioApi, StudioApiError } from "../api";
-import AudioTrimModal from "../../components/AudioTrimModal.vue";
+import SampleTrimDialog from "../components/SampleTrimDialog.vue";
 import PaginatedTable from "../components/PaginatedTable.vue";
 import { useWorkspace } from "../workspace";
 import type { Sample, SampleQuery } from "../types";
@@ -87,7 +87,7 @@ onBeforeUnmount(() => { request?.abort(); mutation?.abort(); stopAudio(); });
       </table>
       <PaginatedTable :total="total" :offset="offset" :limit="limit" :loading="loading" noun="samples" @page="offset = $event; load()" />
     </div>
-    <AudioTrimModal :studio-target="trimTarget ? { wordId: trimTarget.word_id, sampleId: trimTarget.id, revision: trimTarget.revision, src: studioApi.audioUrl(trimTarget.word_id, trimTarget.id) } : null" @save="trim($event)" @close="trimTarget = null" />
+    <SampleTrimDialog :src="trimTarget ? studioApi.audioUrl(trimTarget.word_id, trimTarget.id) : null" @save="trim($event)" @close="trimTarget = null" />
     <div v-if="deleteTarget" class="studio-modal-backdrop"><section class="studio-card" role="dialog" aria-modal="true" aria-label="Confirm sample deletion"><h2>Remove sample?</h2><p>This hides the sample but retains provenance and completed-run inputs.</p><button type="button" data-action="confirm-delete" class="studio-primary" @click="remove">Remove</button><button type="button" data-action="cancel-delete" @click="deleteTarget = null">Cancel</button></section></div>
   </section>
 </template>

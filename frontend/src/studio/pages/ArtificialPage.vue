@@ -5,7 +5,7 @@ import { StudioApiError, studioApi } from "../api";
 import { useWorkspace } from "../workspace";
 import type { Batch, GenerationCapability, GenerationRecipe, GenerationSource, Job } from "../types";
 import PaginatedTable from "../components/PaginatedTable.vue";
-import { useJobQueue } from '../jobs';
+import { useJobQueue, statusClass } from '../jobs';
 
 const workspace = useWorkspace();
 const queue = useJobQueue();
@@ -189,7 +189,7 @@ onBeforeUnmount(() => { loadRequest?.abort(); abortWorkspaceMutations(); });
       <p v-if="loading" class="studio-muted mt-3">Loading datasets…</p>
       <article v-for="batch in batches" :key="batch.id" class="studio-history mt-3">
         <div class="studio-dataset-row">
-          <label class="studio-checkbox-label"><input :data-batch-id="batch.id" type="checkbox" :checked="selected.has(batch.id)" :disabled="batch.status !== 'complete'" @change="toggle(batch, ($event.target as HTMLInputElement).checked)"><span><strong>{{ batch.phrase }}</strong><span class="studio-muted block text-xs">{{ batch.audio.length }} samples · {{ batch.recipe.engines?.map(engine => engineNames[engine] ?? engine).join(', ') || 'Saved generation models' }} · {{ absoluteTime(batch.created_at) }}</span><span v-if="batch.status !== 'complete'" class="studio-muted block text-xs">{{ batch.status }} — only completed datasets can be selected.</span></span><span class="studio-status ml-auto" :class="`studio-status-${batch.status}`">{{ batch.status }}</span></label>
+          <label class="studio-checkbox-label"><input :data-batch-id="batch.id" type="checkbox" :checked="selected.has(batch.id)" :disabled="batch.status !== 'complete'" @change="toggle(batch, ($event.target as HTMLInputElement).checked)"><span><strong>{{ batch.phrase }}</strong><span class="studio-muted block text-xs">{{ batch.audio.length }} samples · {{ batch.recipe.engines?.map(engine => engineNames[engine] ?? engine).join(', ') || 'Saved generation models' }} · {{ absoluteTime(batch.created_at) }}</span><span v-if="batch.status !== 'complete'" class="studio-muted block text-xs">{{ batch.status }} — only completed datasets can be selected.</span></span><span class="studio-status ml-auto" :class="statusClass(batch.status)">{{ batch.status }}</span></label>
           <button type="button" :data-delete-batch="batch.id" :disabled="saving || ['queued', 'running', 'cancelling'].includes(batch.status)" @click="deleting = batch">Delete dataset</button>
         </div>
         <p v-if="batch.recipe.moss_source_batch_ids?.length" class="studio-muted text-xs">MOSS sources: {{ batch.recipe.moss_source_batch_ids.join(', ') }}</p>

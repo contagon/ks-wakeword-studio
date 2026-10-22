@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import type { CapturePreview, CaptureSelection } from '../types';
 
-const props = defineProps<{ audio: File; preview: CapturePreview; disabled?: boolean }>();
+const props = withDefaults(defineProps<{ audio: File; preview: CapturePreview; disabled?: boolean; title?: string }>(), { title: 'Review your sample' });
 const emit = defineEmits<{ selection: [value: CaptureSelection | null] }>();
 const start = ref(props.preview.start_s); const end = ref(props.preview.end_s);
 const method = ref<CaptureSelection['trim_method']>(props.preview.trim_method);
@@ -57,7 +57,7 @@ onBeforeUnmount(() => { generation++; cleanup(); });
 
 <template>
   <div class="studio-capture-review">
-    <div class="flex flex-wrap items-center justify-between gap-2"><h2>Review your sample</h2><span class="studio-muted text-xs">{{ method === 'silero' ? 'Auto-trimmed' : method === 'manual' ? 'Manual trim' : 'Full clip' }} · {{ Math.max(0, end - start).toFixed(2) }} s retained</span></div>
+    <div class="flex flex-wrap items-center justify-between gap-2"><h2>{{ props.title }}</h2><span class="studio-muted text-xs">{{ method === 'silero' ? 'Auto-trimmed' : method === 'manual' ? 'Manual trim' : 'Full clip' }} · {{ Math.max(0, end - start).toFixed(2) }} s retained</span></div>
     <p v-if="props.preview.duration_limited" class="studio-note" role="status">Training audio is limited to 10 minutes, including any delayed browser stop. Your full original recording is retained when saved.</p>
     <p v-if="props.preview.warning" class="studio-note" role="status">{{ props.preview.warning === 'no_speech' ? 'No speech detected. The full clip is selected; background-noise negatives can still be saved.' : 'Automatic speech trimming is unavailable. The full clip is selected; adjust it manually if needed.' }}</p>
     <p v-if="loading" class="studio-muted" role="status">Preparing waveform…</p>

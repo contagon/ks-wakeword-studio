@@ -132,3 +132,13 @@ export function useJobQueue(): JobQueue {
   // Standalone page mounts (previews/tests) get the same lifecycle without a module singleton.
   const local = createJobQueue(); onMounted(local.start); onBeforeUnmount(local.stop); return local;
 }
+
+const STATUS_TONES: Record<string, string> = {
+  complete: 'success', installed: 'success',
+  queued: 'neutral', running: 'neutral', cancelling: 'neutral', available: 'neutral',
+  cancelled: 'muted', failed: 'failed', interrupted: 'interrupted',
+};
+/** Pill colour class for a raw job or dataset status; unknown statuses render muted. */
+export function statusClass(status: string): string {
+  return `studio-status-${STATUS_TONES[status] ?? 'muted'}`;
+}

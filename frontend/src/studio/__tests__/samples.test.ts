@@ -94,19 +94,19 @@ describe("provenance-aware sample library", () => {
 
   it("trims non-destructively through the server with the current revision", async () => {
     const ui = await open();
-    await row(ui, "s5").get("[data-action=trim]").trigger("click"); await settle();
-    const dialog = document.querySelector("[role=dialog][aria-label='Trim audio']")!;
-    expect(dialog).not.toBeNull();
-    expect(server.requests.some(r => r.url.pathname === "/api/studio/wakewords/a/samples/s5/audio")).toBe(true);
+    const audio = server.hold(r => r.url.pathname === "/api/studio/wakewords/a/samples/s5/audio", () => new Response(wav(1).buffer as ArrayBuffer, { headers: { "Content-Type": "audio/wav" } }));
+    await row(ui, "s5").get("[data-action=trim]").trigger("click"); audio.release(); await settle();
+    const dialog = ui.get("[role=dialog][aria-label='Trim audio']");
+    expect(dialog.text()).toContain("1.00 s retained");
     expect(server.requests.some(r => r.url.pathname.startsWith("/api/samples"))).toBe(false);
-    const start = dialog.querySelector<HTMLInputElement>("input[type=range]")!;
-    start.value = "0.2"; start.dispatchEvent(new Event("input")); await settle();
-    [...dialog.querySelectorAll("button")].find(b => b.textContent?.includes("Save trim"))!.click(); await settle();
+    await dialog.get("[data-action=adjust-trim]").trigger("click");
+    await dialog.get("[name=trim-start]").setValue("0.2"); await settle();
+    await dialog.get("[data-action=save-trim]").trigger("click"); await settle();
     const request = server.mutations().at(-1)!;
     expect(request.url.pathname).toBe("/api/studio/wakewords/a/samples/s5/trim");
     expect(request.body).toEqual({ start_s: 0.2, end_s: 1, expected_revision: 2 });
     expect(server.requests.some(r => r.method === "DELETE")).toBe(false);
-    expect(document.querySelector("[aria-label='Trim audio']")).toBeNull();
+    expect(ui.find("[aria-label='Trim audio']").exists()).toBe(false);
     expect(row(ui, "s5").text()).toContain("rev 3");
   });
 

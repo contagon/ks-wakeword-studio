@@ -29,7 +29,7 @@ class VueTrainerUiTests(unittest.TestCase):
             self.assertIn(contract, api)
         classify = (REPO_ROOT / 'frontend/src/studio/pages/ClassifyPage.vue').read_text()
         self.assertIn('expected_revision', api)
-        self.assertIn('editing(event)', classify)
+        self.assertIn('shortcutTarget(event)', classify)
         self.assertIn('data-shortcuts', classify)
         self.assertIn('AbortController', classify)
 

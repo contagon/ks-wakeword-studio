@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { studioApi } from '../api';
-import { isActiveJob, useJobQueue } from '../jobs';
+import { isActiveJob, useJobQueue, statusClass } from '../jobs';
 import { publicError } from '../errors';
 import type { AugmentationCatalog, AugmentationDataset, DownloadJob } from '../types';
 import { useWorkspace } from '../workspace';
@@ -88,7 +88,7 @@ onBeforeUnmount(() => { disposed = true; request?.abort(); saveRequest?.abort();
     <p v-if="error" class="studio-note mt-3" role="alert">{{ error }}</p>
     <article v-for="row in catalog?.items ?? []" :key="row.id" :data-augmentation-id="row.id" class="studio-history mt-3">
       <div class="studio-dataset-row"><label class="studio-checkbox-label"><input type="checkbox" :disabled="!activeId || saving" :checked="selected.has(row.id)" @change="toggle(row.id, ($event.target as HTMLInputElement).checked)"><div class="studio-dataset-copy"><strong>{{ row.name }}</strong><p class="studio-muted text-xs">{{ row.description }} · {{ row.source }}</p><p class="studio-muted text-xs">{{ datasetBytes(row.installed_bytes ?? row.download_bytes) }}{{ row.installed_bytes !== null ? ' installed' : '' }} · {{ datasetSamples(row.file_count) }}</p></div></label>
-        <div class="studio-dataset-actions"><span class="studio-status" :class="`studio-status-${state(row)}`">{{ state(row) }}</span><button v-if="state(row) !== 'installed'" type="button" :aria-busy="busy(row)" :disabled="busy(row)" @click="download(row)">{{ busy(row) ? 'Preparing…' : ['failed', 'cancelled', 'interrupted'].includes(state(row)) ? 'Retry download' : 'Download & prepare' }}</button><button v-if="jobId(row)" type="button" @click="queue.show(jobId(row)!)">View in queue</button></div>
+        <div class="studio-dataset-actions"><span class="studio-status" :class="statusClass(state(row))">{{ state(row) }}</span><button v-if="state(row) !== 'installed'" type="button" :aria-busy="busy(row)" :disabled="busy(row)" @click="download(row)">{{ busy(row) ? 'Preparing…' : ['failed', 'cancelled', 'interrupted'].includes(state(row)) ? 'Retry download' : 'Download & prepare' }}</button><button v-if="jobId(row)" type="button" @click="queue.show(jobId(row)!)">View in queue</button></div>
       </div>
       <p v-if="failure(row)" class="studio-note text-xs mt-3" role="alert">{{ failure(row) }}</p>
     </article>

@@ -5,7 +5,7 @@ import { useWorkspace } from "../workspace";
 import type { AugmentationCatalog, Dataset, Page } from "../types";
 import { datasetBytes, datasetSamples } from '../datasetFormat';
 import PaginatedTable from "../components/PaginatedTable.vue";
-import { isActiveJob, useJobQueue } from '../jobs';
+import { isActiveJob, useJobQueue, statusClass } from '../jobs';
 import AugmentationDatasets from '../components/AugmentationDatasets.vue';
 
 const workspace = useWorkspace();
@@ -72,7 +72,7 @@ onBeforeUnmount(() => { loadRequest?.abort(); abortWorkspaceMutations(); });
                 <span v-if="dataset.split === 'evaluation'" class="studio-note block text-xs">Evaluation-only: this dataset is not sampled as a training input.</span>
               </div>
             </label>
-            <div class="studio-dataset-actions"><span class="studio-status" :class="`studio-status-${datasetState(dataset)}`">{{ datasetState(dataset) }}</span><button v-if="datasetState(dataset) !== 'installed'" type="button" :aria-busy="downloadBusy(dataset)" :disabled="downloadBusy(dataset)" @click="download(dataset)">{{ downloadBusy(dataset) ? 'Downloading…' : 'Download' }}</button><button v-if="datasetJob(dataset)?.id || dataset.job_id" type="button" data-action="view-dataset-job" @click="queue.show(datasetJob(dataset)?.id ?? dataset.job_id!)">View in queue</button></div>
+            <div class="studio-dataset-actions"><span class="studio-status" :class="statusClass(datasetState(dataset))">{{ datasetState(dataset) }}</span><button v-if="datasetState(dataset) !== 'installed'" type="button" :aria-busy="downloadBusy(dataset)" :disabled="downloadBusy(dataset)" @click="download(dataset)">{{ downloadBusy(dataset) ? 'Downloading…' : 'Download' }}</button><button v-if="datasetJob(dataset)?.id || dataset.job_id" type="button" data-action="view-dataset-job" @click="queue.show(datasetJob(dataset)?.id ?? dataset.job_id!)">View in queue</button></div>
           </div>
         </article>
       </div><p v-else-if="!loading" class="studio-muted mt-3">No catalog datasets are available.</p>
