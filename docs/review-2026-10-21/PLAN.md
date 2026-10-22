@@ -517,6 +517,22 @@ Also:
   - **E2E:** `e2e/helpers.ts` `createWord()`. The layout and polish specs moved into `studio.spec.ts`, so they now also run under its no-page-errors check.
   - **Skipped on purpose:** the two loopback kiosk servers stay separate. One is scripted per test and the other simulates a leader/follower fleet; merging them would mean rewriting both.
   - After this phase: pytest 431 passed, 1 skipped; vitest 202; Playwright 18 passed, 1 skipped.
+- **Phase 11 done (commit `f1f1e07`):** §9.
+  - **Removed or untracked:**
+    - `.superpowers/` is untracked; `.kiro/` already was.
+    - The 17 `docs/superpowers` planning docs, `mmw.png` and the completed `TODOS.md` (its last item shipped in phase 6) are deleted.
+  - **Small fixes:**
+    - `.bashrc` is trimmed to 30 lines.
+    - README image tags point at v36.
+    - The `.gitignore` newline and the justfile comment were already fixed.
+  - **Dockerfile:** only `run.sh` and `cli/` are copied executable, plain files are 0644, and the `--chown` and `chmod -R` steps are gone. The built default image was checked: the file modes, and the interactive shell's warnings and `venv` alias.
+  - **Left as is:** `.env` (`DATA=/mnt/...`) is tracked and machine-specific, but `compose.yaml` reads it, and the compose setup is kept by decision.
+- **§10 items not covered by any phase (still open):**
+  - Split `ClassifyPage.vue` (616 lines) and `ArtificialPage.vue` (641).
+  - Rename `RecordPage`/`NegativeDatasetsPage`/`PaginatedTable` to Manual/Downloaded/Pager.
+  - Move UI prose out of `studio/models.py`. The exceptions stay there; see phase 8.
+  - Merge `api.py`'s three `studio.models` imports.
+  - Add a `build-blackwell` just recipe.
 
 ## 11. Order of work
 
