@@ -5,7 +5,7 @@ import { isActiveJob, useJobQueue, statusClass } from "../jobs";
 import { publicError } from "../errors";
 import type { AugmentationCatalog, AugmentationDataset, DownloadJob } from "../types";
 import { useWorkspace } from "../workspace";
-import { datasetBytes, datasetSamples } from "../datasetFormat";
+import { datasetBytes, datasetSamples } from "../format";
 
 const emit = defineEmits<{ catalog: [value: AugmentationCatalog] }>();
 const workspace = useWorkspace();

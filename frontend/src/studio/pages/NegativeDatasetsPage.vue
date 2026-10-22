@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { studioApi } from "../api";
 import { useWorkspace } from "../workspace";
 import type { AugmentationCatalog, Dataset, Page } from "../types";
-import { datasetBytes, datasetSamples } from "../datasetFormat";
+import { datasetBytes, datasetSamples } from "../format";
 import PaginatedTable from "../components/PaginatedTable.vue";
 import { isActiveJob, useJobQueue, statusClass } from "../jobs";
 import AugmentationDatasets from "../components/AugmentationDatasets.vue";
@@ -196,7 +196,7 @@ onBeforeUnmount(() => {
         storage && storage.storage_total_bytes > 0 && storage.storage_free_bytes / storage.storage_total_bytes < 0.1
       "
       data-disk-warning
-      class="studio-note mb-4"
+      class="studio-note studio-note-warning mb-4"
       role="status"
     >
       Disk space is low: {{ datasetBytes(storage.storage_free_bytes) }} free of

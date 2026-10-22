@@ -94,7 +94,10 @@ onBeforeUnmount(() => {
             <a
               :href="routes.href(page.id)"
               :data-page="page.id"
-              :class="{ active: current.id === page.id, 'studio-sub': page.group === 'Data' }"
+              :class="{
+                active: current.id === page.id,
+                'studio-sub': page.group === 'Data' || page.group === 'Models',
+              }"
               :aria-current="current.id === page.id ? 'page' : undefined"
               @click.prevent="navigate(page.id)"
               >{{ page.name }}</a

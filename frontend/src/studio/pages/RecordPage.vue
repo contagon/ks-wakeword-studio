@@ -252,7 +252,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           data-action="record-toggle"
-          :class="state === 'recording' ? 'studio-record-stop' : 'studio-primary'"
+          :class="state === 'recording' ? 'studio-danger' : 'studio-primary'"
           :disabled="state !== 'recording' && !canStart"
           aria-keyshortcuts="Space"
           @click="toggle"

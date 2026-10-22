@@ -144,16 +144,16 @@ describe("Deploy page", () => {
 
     expect(deviceRequests).toBe(1);
     const archive = ui.get('[data-version-id="new"]');
-    expect(archive.get("strong time").attributes("datetime")).toBe("2026-10-18T17:00:00Z");
-    expect(archive.get("strong time").text()).toContain("2026");
-    expect(archive.get("strong time").text()).toBe(
+    expect(archive.get("time").attributes("datetime")).toBe("2026-10-18T17:00:00Z");
+    expect(archive.get("time").text()).toContain("2026");
+    expect(archive.get("time").text()).toBe(
       new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
         new Date("2026-10-18T17:00:00Z"),
       ),
     );
-    expect(archive.get("strong time").attributes("title")).toContain("2026");
+    expect(archive.get("time").attributes("title")).toContain("2026");
     expect(archive.text()).not.toContain("Run run");
-    expect(archive.get("strong").text()).not.toContain("new");
+    expect(archive.get(".studio-list-main").text()).not.toContain("new");
     expect(archive.get("a").text()).toBe("Download");
     expect(archive.get("a").attributes("href")).toBe("/api/studio/wakewords/a/models/new/archive");
     expect(archive.get("a").classes()).toContain("studio-button");

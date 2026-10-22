@@ -6,6 +6,7 @@ import { useWorkspace } from "../workspace";
 import type { Batch, GenerationCapability, GenerationRecipe, GenerationSource, Job } from "../types";
 import PaginatedTable from "../components/PaginatedTable.vue";
 import { useJobQueue, statusClass } from "../jobs";
+import { plural } from "../format";
 
 const workspace = useWorkspace();
 const queue = useJobQueue();
@@ -22,6 +23,11 @@ function isPreviewBusy(engine: string): boolean {
 }
 const capabilities = ref<GenerationCapability[]>([]);
 const batches = ref<Batch[]>([]);
+/** A MOSS source batch by its creation time; the id only if it is no longer listed. */
+const sourceName = (id: string) => {
+  const source = batches.value.find((batch) => batch.id === id);
+  return source ? absoluteTime(source.created_at) : id;
+};
 const total = ref(0);
 const offset = ref(0);
 const recipe = ref<GenerationRecipe>({
@@ -600,7 +606,7 @@ onBeforeUnmount(() => {
             /><span
               ><strong>{{ batch.phrase }}</strong
               ><span class="studio-muted block text-xs"
-                >{{ batch.audio.length }} samples ·
+                >{{ plural(batch.audio.length, "sample") }} ·
                 {{
                   batch.recipe.engines?.map((engine) => engineNames[engine] ?? engine).join(", ") ||
                   "Saved generation models"
@@ -609,19 +615,22 @@ onBeforeUnmount(() => {
               ><span v-if="batch.status !== 'complete'" class="studio-muted block text-xs"
                 >{{ batch.status }} — only completed datasets can be selected.</span
               ></span
-            ><span class="studio-status ml-auto" :class="statusClass(batch.status)">{{ batch.status }}</span></label
+            ></label
           >
-          <button
-            type="button"
-            :data-delete-batch="batch.id"
-            :disabled="saving || ['queued', 'running', 'cancelling'].includes(batch.status)"
-            @click="deleting = batch"
-          >
-            Delete dataset
-          </button>
+          <div class="studio-dataset-actions">
+            <span class="studio-status" :class="statusClass(batch.status)">{{ batch.status }}</span>
+            <button
+              type="button"
+              :data-delete-batch="batch.id"
+              :disabled="saving || ['queued', 'running', 'cancelling'].includes(batch.status)"
+              @click="deleting = batch"
+            >
+              Delete dataset
+            </button>
+          </div>
         </div>
         <p v-if="batch.recipe.moss_source_batch_ids?.length" class="studio-muted text-xs">
-          MOSS sources: {{ batch.recipe.moss_source_batch_ids.join(", ") }}
+          MOSS sources: {{ batch.recipe.moss_source_batch_ids.map(sourceName).join(", ") }}
         </p>
         <section
           v-if="deleting?.id === batch.id"

@@ -347,9 +347,9 @@ describe("ArtificialPage", () => {
     const ui = mount(host());
     await flushPromises();
     await flushPromises();
-    const row = ui.get('[data-delete-batch="ready"]').element.parentElement!;
-    expect(row.classList.contains("studio-dataset-row")).toBe(true);
-    expect(row.lastElementChild).toBe(ui.get('[data-delete-batch="ready"]').element);
+    const actions = ui.get('[data-delete-batch="ready"]').element.parentElement!;
+    expect(actions.parentElement!.classList.contains("studio-dataset-row")).toBe(true);
+    expect(actions.lastElementChild).toBe(ui.get('[data-delete-batch="ready"]').element);
     ui.unmount();
   });
   it("hides batch size while preserving the saved internal value when generating", async () => {

@@ -497,7 +497,7 @@ onBeforeUnmount(() => {
       v-if="collectionOutcome"
       data-collection-outcome
       class="studio-note"
-      :class="{ 'studio-collection-warning': collectionWarning }"
+      :class="{ 'studio-note-warning': collectionWarning }"
       :role="collectionWarning ? 'alert' : 'status'"
     >
       <strong>{{ collectionWarning ? "Collection needs attention" : "Collection finished" }}</strong> ·

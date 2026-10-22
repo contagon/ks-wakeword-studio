@@ -157,7 +157,7 @@ onBeforeUnmount(() => {
       Training audio is limited to 10 minutes, including any delayed browser stop. Your full original recording is
       retained when saved.
     </p>
-    <p v-if="props.preview.warning" class="studio-note" role="status">
+    <p v-if="props.preview.warning" class="studio-note studio-note-warning" role="status">
       {{
         props.preview.warning === "no_speech"
           ? "No speech detected. The full clip is selected; background-noise negatives can still be saved."

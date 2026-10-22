@@ -19,11 +19,6 @@
   display: flex;
   gap: 5px;
 }
-.studio-app button.studio-record-stop {
-  background: #a52e38;
-  border-color: #a52e38;
-  color: white;
-}
 .studio-capture-review {
   border-top: 1px solid var(--studio-border);
   padding-top: 18px;
@@ -173,7 +168,6 @@
   --color-studio-surface: #ffffff;
 }
 
-/* Scoped to the primary studio; embedded legacy trainer (.legacy-scope) keeps its own styles. */
 html[data-studio-theme="dark"]:has(.studio-app) {
   background: #101923;
 }
@@ -193,6 +187,10 @@ html[data-studio-theme="dark"]:has(.studio-app) {
   --studio-note-border: #cbded2;
   --studio-warning: #fff6e1;
   --studio-warning-border: #e6c98f;
+  --studio-error: #fdeced;
+  --studio-error-border: #efb6bd;
+  --studio-danger: #a52e38;
+  --studio-danger-hover: #8c2530;
   --studio-native-theme: light;
   font:
     14px/1.5 system-ui,
@@ -219,27 +217,39 @@ html[data-studio-theme="dark"] .studio-app {
   --studio-note-border: #3f6c58;
   --studio-warning: #352d1d;
   --studio-warning-border: #786134;
+  --studio-error: #3a1d24;
+  --studio-error-border: #7c3a46;
+  --studio-danger: #b8434d;
+  --studio-danger-hover: #cc5560;
   --studio-native-theme: dark;
 }
-.studio-app :where(button, input, select, audio):not(.legacy-scope *) {
+.studio-app :where(button, input, select, audio) {
   color-scheme: var(--studio-native-theme);
 }
 .studio-app * {
   box-sizing: border-box;
 }
-.studio-app h1:not(.legacy-scope *) {
+.studio-app h1 {
   font-size: 24px;
   font-weight: 700;
   letter-spacing: -0.6px;
   margin: 0 0 5px;
 }
-.studio-app h2:not(.legacy-scope *) {
+.studio-app h2 {
   font-size: 16px;
   font-weight: 650;
   margin: 0 0 12px;
 }
-.studio-app
-  :where(button, .studio-button, input:not([type="checkbox"]):not([type="radio"]), select):not(.legacy-scope *) {
+/* A heading that shares a row with actions is centred on them, not pushed up by its margin. */
+.studio-app :is(.flex, .studio-toolbar) > h2 {
+  margin: 0;
+}
+.studio-app h3 {
+  font-size: 14px;
+  font-weight: 650;
+  margin: 0 0 8px;
+}
+.studio-app :where(button, .studio-button, input:not([type="checkbox"]):not([type="radio"]), select) {
   font: inherit;
   border: 1px solid var(--studio-border);
   border-radius: 7px;
@@ -249,29 +259,29 @@ html[data-studio-theme="dark"] .studio-app {
   max-width: 100%;
   min-height: 36px;
 }
-.studio-app :where(button, .studio-button):not(.legacy-scope *) {
+.studio-app :where(button, .studio-button) {
   width: auto;
   height: fit-content;
   flex: 0 0 auto;
   justify-self: start;
   line-height: 20px;
 }
-.studio-app :is(button, select):not(.legacy-scope *) {
+.studio-app :is(button, select) {
   cursor: pointer;
 }
-.studio-app :where(button, .studio-button):hover:not(.legacy-scope *) {
+.studio-app :where(button, .studio-button):hover {
   background: var(--studio-hover);
 }
-.studio-app button:disabled:not(.legacy-scope *) {
+.studio-app button:disabled {
   opacity: 0.6;
   cursor: default;
 }
-.studio-app input:not([type="checkbox"]):not([type="radio"]):not(.legacy-scope *) {
+.studio-app input:not([type="checkbox"]):not([type="radio"]) {
   display: block;
   width: 100%;
   margin-top: 0;
 }
-.studio-app input:is([type="checkbox"], [type="radio"]):not(.legacy-scope *) {
+.studio-app input:is([type="checkbox"], [type="radio"]) {
   appearance: auto;
   width: 16px;
   height: 16px;
@@ -282,10 +292,10 @@ html[data-studio-theme="dark"] .studio-app {
   accent-color: var(--color-studio-green);
   cursor: pointer;
 }
-.studio-app input[readonly]:not(.legacy-scope *) {
+.studio-app input[readonly] {
   background: var(--studio-bg);
 }
-.studio-app :focus-visible:not(.legacy-scope *) {
+.studio-app :focus-visible {
   outline: 3px solid #459aef;
   outline-offset: 3px;
 }
@@ -298,7 +308,8 @@ html[data-studio-theme="dark"] .studio-app {
   gap: 16px;
 }
 .studio-brand {
-  font-size: 18px;
+  font-size: 17px;
+  white-space: nowrap;
   font-weight: 750;
   color: white;
   padding: 0 10px;
@@ -406,9 +417,16 @@ html[data-studio-theme="dark"] .studio-app {
   border-radius: 7px;
   margin-bottom: 12px;
 }
-.studio-note.studio-collection-warning {
+.studio-note[role="alert"] {
+  background: var(--studio-error);
+  border-color: var(--studio-error-border);
+}
+.studio-note.studio-note-warning {
   background: var(--studio-warning);
   border-color: var(--studio-warning-border);
+}
+.studio-card > .studio-note:last-child {
+  margin-bottom: 0;
 }
 .studio-app button.studio-primary {
   background: var(--studio-primary);
@@ -417,6 +435,14 @@ html[data-studio-theme="dark"] .studio-app {
 }
 .studio-app button.studio-primary:hover {
   background: var(--studio-primary-hover);
+}
+.studio-app button.studio-danger {
+  background: var(--studio-danger);
+  color: white;
+  border-color: var(--studio-danger);
+}
+.studio-app button.studio-danger:hover {
+  background: var(--studio-danger-hover);
 }
 .studio-app button[aria-busy="true"]:disabled {
   color: var(--studio-muted);
@@ -501,7 +527,7 @@ html[data-studio-theme="dark"] .studio-app {
 .studio-content td {
   border-top: 1px solid var(--studio-border);
   padding: 9px 8px;
-  vertical-align: top;
+  vertical-align: middle;
 }
 .studio-content table {
   min-width: 680px;
@@ -556,13 +582,14 @@ html[data-studio-theme="dark"] .studio-app {
 }
 .studio-dataset-row {
   display: flex;
-  align-items: start;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 8px 16px;
 }
 .studio-dataset-row > .studio-checkbox-label {
   align-items: start;
-  flex: 1;
+  flex: 1 1 260px;
   min-width: 0;
 }
 .studio-dataset-row input[type="checkbox"] {
@@ -587,13 +614,23 @@ html[data-studio-theme="dark"] .studio-app {
 .studio-app details[open] > summary {
   margin-bottom: 12px;
 }
-.studio-safety {
-  border-left: 4px solid #c18b26;
+/* Rows of records with actions (runs, versions, batches): text grows, actions stay right and centred. */
+.studio-list-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
 }
-.studio-safety [data-quarantine-notice] {
-  background: var(--studio-warning);
-  border-color: var(--studio-warning-border);
-  margin: 12px 0;
+.studio-list-row > .studio-list-main {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.studio-list-row > .studio-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 @media (max-width: 900px) {
   .studio-schedule-row,
@@ -605,9 +642,6 @@ html[data-studio-theme="dark"] .studio-app {
   .studio-schedule-row,
   .studio-registration-row {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .studio-dataset-row {
-    flex-wrap: wrap;
   }
   .studio-dataset-actions {
     margin-left: 24px;

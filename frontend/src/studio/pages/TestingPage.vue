@@ -209,13 +209,7 @@ onBeforeUnmount(() => {
       </div>
       <ProbabilityGraph :samples="samples" :threshold="threshold" />
       <div class="testing-actions">
-        <button
-          v-if="active"
-          type="button"
-          class="studio-record-stop"
-          data-action="stop-testing"
-          @click="session.stop()"
-        >
+        <button v-if="active" type="button" class="studio-danger" data-action="stop-testing" @click="session.stop()">
           Stop testing
         </button>
         <button

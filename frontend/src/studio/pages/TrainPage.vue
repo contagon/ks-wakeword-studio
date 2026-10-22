@@ -324,7 +324,7 @@ onBeforeUnmount(() => {
             {{ starting ? "Starting…" : trainingBusy ? "Training…" : "Start training" }}
           </button>
         </div>
-        <p v-if="blockedReason" data-training-blocked class="studio-note text-xs" role="alert">
+        <p v-if="blockedReason" data-training-blocked class="studio-note studio-note-warning text-xs" role="alert">
           {{ blockedReason }} <a :href="datasetsHref">Open Downloaded</a>
         </p>
       </div>
@@ -334,12 +334,15 @@ onBeforeUnmount(() => {
     <div class="studio-card mt-4">
       <h2>Run history</h2>
       <article v-for="run in runs" :key="run.id" class="studio-history mt-3" :data-run-id="run.id">
-        <div class="flex justify-between items-center gap-3">
-          <span
-            ><strong data-run-number>{{ run.run_number ? `Run #${run.run_number}` : "Run" }}</strong
-            ><span data-run-time class="studio-muted block text-xs">{{ absoluteTime(runTime(run)) }}</span></span
-          ><span class="studio-status ml-auto" :class="statusClass(run.status)">{{ run.status }}</span
-          ><button type="button" @click="queue.show(run.id)">View in queue</button>
+        <div class="studio-list-row">
+          <div class="studio-list-main">
+            <p data-run-number class="font-semibold">{{ run.run_number ? `Run #${run.run_number}` : "Run" }}</p>
+            <p data-run-time class="studio-muted text-xs">{{ absoluteTime(runTime(run)) }}</p>
+          </div>
+          <div class="studio-list-actions">
+            <span class="studio-status" :class="statusClass(run.status)">{{ run.status }}</span>
+            <button type="button" @click="queue.show(run.id)">View in queue</button>
+          </div>
         </div>
         <p v-if="skipped(run)" class="studio-note text-xs">Skipped because inputs and configuration were unchanged.</p>
         <p v-if="jobError(run)" class="studio-note text-xs" role="alert">{{ jobError(run) }}</p>

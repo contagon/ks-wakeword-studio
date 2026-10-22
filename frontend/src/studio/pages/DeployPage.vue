@@ -5,6 +5,7 @@ import { useDeviceRegistry } from "../devices";
 import { useWorkspace } from "../workspace";
 import type { ModelVersion, Publication } from "../types";
 import { absoluteTime } from "../time";
+import { formatPercent } from "../format";
 
 const workspace = useWorkspace();
 const registry = useDeviceRegistry();
@@ -145,22 +146,27 @@ onBeforeUnmount(() => {
       <p v-if="loading" class="studio-muted">Loading archives…</p>
       <div v-else-if="versions.length" class="grid gap-3">
         <article v-for="version in versions" :key="version.id" class="studio-history" :data-version-id="version.id">
-          <div class="flex flex-wrap justify-between gap-3">
-            <div class="min-w-0 flex-1">
-              <p v-if="version.run_number" data-run-number class="font-semibold">Run #{{ version.run_number }}</p>
-              <strong
-                ><time :datetime="version.trained_at" :title="absoluteTime(version.trained_at)">{{
+          <div class="studio-list-row">
+            <div class="studio-list-main">
+              <p data-run-number class="font-semibold">
+                {{ version.run_number ? `Run #${version.run_number}` : "Imported model" }}
+              </p>
+              <p class="studio-muted text-xs">
+                <time :datetime="version.trained_at" :title="absoluteTime(version.trained_at)">{{
                   absoluteTime(version.trained_at)
-                }}</time></strong
-              >
-              <p v-if="version.origin === 'legacy'" class="studio-note text-xs">
+                }}</time
+                ><template v-if="readModelMetrics(version.metrics).recall !== null">
+                  · Recall {{ formatPercent(readModelMetrics(version.metrics).recall!) }}</template
+                >
+              </p>
+              <p v-if="version.origin === 'legacy'" class="studio-note text-xs mt-2">
                 Legacy import · {{ version.validation_state }}. Never automatically published. Explicit publication
                 first requires structural TensorFlow validation in the prepared training environment
                 (cli/setup_python_venv); validation failure leaves the archive available without changing the desired
                 version.
               </p>
             </div>
-            <div class="flex flex-wrap items-center gap-2">
+            <div class="studio-list-actions">
               <a class="studio-button" :href="studioApi.archiveUrl(version.word_id, version.id)">Download</a>
               <button
                 type="button"
@@ -173,9 +179,6 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-          <p v-if="readModelMetrics(version.metrics).recall !== null" class="studio-muted text-xs">
-            Recall {{ readModelMetrics(version.metrics).recall }}
-          </p>
         </article>
       </div>
       <p v-else class="studio-muted">No archived model versions for this workspace.</p>
