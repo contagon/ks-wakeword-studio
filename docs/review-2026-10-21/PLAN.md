@@ -470,6 +470,15 @@ Also:
   - On request, the items first kept as-is were reworked too: Samples stacks as cards on phones, Testing sensitivity is a native select, and Manual uses one label toggle. The theme-toggle and Automate deployment changes were tried, then reverted at the user's request.
   - Only the job ids in the expanded queue logs remain, for debugging.
   - Focus restoration and trapping in dialogs was dropped at the user's request; the native `showModal()` handles focus.
+- **Phase 7 done (commits `c3557ed`, `e6a65dc`, plus the app-mode commit):** §6.2 and the frontend items in §7.
+  - New helpers: `fetchAll`, `queue.busy` / `queue.onFinished` / `isActiveStatus`, `latestRequest` (Train, Downloaded and Artificial), `routes.href(id, tab)`, and the StudioShell page map.
+  - Dead code removed and `noUnusedLocals` enabled.
+  - The build is a Vite app build (minified); the theme script is inlined.
+  - Skipped on purpose:
+    - **Samples playback** keeps its blob fetch: a direct `src` would change the error message for failed loads.
+    - **The waveform peak calculations** stay separate: they bucket differently, so sharing code would change the waveforms.
+    - **The remaining pages keep their single generation counters**, which have slightly different semantics.
+    - **The worker filename keeps its hash** for cache-busting, now that `static/ui` is no longer committed.
 
 ## 11. Order of work
 
