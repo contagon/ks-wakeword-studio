@@ -324,7 +324,8 @@ test("all pages have compact controls and no narrow-screen overflow", async ({ p
         expect(bounds!.x + bounds!.width - actions!.x - actions!.width).toBeLessThan(5);
       }
       if (route === "samples" && width === 390) {
-        expect((await page.locator("table").boundingBox())!.width).toBeGreaterThanOrEqual(680);
+        // Phones stack each sample as a card instead of a horizontally scrolling table.
+        expect((await page.locator("table").boundingBox())!.width).toBeLessThanOrEqual(390);
         await expect(page.locator('[data-action="relabel"]').first().locator("option:checked")).toHaveText(
           "Set label…",
         );

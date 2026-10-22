@@ -241,15 +241,9 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <audio ref="audio" data-audio-player preload="none" class="hidden" @ended="stopAudio" />
-    <div
-      class="studio-card overflow-x-auto"
-      :aria-busy="loading"
-      role="region"
-      aria-label="Samples table; scroll horizontally to view all actions"
-      tabindex="0"
-    >
+    <div class="studio-card overflow-x-auto" :aria-busy="loading" role="region" aria-label="Samples" tabindex="0">
       <p v-if="loading">Loading samples…</p>
-      <table v-else class="w-full text-sm">
+      <table v-else class="studio-samples-table w-full text-sm">
         <thead>
           <tr>
             <th>Sample</th>
@@ -261,14 +255,14 @@ onBeforeUnmount(() => {
         </thead>
         <tbody>
           <tr v-for="item in items" :key="item.id" :data-row-id="item.id">
-            <td>
+            <td data-caption="Sample">
               {{ item.recording?.clip_id ?? item.id
               }}<small v-if="item.recording" class="block studio-muted"
                 >{{ item.recording.phrase }} · {{ item.recording.engine }} · {{ rowKind(item) }}</small
               >
             </td>
-            <td>{{ item.label }}</td>
-            <td>
+            <td data-caption="Label">{{ item.label }}</td>
+            <td data-caption="Source">
               {{ sourceLabel(item)
               }}<small v-if="item.capture" class="block studio-muted"
                 >{{
@@ -281,8 +275,8 @@ onBeforeUnmount(() => {
                 · {{ item.capture.duration_s.toFixed(2) }} s original</small
               >
             </td>
-            <td>rev {{ item.revision }}</td>
-            <td>
+            <td data-caption="Revision">rev {{ item.revision }}</td>
+            <td data-caption="Actions">
               <div class="flex flex-wrap gap-1">
                 <button
                   type="button"

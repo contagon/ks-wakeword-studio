@@ -48,18 +48,12 @@ async function openTester(page: Page, request: APIRequestContext) {
   await expect(page.locator("[data-action=start-testing]")).toBeEnabled();
 }
 
-test("opens the real modal, switches saved sensitivity, and fits a narrow viewport", async ({ page, request }) => {
+test("switches saved sensitivity and fits a narrow viewport", async ({ page, request }) => {
   await openTester(page, request);
   await expect(page.locator("nav a").last()).toHaveText("Testing");
-  await page.locator("[data-action=sensitivity]").click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.locator("[data-sensitivity=slight]")).toContainText("0.95");
-  await page.locator("[data-sensitivity=very]").click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(page.locator("[data-action=sensitivity] option[value=slight]")).toContainText("0.95");
+  await page.locator("[data-action=sensitivity]").selectOption("very");
   await expect(page.locator("[data-threshold]")).toContainText("0.80");
-  await page.locator("[data-action=sensitivity]").click();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).not.toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole("img", { name: /Live detection probability/ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -118,8 +112,7 @@ test("runs a real microWakeWord model through browser microphone, worklet and wo
   await page.locator("[data-action=start-testing]").click();
   await expect(page.locator(".testing-actions [role=status]")).toHaveText(/Listening|Above threshold/);
   await expect.poll(() => page.locator("[data-red-trace]").getAttribute("points")).toMatch(/\d+,\d+/);
-  await page.locator("[data-action=sensitivity]").click();
-  await page.locator("[data-sensitivity=very]").click();
+  await page.locator("[data-action=sensitivity]").selectOption("very");
   await expect(page.locator("[data-threshold]")).toContainText("0.80");
   await page.getByRole("link", { name: "Wakewords", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Wakewords", exact: true })).toBeVisible();

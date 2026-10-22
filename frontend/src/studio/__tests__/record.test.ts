@@ -149,7 +149,7 @@ describe("browser recording", () => {
     expect(recorders).toHaveLength(1);
     press(" ", { repeat: true });
     press(" ", { ctrlKey: true });
-    press(" ", {}, app.get("select[name=import-label]").element);
+    press(" ", {}, app.get("input[name=import-file]").element);
     await settle();
     expect(recorders[0].state).toBe("recording");
     await app.get("[data-action=open-job-queue]").trigger("click");
@@ -207,7 +207,7 @@ describe("browser recording", () => {
     expect(captures()).toHaveLength(1);
     expect(app.text()).toContain("Sample saved");
     await record();
-    press("k", {}, app.get("[name=import-label]").element);
+    press("k", {}, app.get("[name=import-file]").element);
     await settle();
     expect(captures()).toHaveLength(1);
   });

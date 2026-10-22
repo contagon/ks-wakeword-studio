@@ -79,11 +79,10 @@ describe("Testing page", () => {
     await flushPromises();
     expect(ui.get("select").findAll("option")).toHaveLength(2);
     expect(ui.get('[data-action="start-testing"]').attributes("disabled")).toBeUndefined();
-    await ui.get('[data-action="sensitivity"]').trigger("click");
-    expect(ui.get("dialog").attributes("open")).toBeDefined();
-    expect(ui.get("dialog").text()).toContain("0.95");
-    expect(ui.get("dialog").text()).toContain("0.80");
-    await ui.get('[data-sensitivity="very"]').trigger("click");
+    const sensitivity = ui.get('[data-action="sensitivity"]');
+    expect(sensitivity.text()).toContain("0.95");
+    expect(sensitivity.text()).toContain("0.80");
+    await sensitivity.setValue("very");
     expect(ui.get("[data-threshold]").text()).toContain("0.80");
     await ui.get('[data-action="start-testing"]').trigger("click");
     expect(live.start.mock.calls[0]?.[0]).toBe("/api/studio/wakewords/a/models/new/archive/cedar.tflite");

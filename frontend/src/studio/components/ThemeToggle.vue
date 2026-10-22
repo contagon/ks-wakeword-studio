@@ -5,8 +5,9 @@ const { dark, toggle, dispose } = createThemeController();
 onBeforeUnmount(dispose);
 </script>
 <template>
-  <button type="button" aria-label="Dark mode" :aria-pressed="dark" @click="toggle">
-    <span aria-hidden="true">{{ dark ? "☀" : "☾" }}</span>
-    <span class="studio-header-label">{{ dark ? "Light mode" : "Dark mode" }}</span>
+  <!-- A toggle: the name stays "Dark mode" and aria-pressed (plus the selected style) shows whether it is on. -->
+  <button type="button" :aria-pressed="dark" :class="{ 'studio-selected': dark }" @click="toggle">
+    <span aria-hidden="true">☾</span>
+    <span class="studio-header-label">Dark mode</span>
   </button>
 </template>

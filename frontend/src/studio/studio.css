@@ -887,3 +887,38 @@ html[data-studio-theme="dark"] :is(.studio-status-failed, .studio-status-interru
 .studio-content td {
   overflow-wrap: normal;
 }
+/* Phones: each sample becomes a stacked card with small column captions instead of a scrolling table. */
+@media (max-width: 650px) {
+  .studio-content table.studio-samples-table {
+    min-width: 0;
+  }
+  .studio-samples-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .studio-samples-table :is(tbody, tr, td) {
+    display: block;
+    width: 100%;
+  }
+  .studio-samples-table tr {
+    border-top: 1px solid var(--studio-border);
+    padding: 8px 0;
+  }
+  .studio-samples-table tbody tr:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+  .studio-content .studio-samples-table td {
+    border-top: 0;
+    padding: 3px 0;
+  }
+  .studio-samples-table td[data-caption]::before {
+    content: attr(data-caption);
+    display: block;
+    font-size: 11px;
+    color: var(--studio-muted);
+  }
+}

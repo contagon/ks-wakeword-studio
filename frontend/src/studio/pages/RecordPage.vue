@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LabelToggle from "../components/LabelToggle.vue";
 import PageHeader from "../components/PageHeader.vue";
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { studioApi } from "../api";
@@ -196,12 +197,12 @@ onBeforeUnmount(() => {
             required
             :disabled="uploading"
             @change="importFile = ($event.target as HTMLInputElement).files?.[0] ?? null" /></label
-        ><label
-          >Sample label<select name="import-label" v-model="importLabel" :disabled="uploading">
-            <option value="positive">Positive</option>
-            <option value="negative">Negative</option>
-          </select></label
-        ><button
+        ><LabelToggle
+          v-model="importLabel"
+          group-label="Upload sample label"
+          attribute="data-import-label"
+          :disabled="uploading"
+        /><button
           type="submit"
           class="studio-primary"
           :aria-busy="uploading"
@@ -217,20 +218,7 @@ onBeforeUnmount(() => {
           <h2>Microphone recording</h2>
           <p class="studio-muted">One recording, one sample. You decide when to stop.</p>
         </div>
-        <div class="studio-capture-label" role="group" aria-label="Recording sample label">
-          <button
-            v-for="value in ['positive', 'negative'] as const"
-            :key="value"
-            type="button"
-            :data-label="value"
-            :aria-pressed="label === value"
-            :class="{ 'studio-primary': label === value }"
-            :disabled="saving"
-            @click="label = value"
-          >
-            {{ value === "positive" ? "Positive" : "Negative" }}
-          </button>
-        </div>
+        <LabelToggle v-model="label" group-label="Recording sample label" :disabled="saving" />
       </div>
       <div class="studio-capture-area">
         <div class="studio-muted" role="status">

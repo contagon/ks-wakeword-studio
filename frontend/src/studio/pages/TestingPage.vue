@@ -21,7 +21,6 @@ const versions = ref<ModelVersion[]>([]);
 const versionId = ref("");
 const config = ref<TestingConfig | null>(null);
 const sensitivity = ref<Sensitivity>("moderate");
-const dialog = ref<HTMLDialogElement>();
 const state = ref<TestingState>("idle");
 const loading = ref(false);
 const error = ref("");
@@ -32,7 +31,6 @@ let manifestRequest: AbortController | undefined;
 let disposed = false;
 const selectedVersion = computed(() => versions.value.find((version) => version.id === versionId.value));
 const threshold = computed(() => sensitivityThreshold(config.value?.cutoff ?? 0.9, sensitivity.value));
-const sensitivityLabel = computed(() => sensitivities.find((option) => option.id === sensitivity.value)!.label);
 const active = computed(() => state.value === "starting" || state.value === "listening");
 const peak = computed(() => Math.max(0, ...samples.value.map((sample) => sample.probability)));
 const above = computed(() => !latest.value?.warming && (latest.value?.probability ?? 0) > threshold.value);
@@ -67,10 +65,6 @@ function reset() {
   latest.value = null;
   samples.value = [];
 }
-function chooseSensitivity(value: Sensitivity) {
-  sensitivity.value = value;
-  dialog.value?.close();
-}
 async function loadManifest() {
   manifestRequest?.abort();
   reset();
@@ -93,7 +87,6 @@ async function loadVersions() {
   listRequest?.abort();
   manifestRequest?.abort();
   reset();
-  dialog.value?.close();
   versions.value = [];
   versionId.value = "";
   config.value = null;
@@ -148,7 +141,6 @@ onBeforeUnmount(() => {
   disposed = true;
   listRequest?.abort();
   manifestRequest?.abort();
-  dialog.value?.close();
   session.stop();
 });
 </script>
@@ -177,18 +169,13 @@ onBeforeUnmount(() => {
             </option>
           </select>
         </label>
-        <div class="testing-sensitivity">
-          <span class="studio-muted">Sensitivity</span
-          ><button
-            type="button"
-            data-action="sensitivity"
-            :disabled="!config"
-            aria-haspopup="dialog"
-            @click="dialog?.showModal()"
-          >
-            {{ sensitivityLabel }} ▾
-          </button>
-        </div>
+        <label
+          >Sensitivity<select v-model="sensitivity" name="sensitivity" data-action="sensitivity" :disabled="!config">
+            <option v-for="option in sensitivities" :key="option.id" :value="option.id">
+              {{ option.label }} · {{ sensitivityThreshold(config?.cutoff ?? 0.9, option.id).toFixed(2) }}
+            </option>
+          </select></label
+        >
       </div>
       <p v-if="!workspace.selectedId.value" class="studio-note">Select or create a wakeword to test.</p>
       <p v-else-if="!loading && !versions.length && !error" class="studio-note">Train a model to start live testing.</p>
@@ -227,44 +214,18 @@ onBeforeUnmount(() => {
         <span role="status" :class="{ 'testing-above': above && state === 'listening' }">{{ status }}</span>
       </div>
       <p class="studio-muted testing-footnote">
-        The dashed line is the selected sensitivity threshold. Red means the smoothed probability is above it. Browser
+        Sensitivity thresholds derive from this version’s saved cutoff ({{ (config?.cutoff ?? 0.9).toFixed(2) }}), using
+        Voice Satellite’s calculation; higher sensitivity lowers the threshold and may increase false detections. The
+        dashed line is the selected sensitivity threshold. Red means the smoothed probability is above it. Browser
         microphone processing and device hardware may differ from your deployed satellite.
       </p>
     </div>
-    <dialog ref="dialog" class="studio-card testing-dialog" aria-labelledby="testing-sensitivity-title">
-      <h2 id="testing-sensitivity-title">Detection sensitivity</h2>
-      <p class="studio-muted">
-        Derived from this version’s saved cutoff ({{ (config?.cutoff ?? 0.9).toFixed(2) }}), using Voice Satellite’s
-        calculation.
-      </p>
-      <div class="sensitivity-options">
-        <button
-          v-for="option in sensitivities"
-          :key="option.id"
-          type="button"
-          :data-sensitivity="option.id"
-          :aria-pressed="sensitivity === option.id"
-          :class="{ 'studio-selected': sensitivity === option.id }"
-          @click="chooseSensitivity(option.id)"
-        >
-          <span>{{ option.label }}</span
-          ><strong>{{ sensitivityThreshold(config?.cutoff ?? 0.9, option.id).toFixed(2) }}</strong>
-        </button>
-      </div>
-      <p class="studio-muted">Higher sensitivity lowers the threshold and may increase false detections.</p>
-      <button type="button" @click="dialog?.close()">Close</button>
-    </dialog>
   </section>
 </template>
 
 <style scoped>
 .testing-controls {
   margin: 24px 0;
-}
-.testing-sensitivity {
-  display: grid;
-  gap: 4px;
-  font-size: 12px;
 }
 .testing-mic {
   display: flex;
@@ -304,30 +265,6 @@ onBeforeUnmount(() => {
 .testing-footnote {
   font-size: 12px;
   margin: 18px 0 0;
-}
-.testing-dialog {
-  width: min(460px, calc(100% - 32px));
-  margin: auto;
-  color: var(--studio-text);
-  background: var(--studio-surface);
-}
-.testing-dialog::backdrop {
-  background: rgb(20 35 48 / 0.55);
-}
-.testing-dialog p {
-  margin: 12px 0;
-}
-.sensitivity-options {
-  display: grid;
-  gap: 10px;
-  margin: 20px 0;
-}
-.sensitivity-options button {
-  display: flex;
-  justify-content: space-between;
-  gap: 24px;
-  width: 100%;
-  text-align: left;
 }
 @media (max-width: 650px) {
   .testing-controls {
