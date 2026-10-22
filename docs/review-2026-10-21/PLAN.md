@@ -499,6 +499,16 @@ Also:
     - **Some service methods are still only called from tests:** `GenerationService.enqueue/save_recipe/get_batch`, `TrainingService.get_manifest`, `ScheduleService.save`, `WorkspaceService.update/source_mappings`, and runtime and worker health. Tests use them as fixtures.
     - **Ingest's workspace pre-checks stay.** They avoid running ffmpeg for a missing workspace.
   - After this phase: pytest 451 passed, 1 skipped; vitest 202; Playwright 18 passed, 1 skipped.
+- **Phase 9 done (commits `408bb24`, `c43d838`, `8258e9b`, `4dd16ea`, `1842f9d`):** §6.3 and the script and Docker items in §7.
+  - **Corpus script:** `cli/prepare_corpus.py` replaces the four bash corpus scripts (~830 lines). It keeps the output naming, `*_corrupted_files.log`, the recorded-count reuse (same count files) and `CHIME_AUDIO_URL`. MIT uses `snapshot_download`, and the AudioSet revision probe uses `huggingface_hub.file_exists`. `setup_augmentation.py` no longer symlinks `.venv` into the stage dir.
+  - **Shell helpers:** `shell.functions` gains `pip_install`, `detect_blackwell` and `checkout_tool`. microWakeWord and piper-sample-generator are pinned to the upstream HEADs of 2026-10-22.
+  - **Venv fast path:** `setup_python_venv` exits early for a healthy venv whose `.mww-stack` marker matches the pins (`--force` overrides). Callers just run it. Existing installs rebuild once to write the marker.
+  - **CUDA paths:** `cli/cuda_library_path.py` replaces the heredoc that `run.sh` and the trainer both carried.
+  - **Training YAML:** `dataset_config.py` writes the whole config with `yaml.safe_dump`. All 12 positive/negative/manifest combinations matched the old sed/perl output.
+  - **Docker:** one `dockerfile`, with per-variant system stages selected by `--build-arg VARIANT=blackwell`. Publishing is a matrix with the same tags and cache scopes, and release notes are a follow-up job. The default image was built and inspected locally; the Blackwell variant passed `docker build --check` but was not built.
+  - **Small items:** the augmenter defaults loop; calibration defaults in one place; the `QWEN_LANGUAGE_NAMES` alias; dead shell defaults and parser state.
+  - **Skipped on purpose:** the "TF env setup" duplication. Only the trainer (shell) and augmenter (Python `setdefault`) set it, with different values on purpose.
+  - After this phase: pytest 455 passed, 1 skipped; vitest 202; Playwright 18 passed, 1 skipped.
 
 ## 11. Order of work
 
