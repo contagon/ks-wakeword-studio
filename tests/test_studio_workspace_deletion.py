@@ -2,7 +2,6 @@ import io
 import json
 import tempfile
 import unittest
-import wave
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -10,14 +9,7 @@ from uuid import uuid4
 
 from studio.models import Conflict, DiagnosticClip, NotFound
 from studio.runtime import StudioRuntime
-
-
-def wav(value=0):
-    output = io.BytesIO()
-    with wave.open(output, 'wb') as audio:
-        audio.setparams((1, 2, 16000, 0, 'NONE', 'not compressed'))
-        audio.writeframes(int(value).to_bytes(2, 'little') * 16000)
-    return io.BytesIO(output.getvalue())
+from studio_harness import wav
 
 
 class WorkspaceDeletionTests(unittest.TestCase):
@@ -53,22 +45,22 @@ class WorkspaceDeletionTests(unittest.TestCase):
     def test_failed_deletion_does_not_tombstone_surviving_recordings_after_restart(self):
         from unittest.mock import patch
         clip = DiagnosticClip('clip-rollback', None, 'Delete me', 'mww', False, {}, {})
-        original = self.runtime.samples.ingest('device', clip, wav(1), self.word.id)
+        original = self.runtime.samples.ingest('device', clip, io.BytesIO(wav(1)), self.word.id)
         with patch('studio.deletion._audio_gc', side_effect=RuntimeError('rollback')):
             with self.assertRaises(RuntimeError):
                 self.words.delete(self.word.id)
-        self.assertEqual(self.runtime.samples.ingest('device', clip, wav(1), self.word.id).id, original.id)
+        self.assertEqual(self.runtime.samples.ingest('device', clip, io.BytesIO(wav(1)), self.word.id).id, original.id)
         self.runtime.shutdown()
         self.runtime.startup()
-        self.assertEqual(self.runtime.samples.ingest('device', clip, wav(1), self.word.id).id, original.id)
+        self.assertEqual(self.runtime.samples.ingest('device', clip, io.BytesIO(wav(1)), self.word.id).id, original.id)
 
     def test_audio_lineage_scoped_gc_preserves_shared_and_unrelated_blobs(self):
         samples = self.runtime.samples
-        owned = samples.import_audio(self.word.id, 'positive', wav(1))
+        owned = samples.import_audio(self.word.id, 'positive', io.BytesIO(wav(1)))
         trimmed = samples.trim(owned.id, 0, .5, 0)
         # A blob shared through a distinct audio record must survive.
-        shared = samples.import_audio(self.word.id, 'negative', wav(2))
-        survivor = samples.import_audio(self.other.id, 'positive', wav(2))
+        shared = samples.import_audio(self.word.id, 'negative', io.BytesIO(wav(2)))
+        survivor = samples.import_audio(self.other.id, 'positive', io.BytesIO(wav(2)))
         unrelated = self.runtime.blobs.put(io.BytesIO(b'unrelated orphan'))
         self.words.delete(self.word.id)
         self.assertTrue(samples.audio(survivor.id, self.other.id))
@@ -83,7 +75,7 @@ class WorkspaceDeletionTests(unittest.TestCase):
     def test_blob_gc_waits_for_inflight_same_content_import_reference(self):
         from unittest.mock import patch
         samples = self.runtime.samples
-        owned = samples.import_audio(self.word.id, 'positive', wav(1))
+        owned = samples.import_audio(self.word.id, 'positive', io.BytesIO(wav(1)))
         prepared, release, deleted = threading.Event(), threading.Event(), threading.Event()
         publish = samples._publish
 
@@ -99,7 +91,7 @@ class WorkspaceDeletionTests(unittest.TestCase):
             deleted.set()
 
         with ThreadPoolExecutor(max_workers=2) as pool, patch.object(samples, '_publish', side_effect=pause):
-            writer = pool.submit(samples.import_audio, self.other.id, 'positive', wav(1))
+            writer = pool.submit(samples.import_audio, self.other.id, 'positive', io.BytesIO(wav(1)))
             self.assertTrue(prepared.wait(3))
             deletion = pool.submit(remove)
             try:
@@ -112,7 +104,7 @@ class WorkspaceDeletionTests(unittest.TestCase):
         self.assertTrue(samples.audio(survivor.id, self.other.id))
 
     def test_all_metadata_and_owned_files_removed_without_trusting_archive_paths(self):
-        sample = self.runtime.samples.import_audio(self.word.id, 'positive', wav(3))
+        sample = self.runtime.samples.import_audio(self.word.id, 'positive', io.BytesIO(wav(3)))
         job_id = self.job()
         version_id = uuid4().hex
         outsider = Path(self.temp.name) / 'kiosk-deployed'
@@ -159,7 +151,7 @@ class WorkspaceDeletionTests(unittest.TestCase):
     def test_diagnostic_source_tombstone_retained_without_audio(self):
         from studio.collection import CollectionService
         clip = DiagnosticClip(id='clip', phrase='Delete me', engine='micro', near_miss=False, scores={}, metadata={})
-        recording = self.runtime.samples.ingest('device', clip, wav(4), self.word.id)
+        recording = self.runtime.samples.ingest('device', clip, io.BytesIO(wav(4)), self.word.id)
         self.words.delete(self.word.id)
         self.assertTrue(CollectionService(self.store, self.runtime.samples, self.runtime.devices)._seen('device', 'clip'))
         with self.store.transaction() as db:
@@ -168,18 +160,18 @@ class WorkspaceDeletionTests(unittest.TestCase):
 
     def test_inflight_collection_cannot_reimport_deleted_source_as_unmapped(self):
         clip = DiagnosticClip(id='clip', phrase='Delete me', engine='micro', near_miss=False, scores={}, metadata={})
-        self.runtime.samples.ingest('device', clip, wav(4), self.word.id)
+        self.runtime.samples.ingest('device', clip, io.BytesIO(wav(4)), self.word.id)
         self.words.delete(self.word.id)
         with self.assertRaises(Conflict):
-            self.runtime.samples.ingest('device', clip, wav(4), None)
+            self.runtime.samples.ingest('device', clip, io.BytesIO(wav(4)), None)
         with self.store.transaction() as db:
             self.assertEqual(db.execute('SELECT count(*) FROM recordings').fetchone()[0], 0)
 
     def test_conflicting_recording_original_and_normalized_orphans_are_collected(self):
         import hashlib
         clip = DiagnosticClip(id='clip', phrase='Delete me', engine='micro', near_miss=False, scores={}, metadata={})
-        self.runtime.samples.ingest('device', clip, wav(1), self.word.id)
-        normalized = wav(2).getvalue()
+        self.runtime.samples.ingest('device', clip, io.BytesIO(wav(1)), self.word.id)
+        normalized = io.BytesIO(wav(2)).getvalue()
         conflicting = normalized + b'ignored container metadata'
         self.runtime.samples.ingest('device', clip, io.BytesIO(conflicting), self.word.id)
         original_hash = hashlib.sha256(conflicting).hexdigest()
@@ -192,7 +184,7 @@ class WorkspaceDeletionTests(unittest.TestCase):
 
     def test_interrupted_physical_cleanup_is_retried_at_startup(self):
         from unittest.mock import patch
-        sample = self.runtime.samples.import_audio(self.word.id, 'positive', wav(5))
+        sample = self.runtime.samples.import_audio(self.word.id, 'positive', io.BytesIO(wav(5)))
         directory = self.store.root / 'models' / self.word.id
         directory.mkdir(parents=True)
         (directory / 'owned').write_bytes(b'owned')
@@ -240,7 +232,7 @@ class WorkspaceDeletionTests(unittest.TestCase):
         self.assertEqual((outside / 'keep').read_bytes(), b'keep')
 
     def test_surviving_training_manifest_retains_referenced_audio_and_ancestors(self):
-        original = self.runtime.samples.import_audio(self.word.id, 'positive', wav(6))
+        original = self.runtime.samples.import_audio(self.word.id, 'positive', io.BytesIO(wav(6)))
         trimmed = self.runtime.samples.trim(original.id, 0, .5, 0)
         # Retained snapshots are immutable references even without SQL audio FKs.
         with self.store.transaction() as db:

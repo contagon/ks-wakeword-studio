@@ -11,26 +11,16 @@ from concurrent.futures import ThreadPoolExecutor
 
 from studio.deployment import DeploymentService
 from studio.kiosk import KioskClient
-from studio.models import Conflict, RemoteRejected, RemoteUnavailable, ValidationError
+from studio.models import Conflict, RemoteUnavailable, ValidationError
 from studio.runtime import StudioRuntime
-from test_studio_training import TrainingRunner
-from test_studio_generation import wav
+from studio_harness import VersionedTrainingRunner, api_client, wav
 
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-class VersionedTrainingRunner(TrainingRunner):
-    def run(self, context, argv, **kwargs):
-        code = super().run(context, argv, **kwargs)
-        root = Path(next(a.split('=', 1)[1] for a in argv if a.startswith('--data-dir=')))
-        weights = root / 'output/fixture/hello_robot.tflite'
-        weights.write_bytes(weights.read_bytes() + context.job.id.encode())
-        return code
-
-
-class FixtureKiosk(KioskClient):
+class InProcessKiosk(KioskClient):
     def __init__(self):
         super().__init__(lambda _: 'fixture-admin')
         self.calls, self.staged, self.files, self.offline = [], {}, {}, set()
@@ -107,8 +97,8 @@ class DeploymentTests(unittest.TestCase):
         from dataclasses import replace
         policy = self.runtime.automation.get(self.word.id).settings
         self.runtime.automation.save(self.word.id, replace(policy, deployment_policy=replace(policy.deployment_policy, after_training=True)))
-        self.runtime.samples.import_audio(self.word.id, 'positive', io.BytesIO(wav(1)))
-        self.client = FixtureKiosk()
+        self.runtime.samples.import_audio(self.word.id, 'positive', io.BytesIO(wav(1, 0.1)))
+        self.client = InProcessKiosk()
         self.runtime.devices.client = self.client
         with self.runtime.devices.store.transaction() as db:
             for id, role, leader, eligible, credential in [
@@ -328,15 +318,10 @@ class DeploymentTests(unittest.TestCase):
         self.assertNotIn('openwakeword/hello_robot.oww.onnx', self.client.loaded['solo'])
 
     def test_api_archive_publish_and_cross_word_validation(self):
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-        from studio.api import create_router
         import zipfile
         version = self.train()
-        app = FastAPI()
-        app.include_router(create_router(self.runtime))
         base = '/api/studio/wakewords/' + self.word.id
-        with TestClient(app) as api:
+        with api_client(self.runtime) as api:
             self.assertEqual(api.get(base + '/deployment/status').status_code, 200)
             archive = api.get(base + '/models/' + version.id + '/archive')
             self.assertEqual(archive.status_code, 200)

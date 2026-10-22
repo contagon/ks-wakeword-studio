@@ -4,7 +4,7 @@ import json
 
 from studio.models import DiagnosticClip, SampleQuery
 from studio.runtime import StudioRuntime
-from test_studio_samples import wav
+from studio_harness import wav
 
 
 class SpeechRunner:
@@ -33,7 +33,7 @@ def setup_runtime(tmp_path):
 
 
 def add_sample(runtime, word, near=False):
-    rec = runtime.samples.ingest('fixture', DiagnosticClip('clip', phrase='Hey Cedar', engine='mww', near_miss=near), io.BytesIO(wav()), word.id)
+    runtime.samples.ingest('fixture', DiagnosticClip('clip', phrase='Hey Cedar', engine='mww', near_miss=near), io.BytesIO(wav()), word.id)
     return runtime.samples.queue(word.id, SampleQuery()).items[0]
 
 
@@ -70,8 +70,8 @@ def test_manual_revision_wins(tmp_path):
 def test_collection_followup_recovers_commit_callback_gap(tmp_path):
     runtime, word, runner = setup_runtime(tmp_path)
     try:
-        sample = add_sample(runtime, word)
-        job = runtime.jobs.enqueue('scrape', word.id, {})
+        add_sample(runtime, word)
+        runtime.jobs.enqueue('scrape', word.id, {})
         claimed = runtime.jobs.claim('collection', runtime.clock(), kinds={'scrape'})
         runtime.jobs.finish(claimed.id, {'run_id': 'fixture-run', 'new': 1, 'new_mapped': 1, 'status': 'partial'})
         runtime.automation.reconcile()

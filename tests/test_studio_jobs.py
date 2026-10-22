@@ -5,13 +5,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from studio.db import Store
 from studio.jobs import JobQueue, WorkerPool, ChildGroups, ProcessRunner, JobContext
 from studio.models import Conflict, ValidationError
 from studio.runtime import StudioRuntime
 from studio.workspaces import WorkspaceService
+from studio_harness import api_client
 
 
 class FakeGroups:
@@ -544,27 +543,21 @@ class ChildGroupTests(unittest.TestCase):
 
 class JobBoundaryTests(unittest.TestCase):
     def test_health_before_startup_does_not_initialize_storage_or_claim_readiness(self):
-        from studio.api import create_router
         with tempfile.TemporaryDirectory() as root:
             runtime = StudioRuntime(Path(root))
-            app = FastAPI()
-            app.include_router(create_router(runtime))
-            with TestClient(app), patch.object(Store, 'open', side_effect=AssertionError('Unexpected DB access')):
+            with api_client(runtime), patch.object(Store, 'open', side_effect=AssertionError('Unexpected DB access')):
                 self.assertEqual(asdict(runtime.health()), {'workers_started': False, 'degraded': False, 'loops': []})
                 self.assertFalse((Path(root) / 'studio').exists())
 
     def test_health_route_remains_readable_during_sql_failure_and_exposes_recovery(self):
         import sqlite3
         from datetime import timedelta
-        from studio.api import create_router
         with tempfile.TemporaryDirectory() as root:
             now = datetime(2026, 1, 1, tzinfo=timezone.utc)
             runtime = StudioRuntime(Path(root), clock=lambda: now)
-            app = FastAPI()
-            app.include_router(create_router(runtime))
             try:
                 pool = runtime.workers
-                with TestClient(app):
+                with api_client(runtime):
                     # Run one deterministic failed iteration, without real threads or waits.
                     with patch.object(runtime._store, 'transaction', side_effect=sqlite3.OperationalError('Bearer secret-sql')), \
                          patch.object(pool.stop_event, 'wait', side_effect=lambda delay: pool.stop_event.set()):
@@ -589,13 +582,10 @@ class JobBoundaryTests(unittest.TestCase):
                 runtime.shutdown()
 
     def test_runtime_and_http_job_schedule_boundaries(self):
-        from studio.api import create_router
         with tempfile.TemporaryDirectory() as root:
             runtime = StudioRuntime(Path(root))
-            app = FastAPI()
-            app.include_router(create_router(runtime))
             try:
-                with TestClient(app) as client:
+                with api_client(runtime) as client:
                     self.assertIsNotNone(runtime.schedules.save('scrape', '*/5 * * * *', 'UTC', True).next_run_at)
                     job_id = runtime.jobs.enqueue('scrape', None, {'device_ids': []}).id
                     self.assertNotIn('child', client.get(f'/api/studio/jobs/{job_id}').json())

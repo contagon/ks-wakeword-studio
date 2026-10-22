@@ -1,132 +1,34 @@
 """Loopback-only Studio workflow: no LAN, CUDA, or /data access."""
 from __future__ import annotations
 
-import base64
-import hashlib
 import io
-import json
 import tempfile
-import threading
 import unittest
-import wave
 import zipfile
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
-from studio.api import create_router
 from studio.runtime import StudioRuntime
-from studio_harness import FixtureOnlyClient, StubGpuRunner
+from kiosk_fixture import PASSWORD, StatefulKiosk, sha
+from studio_harness import FixtureOnlyClient, StubGpuRunner, api_client
 from studio.models import Device, RemoteRejected
 
-TOKEN = "fixture-admin-token"
-PASSWORD = "fixture-admin-password"
 
 
-def wav_bytes(seed: int = 1) -> bytes:
-    output = io.BytesIO()
-    with wave.open(output, "wb") as file:
-        file.setnchannels(1)
-        file.setsampwidth(2)
-        file.setframerate(16000)
-        file.writeframes((seed.to_bytes(2, "little", signed=True)) * 3200)
-    return output.getvalue()
-
-
-def sha(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-class FixtureKiosk:
-    """Minimal real HTTP kiosk protocol fixture; it binds loopback only."""
-
-    def __init__(self, kiosk_id: str, *, leader: bool, follower: "FixtureKiosk | None" = None):
-        self.kiosk_id, self.leader, self.follower = kiosk_id, leader, follower
-        self.requests: list[tuple[str, bytes]] = []
-        self.files: dict[str, bytes] = {}
-        self.staged: dict[str, bytes] = {}
-        self.slots = ["fixture-selected-a", "fixture-selected-b"]
-        self.audio = wav_bytes(1)
-        self.clip_id = 'clip-1'
-        owner = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *_args):
-                pass
-
-            def do_POST(self):
-                body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-                owner.requests.append((self.path, body))
-                login = self.path == "/api/login" and json.loads(body) == {"password": PASSWORD, "ttl_days": 3650}
-                if not login and self.headers.get("Authorization") != f"Bearer {TOKEN}":
-                    self.send_response(401); self.end_headers(); return
-                command = self.path.rsplit("/", 1)[-1]
-                if login:
-                    payload = {"token": TOKEN}
-                elif self.path.startswith("/api/voice/wake-models/upload?name="):
-                    owner.staged[self.path.split("=", 1)[1]] = body
-                    payload = {"ok": True, "data": {}}
-                elif command == "fleetIdentity":
-                    payload = {"ok": True, "data": {"id": owner.kiosk_id, "leader": owner.leader,
-                                                      "follows": None if owner.leader else "fixture-leader"}}
-                elif command == "fleetStatus":
-                    followers = []
-                    if owner.follower is not None:
-                        followers = [{"id": owner.follower.kiosk_id, "address": "127.0.0.1",
-                                      "port": owner.follower.port, "profile": "voice", "phase": "synced"}]
-                    payload = {"ok": True, "data": {"self": {"id": owner.kiosk_id}, "leader": True,
-                        "following": None, "profiles": [{"id": "voice", "categories": ["Voice Satellite"]}],
-                        "followers": followers}}
-                elif command == "getWakeWordActivations":
-                    payload = {"ok": True, "data": {"enabled": True, "activations": [{"id": owner.clip_id,
-                        "at": "2026-10-18T00:00:00+00:00", "wakeWord": "Hello robot", "engine": "mww"}], "nearMisses": []}}
-                elif command == "getWakeWordActivationAudio":
-                    payload = {"ok": True, "data": {"mimeType": "audio/wav", "base64": base64.b64encode(owner.audio).decode()}}
-                elif command == "commitCustomWakeModels":
-                    staged = dict(owner.staged); owner.staged.clear()
-                    for name, value in staged.items():
-                        engine = "microwakeword" if name.endswith((".json", ".tflite")) else "openwakeword"
-                        owner.files[f"{engine}/{name}"] = value
-                    ids = sorted({name.rsplit(".", 1)[0] for name in staged})
-                    payload = {"ok": True, "data": {"added": [{"engine": "microwakeword", "id": name} for name in ids], "rejected": []}}
-                elif command == "customWakeModelsManifest":
-                    payload = {"ok": True, "data": {"files": {name: sha(value) for name, value in owner.files.items()}}}
-                elif command == "clearWakeWordModels":
-                    payload = {"ok": True, "data": {"removed": 0, "bytesFreed": 0, "restarted": True}}
-                else:
-                    self.send_response(404); self.end_headers(); return
-                encoded = json.dumps(payload).encode()
-                self.send_response(200); self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(encoded))); self.end_headers(); self.wfile.write(encoded)
-
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.port = self.server.server_port
-        self.url = f"http://127.0.0.1:{self.port}"
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-
-    def close(self):
-        self.server.shutdown(); self.server.server_close(); self.thread.join(timeout=5)
-
-    def command_count(self, name: str) -> int:
-        return sum(path.rsplit("/", 1)[-1].split("?", 1)[0] == name for path, _ in self.requests)
 
 
 class StudioWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.now = datetime(2026, 10, 18, tzinfo=timezone.utc)
-        self.follower = FixtureKiosk("fixture-follower", leader=False)
-        self.leader = FixtureKiosk("fixture-leader", leader=True, follower=self.follower)
+        self.follower = StatefulKiosk("fixture-follower", leader=False)
+        self.leader = StatefulKiosk("fixture-leader", leader=True, follower=self.follower)
         from studio_harness import augmentation_fixture
         augmentation_fixture(Path(self.temp.name))
         self.runtime = StudioRuntime(Path(self.temp.name), runner=StubGpuRunner(), clock=lambda: self.now)
         self.runtime.devices.client = FixtureOnlyClient(self.runtime.devices._token, [self.leader.url, self.follower.url])
-        self.app = FastAPI(); self.app.include_router(create_router(self.runtime))
-        self.client = TestClient(self.app)
+        self.client = api_client(self.runtime)
 
     def tearDown(self):
         self.client.close(); self.runtime.shutdown(); self.leader.close(); self.follower.close(); self.temp.cleanup()

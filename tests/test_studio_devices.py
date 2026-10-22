@@ -1,6 +1,5 @@
 import io
 import json
-import os
 import sqlite3
 import tempfile
 import unittest
@@ -8,14 +7,12 @@ from unittest.mock import patch
 from dataclasses import asdict
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from kiosk_fixture import KioskServer, PASSWORD, TOKEN
-from studio.api import create_router
 from studio.db import Store
 from studio.devices import DeviceService
 from studio.models import Conflict, CredentialsRequired, IdentityMismatch, RemoteRejected, NotFound, ValidationError
 from studio.runtime import StudioRuntime
+from studio_harness import api_client
 
 
 class DeviceTests(unittest.TestCase):
@@ -119,9 +116,7 @@ class DeviceTests(unittest.TestCase):
         device = self.service.add(self.server.url, TOKEN, 'leader')
         runtime = StudioRuntime(self.root)
         self.addCleanup(runtime.shutdown)
-        app = FastAPI()
-        app.include_router(create_router(runtime))
-        with TestClient(app) as client:
+        with api_client(runtime) as client:
             path = f'/api/studio/devices/{device.id}'
             self.assertEqual(client.patch(path, json={'url': 'http://10.8.0.9:2324'}).status_code, 200)
             self.assertEqual(client.patch(path, json={'url': 'http://host', 'role': 'standalone'}).status_code, 422)
@@ -277,9 +272,7 @@ class DeviceTests(unittest.TestCase):
             db.execute("UPDATE devices SET active=0, credential_ref=NULL WHERE id=?", (device.id,))
         runtime = StudioRuntime(self.root)
         self.addCleanup(runtime.shutdown)
-        app = FastAPI()
-        app.include_router(create_router(runtime))
-        with TestClient(app) as client:
+        with api_client(runtime) as client:
             path = f"/api/studio/devices/{device.id}/credentials"
             self.server.identity["data"]["id"] = "different-kiosk"
             response = client.post(path, json={"password": PASSWORD})
@@ -364,9 +357,7 @@ class DeviceTests(unittest.TestCase):
     def test_http_registry_routes_and_sanitized_validation_remote_errors(self):
         runtime = StudioRuntime(self.root)
         self.addCleanup(runtime.shutdown)
-        app = FastAPI()
-        app.include_router(create_router(runtime))
-        with TestClient(app) as client:
+        with api_client(runtime) as client:
             response = client.post("/api/studio/devices", json={"url": self.server.url, "password": PASSWORD, "role": "leader"})
             self.assertEqual(response.status_code, 201)
             device_id = response.json()["id"]

@@ -5,13 +5,11 @@ import time
 import unittest
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from kiosk_fixture import KioskServer, PASSWORD, TOKEN
-from studio.api import create_router
 from studio.kiosk import KioskClient
 from studio.models import CredentialsRequired, Device, RemoteRejected, RemoteUnavailable, ValidationError
 from studio.runtime import StudioRuntime
+from studio_harness import api_client
 
 
 class LoginTests(unittest.TestCase):
@@ -67,9 +65,7 @@ class LoginTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             runtime = StudioRuntime(Path(root))
             self.addCleanup(runtime.shutdown)
-            app = FastAPI()
-            app.include_router(create_router(runtime))
-            with TestClient(app) as api:
+            with api_client(runtime) as api:
                 payload = {"url": self.server.url, "password": PASSWORD, "role": "leader"}
                 created = api.post("/api/studio/devices", json=payload)
                 self.assertEqual(created.status_code, 201, created.text)

@@ -3,14 +3,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from studio.api import create_router
 from studio.db import Store
 from studio.models import Conflict, NotFound, ValidationError, WakewordUpdate
 from studio.runtime import StudioRuntime
 from studio.workspaces import WorkspaceService
+from studio_harness import api_client
 
 
 class WorkspaceTests(unittest.TestCase):
@@ -117,9 +116,7 @@ class WorkspaceAPITests(unittest.TestCase):
         self.root = Path(self.temp.name) / "data"
         self.runtime = StudioRuntime(self.root)
         self.addCleanup(self.runtime.shutdown)
-        app = FastAPI()
-        app.include_router(create_router(self.runtime))
-        self.client = TestClient(app)
+        self.client = api_client(self.runtime)
 
     def test_runtime_is_lazy_idempotent_and_restartable(self):
         self.assertFalse(self.root.exists())

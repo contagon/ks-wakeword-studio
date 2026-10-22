@@ -3,9 +3,7 @@ import io
 import pytest
 
 from studio.runtime import StudioRuntime
-from studio_harness import augmentation_fixture
-from test_studio_deployment import VersionedTrainingRunner
-from test_studio_generation import wav
+from studio_harness import VersionedTrainingRunner, augmentation_fixture, wav
 
 
 @pytest.fixture
@@ -14,7 +12,7 @@ def prepared(tmp_path):
     runtime = StudioRuntime(tmp_path, runner=VersionedTrainingRunner())
     word = runtime.workspaces.create('Hello robot', 'en', 'hello_robot')
     runtime.datasets.select(word.id, [])
-    runtime.samples.import_audio(word.id, 'positive', io.BytesIO(wav(1)))
+    runtime.samples.import_audio(word.id, 'positive', io.BytesIO(wav(1, 0.1)))
     yield runtime, word
     runtime.shutdown()
 
@@ -40,7 +38,7 @@ def test_training_archives_without_publication_by_default(prepared):
 
 def test_after_training_opt_in_only_new_versions(prepared):
     runtime, word = prepared
-    old = train(runtime, word)
+    train(runtime, word)
     settings = runtime.automation.get(word.id).settings
     runtime.automation.save(word.id, replace(settings, deployment_policy=replace(settings.deployment_policy, after_training=True)))
     runtime.deployment.reconcile()

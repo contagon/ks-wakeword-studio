@@ -1,5 +1,4 @@
 import json
-import io
 import tempfile
 import unittest
 from dataclasses import asdict, replace
@@ -7,10 +6,10 @@ from pathlib import Path
 
 from studio.models import Conflict, GenerationRecipe, ValidationError
 from studio.runtime import StudioRuntime
-from tests.test_studio_generation import FixtureRunner, wav
+from studio_harness import GenerationRunner, api_client, wav
 
 
-class ReferenceRunner(FixtureRunner):
+class ReferenceRunner(GenerationRunner):
     bad_parent = False
     family_conflict = False
 
@@ -24,7 +23,7 @@ class ReferenceRunner(FixtureRunner):
         output = Path(options['--output-dir']); output.mkdir(parents=True)
         parents = {}
         for index in range(int(options['--samples'])):
-            (output / f'{index}.wav').write_bytes(wav(2 if self.family_conflict else index + 100))
+            (output / f'{index}.wav').write_bytes(wav(2 if self.family_conflict else index + 100, 0.1))
             parents[f'{index}.wav'] = '0' * 32 if self.bad_parent else rows[index % len(rows)]['audio_id']
         (output / '.generation_manifest.json').write_text(json.dumps({'source_audio_ids': parents}))
         return 0
@@ -32,11 +31,7 @@ class ReferenceRunner(FixtureRunner):
 
 class SubmissionTests(unittest.TestCase):
     def api(self):
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-        from studio.api import create_router
-        app = FastAPI(); app.include_router(create_router(self.runtime))
-        return TestClient(app)
+        return api_client(self.runtime)
 
     def test_submission_http_contract_is_per_provider(self):
         with self.api() as client:
@@ -68,7 +63,7 @@ class SubmissionTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        self.runner = FixtureRunner()
+        self.runner = GenerationRunner()
         self.runtime = StudioRuntime(self.root, runner=self.runner)
         self.word = self.runtime.workspaces.create('Hello robot', 'en', 'hello_robot')
         self.runtime.datasets.select(self.word.id, [])
@@ -206,7 +201,7 @@ class SubmissionTests(unittest.TestCase):
                 self.assertEqual(row['parent_id'], self.runner.references[index]['audio_id'])
                 self.assertEqual(row['family_id'], self.runner.references[index]['family_id'])
         self.assertEqual(self.service.selection(self.word.id), [])
-        from tests.studio_harness import augmentation_fixture
+        from studio_harness import augmentation_fixture
         augmentation_fixture(self.root)
         self.service.select_batches(self.word.id, [sources[0], job.id])
         from uuid import uuid4
@@ -269,7 +264,7 @@ class SubmissionTests(unittest.TestCase):
         self.runtime.workers.run_once('gpu')
         self.service.delete_batch(self.word.id, source)
         for audio in original.audio:
-            self.assertEqual(self.runtime.blobs.read(audio.normalized_hash), wav(original.audio.index(audio) + 1))
+            self.assertEqual(self.runtime.blobs.read(audio.normalized_hash), wav(original.audio.index(audio) + 1, 0.1))
         self.service.delete_batch(self.word.id, result.jobs[0].id)
         with self.service.store.transaction() as db:
             self.assertEqual(db.execute('SELECT count(*) FROM audio_records').fetchone()[0], 0)
@@ -281,7 +276,7 @@ class SubmissionTests(unittest.TestCase):
         preview = self.service.enqueue_preview(self.word.id, recipe)
         self.runtime.workers.run_once('gpu')
         self.assertEqual(self.runtime.jobs.get(preview.id).status, 'complete')
-        self.assertEqual(self.service.preview_audio(self.word.id, preview.id), wav(100))
+        self.assertEqual(self.service.preview_audio(self.word.id, preview.id), wav(100, 0.1))
         self.assertEqual(self.service.list(self.word.id).total, 1)
         with self.service.store.transaction() as db:
             self.assertEqual(db.execute('SELECT count(*) FROM audio_records').fetchone()[0], 2)

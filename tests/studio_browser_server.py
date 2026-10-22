@@ -16,9 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from studio.datasets import DatasetService
 from studio.runtime import StudioRuntime
-from studio_harness import FixtureOnlyClient, StubGpuRunner, augmentation_fixture
-from test_studio_workflow import FixtureKiosk, PASSWORD
-from test_studio_workflow import wav_bytes
+from studio_harness import FixtureOnlyClient, StubGpuRunner, augmentation_fixture, wav
+from kiosk_fixture import PASSWORD, StatefulKiosk
 
 
 class BrowserRuntime(StudioRuntime):
@@ -35,8 +34,8 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix='studio-browser-') as directory:
         os.environ['DATA_DIR'] = directory
-        follower = FixtureKiosk('fixture-follower', leader=False)
-        leader = FixtureKiosk('fixture-leader', leader=True, follower=follower)
+        follower = StatefulKiosk('fixture-follower', leader=False)
+        leader = StatefulKiosk('fixture-leader', leader=True, follower=follower)
         augmentation_fixture(Path(directory))
         runtime = BrowserRuntime(Path(directory), runner=StubGpuRunner())
         runtime.startup()
@@ -65,7 +64,7 @@ def main():
         def new_clips():
             for device in (leader, follower):
                 device.clip_id += '-new'
-                device.audio = wav_bytes(50)
+                device.audio = wav(50, 0.2)
             return {'ok': True}
 
         try:

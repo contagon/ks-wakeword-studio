@@ -7,24 +7,14 @@ import wave
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
-from studio.api import create_router
 from studio.db import Store
 from studio.models import Conflict, DiagnosticClip, NotFound, SampleQuery, ValidationError
 from studio.runtime import StudioRuntime
 from studio.samples import SampleService
 from studio.storage import BlobStore
 from studio.workspaces import WorkspaceService
-
-
-def wav(value=200, rate=16000, channels=1):
-    output = io.BytesIO()
-    with wave.open(output, 'wb') as stream:
-        stream.setparams((channels, 2, rate, 0, 'NONE', 'not compressed'))
-        stream.writeframes(value.to_bytes(2, 'little', signed=True) * rate * channels)
-    return output.getvalue()
+from studio_harness import api_client, wav
 
 
 class SampleTests(unittest.TestCase):
@@ -239,9 +229,7 @@ class SampleAPITests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.runtime = StudioRuntime(Path(self.temp.name))
         self.addCleanup(self.runtime.shutdown)
-        app = FastAPI()
-        app.include_router(create_router(self.runtime))
-        self.client = TestClient(app)
+        self.client = api_client(self.runtime)
         self.word = self.runtime.workspaces.create('Hello', 'en', 'hello')
         self.other = self.runtime.workspaces.create('Other', 'en', 'other')
         self.base = f'/api/studio/wakewords/{self.word.id}'

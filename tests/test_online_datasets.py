@@ -9,12 +9,9 @@ import threading
 from unittest.mock import patch
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from studio.api import create_router
 from studio.jobs import ChildGroups
 from studio.runtime import StudioRuntime
-from studio_harness import StubGpuRunner, augmentation_fixture
+from studio_harness import api_client, augmentation_fixture, wav
 
 
 class AugmentationRunner:
@@ -34,7 +31,7 @@ class AugmentationRunner:
         if self.mode == 'symlink':
             (root / 'outside.wav').symlink_to('/etc/passwd')
         elif self.mode != 'empty':
-            (root / 'fixture.wav').write_bytes(StubGpuRunner._wav())
+            (root / 'fixture.wav').write_bytes(wav(1, 0.2))
         if self.mode != 'incomplete':
             (root.parent.parent / 'augmentation-complete.json').write_text(json.dumps({'schema_version': 1, 'corpus': options['--corpus']}))
 
@@ -48,9 +45,7 @@ class OnlineDatasetTests(unittest.TestCase):
         self.runtime = StudioRuntime(self.root, runner=self.runner)
         self.addCleanup(self.runtime.shutdown)
         self.word = self.runtime.workspaces.create('Hello', 'en', 'hello')
-        app = FastAPI()
-        app.include_router(create_router(self.runtime))
-        self.client = TestClient(app)
+        self.client = api_client(self.runtime)
 
     def test_setup_bridge_reuses_shared_environment_and_sanitizes_cuda_paths(self):
         spec = importlib.util.spec_from_file_location('setup_augmentation', 'cli/setup_augmentation.py')
@@ -152,7 +147,7 @@ class OnlineDatasetTests(unittest.TestCase):
 
     def test_truncated_legacy_wav_is_not_ready(self):
         augmentation_fixture(self.root)
-        (self.root / 'training_datasets/mit_rirs_16k/fixture.wav').write_bytes(StubGpuRunner._wav()[:-100])
+        (self.root / 'training_datasets/mit_rirs_16k/fixture.wav').write_bytes(wav(1, 0.2)[:-100])
         self.assertFalse(self.runtime.augmentation.catalog()['ready'])
 
     def test_catalog_get_is_read_only_and_training_rejects_missing_corpora(self):
@@ -181,10 +176,10 @@ class OnlineDatasetTests(unittest.TestCase):
         self.runtime.workers.run_once('download')
         self.assertEqual(self.runtime.jobs.get(first.id).status, 'complete')
         target = self.root / 'training_datasets/mit_rirs_16k/fixture.wav'
-        self.assertEqual(target.read_bytes(), StubGpuRunner._wav())
+        self.assertEqual(target.read_bytes(), wav(1, 0.2))
         row = service.catalog()['items'][0]
         self.assertEqual(row['status'], 'installed')
-        self.assertEqual(row['installed_bytes'], len(StubGpuRunner._wav()))
+        self.assertEqual(row['installed_bytes'], len(wav(1, 0.2)))
         self.assertEqual(row['file_count'], 1)
         self.assertIn('fingerprint', self.runtime.jobs.get(first.id).result)
         self.assertEqual(self.runtime.datasets.list(self.word.id).total, 4)

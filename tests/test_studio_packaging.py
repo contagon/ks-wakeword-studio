@@ -1,7 +1,6 @@
 """Check both image manifests ship the studio code and SQL resource together."""
 
 import shlex
-import os
 import shutil
 import subprocess
 import sys
@@ -74,6 +73,5 @@ class StudioPackagingTests(unittest.TestCase):
                     "runtime.shutdown()",
                 ]), str(package.parent), str(image / "data")],
                 cwd=image, capture_output=True, text=True, timeout=30,
-                env=dict(os.environ, STUDIO_TEST_MODE='1', TRAINER_DEMO_MODE='1', STUDIO_STUB_GPU='1'),
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

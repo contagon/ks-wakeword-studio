@@ -1,13 +1,10 @@
-from dataclasses import asdict, replace
+from dataclasses import replace
 
 import pytest
 
-from studio.db import Store
 from studio.models import NotFound, ValidationError
 from studio.runtime import StudioRuntime
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from studio.api import create_router
+from studio_harness import api_client
 
 
 def test_new_workspace_automation_defaults(tmp_path):
@@ -115,9 +112,7 @@ def test_automation_api_roundtrip_and_strict_nested_validation(tmp_path):
     runtime = StudioRuntime(tmp_path)
     try:
         word = runtime.workspaces.create('Cedar', 'en')
-        app = FastAPI()
-        app.include_router(create_router(runtime))
-        with TestClient(app) as api:
+        with api_client(runtime) as api:
             path = f'/api/studio/wakewords/{word.id}/automation'
             response = api.get(path)
             assert response.status_code == 200

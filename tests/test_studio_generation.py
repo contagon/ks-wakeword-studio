@@ -5,54 +5,16 @@ import subprocess
 import sqlite3
 import tempfile
 import unittest
-import wave
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
-from studio.generation import GenerationService
-from studio.api import create_router
 from studio.models import Conflict, GenerationRecipe, NotFound, ValidationError, WakewordUpdate
 from studio.runtime import StudioRuntime
-
-
-def wav(value=1):
-    stream = io.BytesIO()
-    with wave.open(stream, 'wb') as output:
-        output.setparams((1, 2, 16000, 0, 'NONE', 'not compressed'))
-        output.writeframes(value.to_bytes(2, 'little') * 1600)
-    return stream.getvalue()
-
-
-class FixtureRunner:
-    def __init__(self):
-        self.calls = []
-        self.mode = 'valid'
-        self.hook = None
-
-    def run(self, context, argv, *, cwd=None):
-        self.calls.append((context.job.id, argv, cwd))
-        if self.hook:
-            self.hook(context)
-        options = dict(part.split('=', 1) for part in argv if part.startswith('--') and '=' in part)
-        output = Path(options['--output-dir'])
-        output.mkdir(parents=True)
-        count = int(options['--samples'])
-        if self.mode == 'short':
-            count -= 1
-        if self.mode == 'extra':
-            count += 1
-        for index in range(count):
-            (output / f'{index}.wav').write_bytes(b'broken' if self.mode == 'invalid' else wav(index + 1))
-        if self.mode == 'symlink':
-            (output / '0.wav').unlink()
-            (output / '0.wav').symlink_to(output / '1.wav')
-        return 0
+from studio_harness import GenerationRunner, api_client, wav
 
 
 class GenerationTests(unittest.TestCase):
@@ -81,7 +43,7 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(self.service.selection(self.word.id), [])
         self.assertEqual(self.runtime.training.counts(self.word.id)['artificial'], 0)
         self.assertEqual(self.runtime.jobs.get(job.id).status, 'complete')
-        self.assertEqual(self.runtime.blobs.read(retained.normalized_hash), wav())
+        self.assertEqual(self.runtime.blobs.read(retained.normalized_hash), wav(1, 0.1))
         self.assertFalse((self.service.store.root / 'jobs' / job.id / 'generation').exists())
         with self.service.store.transaction() as db:
             self.assertEqual(db.execute('SELECT manifest FROM training_runs WHERE id=?', ('history',)).fetchone()[0], json.dumps(manifest))
@@ -90,8 +52,7 @@ class GenerationTests(unittest.TestCase):
 
     def test_delete_batch_checks_workspace_and_active_jobs(self):
         job, batch = self.generate()
-        app = FastAPI(); app.include_router(create_router(self.runtime))
-        with TestClient(app) as client:
+        with api_client(self.runtime) as client:
             path = f'/api/studio/wakewords/{self.word.id}/generation/batches/{batch.id}'
             self.assertEqual(client.delete(path.replace(self.word.id, self.other.id)).status_code, 404)
             pending = self.runtime.jobs.enqueue('train', self.word.id, {})
@@ -101,14 +62,14 @@ class GenerationTests(unittest.TestCase):
             self.assertEqual(client.delete(path).status_code, 404)
 
     def test_delete_batch_cleanup_recovers_after_crash_and_preserves_shared_blobs(self):
-        imported = self.runtime.samples.import_audio(self.other.id, 'positive', io.BytesIO(wav()))
+        imported = self.runtime.samples.import_audio(self.other.id, 'positive', io.BytesIO(wav(1, 0.1)))
         job, batch = self.generate()
         with patch('studio.deletion._finish_batch_cleanup', side_effect=OSError('fixture crash')):
             with self.assertRaises(OSError):
                 self.service.delete_batch(self.word.id, batch.id)
         self.runtime.shutdown()
         self.assertEqual(self.runtime.generation.list(self.word.id).total, 0)
-        self.assertEqual(self.runtime.blobs.read(imported.normalized_hash), wav())
+        self.assertEqual(self.runtime.blobs.read(imported.normalized_hash), wav(1, 0.1))
         self.assertFalse((self.runtime.generation.store.root / 'jobs' / job.id / 'generation').exists())
 
     def test_generation_reports_incremental_progress(self):
@@ -120,9 +81,7 @@ class GenerationTests(unittest.TestCase):
         self.assertIn('complete', log)
 
     def test_defaults_and_visible_missing_piper(self):
-        app = FastAPI()
-        app.include_router(create_router(self.runtime))
-        with TestClient(app) as api:
+        with api_client(self.runtime) as api:
             defaults = api.get('/api/studio/generation/defaults')
             self.assertEqual(defaults.status_code, 200)
             self.assertEqual(defaults.json(), {'samples': 50000, 'batch_size': 100})
@@ -135,7 +94,7 @@ class GenerationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        self.runner = FixtureRunner()
+        self.runner = GenerationRunner()
         self.runtime = StudioRuntime(self.root, runner=self.runner)
         self.word = self.runtime.workspaces.create('Hello robot', 'en', 'hello_robot')
         self.other = self.runtime.workspaces.create('Other robot', 'en', 'other_robot')
@@ -174,11 +133,8 @@ class GenerationTests(unittest.TestCase):
         self.assertIn('--engines=qwen3,moss', self.runner.calls[-1][1])
 
     def test_generation_admits_submitted_recipe_atomically_instead_of_rereading_another_tabs_settings(self):
-        from studio.api import create_router
-        app = FastAPI()
-        app.include_router(create_router(self.runtime))
         submitted = replace(self.recipe, samples=3, engines=['qwen3'])
-        with TestClient(app) as client:
+        with api_client(self.runtime) as client:
             response = client.post(f'/api/studio/wakewords/{self.word.id}/generation/submissions', json=asdict(submitted))
         self.assertEqual(response.status_code, 201, response.text)
         [job] = response.json()['jobs']
@@ -200,7 +156,7 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(job.kind, 'preview')
         self.assertTrue(self.runtime.workers.run_once('gpu'))
         self.assertEqual(self.runtime.jobs.get(job.id).status, 'complete')
-        self.assertEqual(self.service.preview_audio(self.word.id, job.id), wav())
+        self.assertEqual(self.service.preview_audio(self.word.id, job.id), wav(1, 0.1))
         self.assertEqual(self.service.list(self.word.id).total, 0)
         self.assertEqual(self.service.get_recipe(self.word.id), self.recipe)
         self.assertIn('--samples=1', self.runner.calls[-1][1])
@@ -218,10 +174,7 @@ class GenerationTests(unittest.TestCase):
             self.service.preview_audio(self.word.id, job.id)
 
     def test_preview_api_uses_workspace_ownership_and_returns_wav_only_after_completion(self):
-        from studio.api import create_router
-        app = FastAPI()
-        app.include_router(create_router(self.runtime))
-        client = TestClient(app)
+        client = api_client(self.runtime)
         base = f'/api/studio/wakewords/{self.word.id}/generation/previews'
         response = client.post(base, json=asdict(replace(self.recipe, engines=['qwen3'])))
         self.assertEqual(response.status_code, 201, response.text)
@@ -231,7 +184,7 @@ class GenerationTests(unittest.TestCase):
         response = client.get(f'{base}/{job_id}/audio')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers['content-type'], 'audio/wav')
-        self.assertEqual(response.content, wav())
+        self.assertEqual(response.content, wav(1, 0.1))
         self.assertEqual(client.get(f'/api/studio/wakewords/{self.other.id}/generation/previews/{job_id}/audio').status_code, 404)
 
     def test_preview_invalid_audio_fails_without_retaining_training_data(self):
@@ -244,7 +197,7 @@ class GenerationTests(unittest.TestCase):
             self.service.preview_audio(self.word.id, job.id)
 
     def test_batch_blob_publication_and_references_are_atomic_against_workspace_gc(self):
-        self.runtime.samples.import_audio(self.other.id, 'positive', io.BytesIO(wav()))
+        self.runtime.samples.import_audio(self.other.id, 'positive', io.BytesIO(wav(1, 0.1)))
         job = self.service.enqueue(self.word.id)
         prepared, release, deleted = threading.Event(), threading.Event(), threading.Event()
         put = self.runtime.blobs.put
@@ -273,17 +226,12 @@ class GenerationTests(unittest.TestCase):
                 deletion.result(timeout=3)
         self.assertEqual(self.runtime.jobs.get(job.id).status, 'complete')
         batch = self.service.get_batch(self.word.id, job.id)
-        self.assertEqual(self.runtime.blobs.read(batch.audio[0].normalized_hash), wav())
+        self.assertEqual(self.runtime.blobs.read(batch.audio[0].normalized_hash), wav(1, 0.1))
 
     def test_selection_endpoint_includes_batches_beyond_visible_page(self):
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-        from studio.api import create_router
         ids = [self.generate()[0].id for _ in range(55)]
         self.service.select_batches(self.word.id, [ids[0], ids[-1]])
-        app = FastAPI()
-        app.include_router(create_router(self.runtime))
-        with TestClient(app) as client:
+        with api_client(self.runtime) as client:
             base = f'/api/studio/wakewords/{self.word.id}/generation'
             self.assertEqual(len(client.get(base + '/batches').json()['items']), 50)
             self.assertEqual(set(client.get(base + '/selection').json()), {ids[0], ids[-1]})
@@ -431,7 +379,7 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(len(self.service.get_batch(self.word.id, batch.id).audio), 2)
 
     def test_identical_generated_and_imported_audio_share_existing_families(self):
-        imported = self.runtime.samples.import_audio(self.other.id, 'positive', io.BytesIO(wav()))
+        imported = self.runtime.samples.import_audio(self.other.id, 'positive', io.BytesIO(wav(1, 0.1)))
         _, batch = self.generate()
         self.assertEqual(batch.audio[0].family_id, imported.family_id)
         self.assertEqual(batch.audio[0].normalized_hash, imported.normalized_hash)
@@ -475,10 +423,7 @@ class GenerationTests(unittest.TestCase):
         self.runtime.shutdown()
         self.assertEqual(self.runtime.generation.get_recipe(self.word.id), self.recipe)
         self.assertTrue(self.runtime.generation.get_batch(self.word.id, batch.id).selected)
-        from studio.api import create_router
-        app = FastAPI()
-        app.include_router(create_router(self.runtime))
-        with TestClient(app) as client:
+        with api_client(self.runtime) as client:
             base = f'/api/studio/wakewords/{self.word.id}/generation'
             self.assertEqual(client.get('/api/studio/generation/catalog').status_code, 200)
             self.assertEqual(client.get(base + '/recipe').json(), asdict(self.recipe))

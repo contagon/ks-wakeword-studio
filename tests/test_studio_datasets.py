@@ -14,6 +14,7 @@ from studio.jobs import JobQueue, WorkerPool
 from studio.models import Conflict, NotFound, ValidationError
 from studio.workspaces import WorkspaceService
 from studio.datasets import DatasetService, mww_dataset_features
+from studio_harness import api_client
 
 
 class DatasetTests(unittest.TestCase):
@@ -236,15 +237,10 @@ class DatasetTests(unittest.TestCase):
         self.assertEqual(negatives, mww_dataset_features(self.service.snapshot(self.a)))
 
     def test_api_selection_and_download_routes(self):
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-        from studio.api import create_router
         from studio.runtime import StudioRuntime
         runtime = StudioRuntime(self.root)
-        app = FastAPI()
-        app.include_router(create_router(runtime))
         try:
-            client = TestClient(app)
+            client = api_client(runtime)
             base = f'/api/studio/wakewords/{self.a}/datasets'
             self.assertEqual(client.get(base).json()['total'], 4)
             self.assertEqual(client.put(base, json={'dataset_ids': ['speech']}).status_code, 200)

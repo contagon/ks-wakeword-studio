@@ -144,6 +144,25 @@ lite.Interpreter = Interpreter
         self.assertEqual(result.returncode, 2)
         self.assertIn(b'invalid choice', result.stderr)
 
+    def test_trainer_titles_and_packages_unicode_wake_words(self):
+        script = (REPO / 'cli/wake_word_sample_trainer').read_text()
+        title = script[script.index('source "${PROGDIR}/shell.functions"'):script.index('# shellcheck source=/dev/null')]
+        derive = f'PROGDIR="{REPO}/cli"\n{title}\nprintf %s "$WAKE_WORD_TITLE"'
+        for args, expected in ((['こんにちは'], 'こんにちは'), (['hey_robot'], 'Hey Robot'), (['こんにちは', 'Hello'], 'Hello')):
+            result = subprocess.run(['bash', '-c', derive, 'trainer', *args], capture_output=True, text=True,
+                                    env={**os.environ, 'DATA_DIR': str(REPO)})
+            self.assertEqual((result.returncode, result.stdout), (0, expected), result.stderr)
+        package = script[script.index('json_path="${OUTPUT_DIR}'):script.index('echo "Name:')]
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(['bash', '-c', package], capture_output=True, text=True, env={
+                **os.environ, 'OUTPUT_DIR': directory, 'wake_word_filename': 'konnichiwa',
+                'tflite_filename': 'konnichiwa.tflite', 'calibration_path': f'{directory}/missing.json',
+                'WAKE_WORD_TITLE': 'こんにちは', 'LANGUAGE': 'ja', 'PYTHON_BIN': sys.executable})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            text = (Path(directory) / 'konnichiwa.json').read_text(encoding='utf-8')
+        self.assertIn('"wake_word": "こんにちは"', text)
+        self.assertEqual(json.loads(text)['trained_languages'], ['ja'])
+
     def test_actual_mww_naming_section_preserves_stable_hyphenated_id(self):
         script = (REPO / 'cli/wake_word_sample_trainer').read_text()
         section = script[script.index('artifact_source='):script.index('\nOUTPUT_DIR=')]

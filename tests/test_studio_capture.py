@@ -5,13 +5,10 @@ import wave
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
-from studio.api import create_router
-from studio.models import Conflict, SampleQuery, ValidationError
+from studio.models import SampleQuery, ValidationError
 from studio.runtime import StudioRuntime
-from tests.test_studio_samples import wav
+from studio_harness import api_client, wav
 
 
 class CapturePreviewTests(unittest.TestCase):
@@ -85,9 +82,7 @@ class CaptureAPITests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.runtime = StudioRuntime(Path(self.temp.name))
         self.addCleanup(self.runtime.shutdown)
-        app = FastAPI()
-        app.include_router(create_router(self.runtime))
-        self.client = TestClient(app)
+        self.client = api_client(self.runtime)
         self.word = self.runtime.workspaces.create('Hello', 'en', 'hello')
         self.base = f'/api/studio/wakewords/{self.word.id}/samples/capture'
 

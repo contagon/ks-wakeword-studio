@@ -1,42 +1,14 @@
 import io
-import json
 import tempfile
 import unittest
 from datetime import timedelta
 from dataclasses import asdict
 from pathlib import Path
-from studio.models import Conflict, WakewordUpdate
+from unittest.mock import patch
+
+from studio.models import Conflict, ValidationError, WakewordUpdate
 from studio.runtime import StudioRuntime
-from studio.training import TrainingService
-from test_studio_generation import wav
-
-
-class TrainingRunner:
-    def __init__(self):
-        self.calls, self.hook, self.mode = [], None, 'valid'
-
-    def run(self, context, argv, *, cwd=None):
-        self.calls.append(argv)
-        options = dict(a.split('=', 1) for a in argv if a.startswith('--') and '=' in a)
-        manifest = json.loads(Path(options['--input-manifest']).read_text())
-        root = Path(options['--data-dir'])
-        if self.hook:
-            self.hook(context)
-        if self.mode == 'crash':
-            raise RuntimeError('simulated worker failure')
-        out = root / 'output/fixture'
-        out.mkdir(parents=True)
-        slug = manifest['model_id']
-        if self.mode != 'missing':
-            (out / f'{slug}.tflite').write_bytes(b'\x00\x00\x00\x00TFL3fixture')
-        (out / f'{slug}.json').write_text(json.dumps({'type': 'micro', 'model': f'{slug}.tflite', 'calibration': {'recall': .8}}))
-        (out / 'logs').mkdir()
-        (out / 'logs/training.log').write_text('fixture engine log')
-        (root / 'work/trained_models').mkdir(parents=True)
-        (root / 'work/trained_models/training_parameters.yaml').write_text('features: []')
-        if self.mode != 'unvalidated':
-            (root / 'validation.json').write_text('{"microWakeWord":true}')
-        return 0
+from studio_harness import GenerationRunner, TrainingRunner, api_client, augmentation_fixture, wav
 
 
 class TrainingTests(unittest.TestCase):
@@ -58,7 +30,7 @@ class TrainingTests(unittest.TestCase):
         self.temp.cleanup()
 
     def audio(self, word=None, label='positive', n=1):
-        return self.runtime.samples.import_audio(word or self.word.id, label, io.BytesIO(wav(n)))
+        return self.runtime.samples.import_audio(word or self.word.id, label, io.BytesIO(wav(n, 0.1)))
 
     def run_job(self, word=None, trigger='manual'):
         job = self.service.enqueue(word or self.word.id, trigger)
@@ -71,8 +43,8 @@ class TrainingTests(unittest.TestCase):
         negative = self.audio(label='negative', n=2)
         self.audio(label='discarded', n=3)
         self.audio(self.other.id, n=4)
-        self.runtime.samples.ingest('device', DiagnosticClip('pending'), io.BytesIO(wav(5)), self.word.id)
-        self.runtime.samples.ingest('device', DiagnosticClip('unmapped'), io.BytesIO(wav(6)), None)
+        self.runtime.samples.ingest('device', DiagnosticClip('pending'), io.BytesIO(wav(5, 0.1)), self.word.id)
+        self.runtime.samples.ingest('device', DiagnosticClip('unmapped'), io.BytesIO(wav(6, 0.1)), None)
         deleted = self.audio(n=7)
         self.runtime.samples.delete(deleted.id, deleted.revision)
         job = self.service.enqueue(self.word.id, 'manual')
@@ -165,12 +137,7 @@ class TrainingTests(unittest.TestCase):
         self.assertIn('No usable positive', self.runtime.jobs.log_tail(job.id))
 
     def test_settings_history_http_counts(self):
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-        from studio.api import create_router
-        app = FastAPI()
-        app.include_router(create_router(self.runtime))
-        with TestClient(app) as client:
+        with api_client(self.runtime) as client:
             base = f'/api/studio/wakewords/{self.word.id}/training'
             self.assertEqual(client.put(base + '/settings', json={'training_steps': 123}).status_code, 200)
             self.assertEqual(client.get(base + '/settings').json(), {'training_steps': 123})
@@ -192,8 +159,7 @@ class TrainingTests(unittest.TestCase):
 
     def test_selected_complete_batch_is_pinned_not_regenerated(self):
         from studio.models import GenerationRecipe
-        from test_studio_generation import FixtureRunner
-        self.runtime.workers.runner = FixtureRunner()
+        self.runtime.workers.runner = GenerationRunner()
         self.runtime.generation.save_recipe(self.word.id, GenerationRecipe('en', 'mixed', 'modern', 3, 1))
         batch_job = self.runtime.generation.enqueue(self.word.id)
         self.runtime.workers.run_once('gpu')
@@ -291,10 +257,60 @@ class TrainingTests(unittest.TestCase):
 
     def test_quarantined_source_is_not_an_effective_training_input(self):
         from studio.models import DiagnosticClip, SampleQuery
-        self.runtime.samples.ingest('device', DiagnosticClip('conflicting'), io.BytesIO(wav(1)), self.word.id)
+        self.runtime.samples.ingest('device', DiagnosticClip('conflicting'), io.BytesIO(wav(1, 0.1)), self.word.id)
         sample = self.runtime.samples.list(self.word.id, SampleQuery()).items[0]
         self.runtime.samples.set_label(sample.id, 'positive', sample.revision)
-        self.runtime.samples.ingest('device', DiagnosticClip('conflicting'), io.BytesIO(wav(2)), self.word.id)
+        self.runtime.samples.ingest('device', DiagnosticClip('conflicting'), io.BytesIO(wav(2, 0.1)), self.word.id)
         manifest = self.service.snapshot(self.word.id, '4' * 32)
         self.assertEqual(manifest.audio, ())
         self.assertEqual(self.service.counts(self.word.id)['positive'], 0)
+
+
+class AugmentationTests(unittest.TestCase):
+    def test_corpus_retention_does_not_hold_metadata_write_lock(self):
+        from studio.db import Store
+        from studio import augmentation
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            augmentation_fixture(root)
+            runtime = StudioRuntime(root)
+            self.addCleanup(runtime.shutdown)
+            word = runtime.workspaces.create('Robot', 'en', 'robot')
+            runtime.datasets.select(word.id, [])
+            observer = Store.open(root)
+            self.addCleanup(observer.close)
+            original = augmentation.snapshot
+            def retain(store, selected_ids=None):
+                with observer.transaction() as db:
+                    db.execute('SELECT 1')
+                return original(store, selected_ids)
+            with patch.object(augmentation, 'snapshot', side_effect=retain):
+                self.assertEqual(len(runtime.training.snapshot(word.id, 'a' * 32).augmentation), 4)
+
+    def test_snapshot_pins_backgrounds_separately_and_replacement_changes_fingerprint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            augmentation_fixture(root)
+            runtime = StudioRuntime(root)
+            self.addCleanup(runtime.shutdown)
+            word = runtime.workspaces.create('Robot', 'en', 'robot')
+            runtime.datasets.select(word.id, [])
+            first = runtime.training.snapshot(word.id, 'a' * 32)
+            self.assertEqual(len(first.augmentation), 4)
+            self.assertEqual(first.datasets, ())
+            retained = Path(first.augmentation[0].path) / 'fixture.wav'
+            original = retained.read_bytes()
+            (root / 'training_datasets' / first.augmentation[0].id / 'fixture.wav').write_bytes(b'replaced')
+            second = runtime.training.snapshot(word.id, 'b' * 32)
+            self.assertNotEqual(first.fingerprint, second.fingerprint)
+            self.assertEqual(retained.read_bytes(), original)
+            self.assertEqual(runtime.training.get_manifest(word.id, first.run_id), first)
+
+    def test_missing_augmentation_fails_before_manifest_commit_with_setup_instructions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = StudioRuntime(Path(directory))
+            self.addCleanup(runtime.shutdown)
+            word = runtime.workspaces.create('Robot', 'en', 'robot')
+            with self.assertRaisesRegex(ValidationError, 'prepare_corpus.py --corpus=mit_rirs_16k'):
+                runtime.training.snapshot(word.id, 'a' * 32)
+            self.assertEqual(runtime.training.store._connection.execute('SELECT count(*) FROM training_runs').fetchone()[0], 0)
