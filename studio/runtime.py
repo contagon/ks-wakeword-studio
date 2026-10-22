@@ -9,11 +9,11 @@ from studio.devices import DeviceService
 from studio.storage import BlobStore
 from studio.samples import SampleService
 from studio.workspaces import WorkspaceService
-from studio.jobs import JobQueue, WorkerPool, utc_now
+from studio.jobs import JobQueue, WorkerPool
 from studio.schedules import ScheduleService
 from studio.automation import AutomationService
 from studio.classification import ClassificationService
-from studio.models import WorkerHealth
+from studio.models import WorkerHealth, utc_now
 from studio.datasets import DatasetService
 from studio.augmentation_datasets import AugmentationDatasetService
 from studio.generation import GenerationService

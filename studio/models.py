@@ -1,6 +1,7 @@
 """Shared domain records; no filesystem or network dependencies."""
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Generic, Literal, TypeVar
 
 
@@ -475,3 +476,22 @@ class Page(Generic[T]):
     total: int
     offset: int
     limit: int
+
+
+def check_page(offset, limit, message="Invalid pagination"):
+    if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
+        raise ValidationError(message)
+
+
+def utc_now():
+    return datetime.now(timezone.utc)
+
+
+def aware_utc(value):
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+        raise ValidationError('Timezone-aware time required')
+    return value.astimezone(timezone.utc)
+
+
+def iso_now(clock):
+    return aware_utc(clock()).isoformat()

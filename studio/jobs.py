@@ -18,10 +18,10 @@ import time
 import uuid
 import traceback
 from dataclasses import replace
-from datetime import datetime, timezone
 from pathlib import Path
 
-from studio.models import Conflict, Job, LoopHealth, NotFound, Page, ValidationError, WorkerHealth
+from studio.models import (Conflict, Job, LoopHealth, NotFound, Page, ValidationError, WorkerHealth,
+                           aware_utc, check_page, iso_now, utc_now)
 from studio.storage import open_directory
 from studio.errors import MESSAGES, child_error, failure_code
 from studio.diagnostics import ChildDiagnostics, retain
@@ -33,16 +33,6 @@ LOG_LIMIT = 65536
 # Bounded numeric training metrics a child may report: (label, maximum, shown as percentage).
 TRAINING_METRICS = {'loss': ('loss', 1e6, False), 'accuracy': ('accuracy', 1, True), 'recall': ('recall', 1, True),
                     'precision': ('precision', 1, True), 'false_accepts_per_hour': ('false accepts/hour', 1e9, False)}
-
-
-def utc_now():
-    return datetime.now(timezone.utc)
-
-
-def aware_utc(value):
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
-        raise ValidationError('Timezone-aware time required')
-    return value.astimezone(timezone.utc)
 
 
 def safe_json(value):
@@ -206,8 +196,7 @@ class JobQueue:
             return self._record(self._row(db, job_id))
 
     def list(self, offset=0, limit=50, *, state=None):
-        if type(offset) is not int or type(limit) is not int or offset < 0 or not 1 <= limit <= 100:
-            raise ValidationError('Invalid pagination')
+        check_page(offset, limit)
         if state not in (None, 'active', 'history'):
             raise ValidationError('Invalid job state filter')
         active = "status IN ('queued','running','cancelling')"
@@ -281,7 +270,7 @@ class JobQueue:
                     raise Conflict('Job still owns work or belongs to another worker')
                 status = 'cancelled' if row['status'] == 'cancelling' else status
                 db.execute('UPDATE studio_jobs SET status=?,result=?,finished_at=? WHERE id=?',
-                           (status, encoded, aware_utc(self.clock()).isoformat(), job_id))
+                           (status, encoded, iso_now(self.clock), job_id))
                 if status == 'complete' and row['kind'] == 'train':
                     # Durable outbox in the same transaction as success. A
                     # crashed/failed completion callback is recovered on startup.
@@ -296,7 +285,7 @@ class JobQueue:
             row = self._row(db, job_id)
             if row['status'] == 'queued':
                 db.execute("UPDATE studio_jobs SET status='cancelled',finished_at=? WHERE id=?",
-                           (aware_utc(self.clock()).isoformat(), job_id))
+                           (iso_now(self.clock), job_id))
             elif row['status'] == 'running':
                 db.execute("UPDATE studio_jobs SET status='cancelling' WHERE id=?", (job_id,))
         # Live handlers observe cancellation; a dead owner is recovered safely.
@@ -319,7 +308,7 @@ class JobQueue:
                         if row['status'] in ACTIVE and self._child_gone(row):
                             status = 'cancelled' if row['status'] == 'cancelling' else 'interrupted'
                             db.execute('UPDATE studio_jobs SET status=?,finished_at=? WHERE id=?',
-                                       (status, aware_utc(self.clock()).isoformat(), job_id))
+                                       (status, iso_now(self.clock), job_id))
                 finally:
                     os.close(fd)
 
@@ -516,7 +505,7 @@ class WorkerPool:
 
     def _record_loop_result(self, component, *, failed):
         try:
-            timestamp = aware_utc(self.clock()).isoformat()
+            timestamp = iso_now(self.clock)
         except Exception:
             # A broken injected clock must not take down error reporting too.
             timestamp = utc_now().isoformat()

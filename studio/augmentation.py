@@ -8,11 +8,21 @@ from pathlib import Path
 from uuid import uuid4
 
 from studio.models import AugmentationInput, ValidationError
-from studio.storage import ensure_directory, flock, open_directory
+from studio.storage import ensure_directory, flock, fsync_directories, open_directory
 
 
-RESOURCES = {'mit_rirs_16k': 'setup_mit_audio', 'audioset_16k': 'setup_audioset',
-             'fma_16k': 'setup_fma', 'chime_16k': 'setup_chime'}
+# Corpus id -> (setup script, display name, description, source). The id also
+# names the corpus directory and the augmenter's --<id>-dir flag.
+CATALOG = {
+    'mit_rirs_16k': ('setup_mit_audio', 'MIT room impulse responses', 'Room echoes and reverberation.',
+                     'MIT environmental impulse responses (Hugging Face mirror)'),
+    'audioset_16k': ('setup_audioset', 'AudioSet', 'Everyday environmental background sounds.',
+                     'AudioSet balanced training subset (agkphysics mirror)'),
+    'fma_16k': ('setup_fma', 'Free Music Archive', 'Music mixed behind wakeword recordings.',
+                'FMA small, with an extra-small fallback mirror'),
+    'chime_16k': ('setup_chime', 'CHiME-Home', 'Real household background recordings.',
+                  'CHiME-Home (Internet Archive mirror)'),
+}
 
 
 def tree_fingerprint(root):
@@ -34,8 +44,8 @@ def tree_fingerprint(root):
 
 
 def snapshot(store, selected_ids=None):
-    selected = list(RESOURCES) if selected_ids is None else list(selected_ids)
-    if any(name not in RESOURCES for name in selected) or len(set(selected)) != len(selected):
+    selected = list(CATALOG) if selected_ids is None else list(selected_ids)
+    if any(name not in CATALOG for name in selected) or len(set(selected)) != len(selected):
         raise ValidationError('Invalid augmentation selection')
     with flock(store.root, 'augmentation.lock'):
         return _snapshot(store, selected)
@@ -45,12 +55,12 @@ def _snapshot(store, selected):
     result = []
     parent = store.root / 'augmentation'
     ensure_directory(parent)
-    for name, setup in RESOURCES.items():
+    for name, (setup, *_) in CATALOG.items():
         if name not in selected:
             continue
-        source = store.root.parent / 'training_datasets' / name
+        source = store.data_dir / 'training_datasets' / name
         if not source.is_dir() or source.is_symlink():
-            raise ValidationError(f'Missing augmentation corpus {name}; run bash cli/{setup} --data-dir={store.root.parent} before training')
+            raise ValidationError(f'Missing augmentation corpus {name}; run bash cli/{setup} --data-dir={store.data_dir} before training')
         fingerprint = tree_fingerprint(source)
         target = parent / fingerprint
         if not target.exists():
@@ -64,9 +74,7 @@ def _snapshot(store, selected):
                         with path.open('rb') as handle:
                             os.fsync(handle.fileno())
                         path.chmod(0o400)
-                for directory in sorted([stage, *[p for p in stage.rglob('*') if p.is_dir()]], key=lambda p: len(p.parts), reverse=True):
-                    with open_directory(directory) as fd:
-                        os.fsync(fd)
+                fsync_directories(stage)
                 stage.rename(target)
                 with open_directory(parent) as fd:
                     os.fsync(fd)
@@ -81,7 +89,7 @@ def _snapshot(store, selected):
 
 def pinned_paths(manifest):
     inputs = manifest.get('augmentation')
-    if (not isinstance(inputs, list) or any(not isinstance(item, dict) or item.get('id') not in RESOURCES for item in inputs)
+    if (not isinstance(inputs, list) or any(not isinstance(item, dict) or item.get('id') not in CATALOG for item in inputs)
             or len({item['id'] for item in inputs}) != len(inputs)):
         raise ValidationError('Missing pinned augmentation inputs; create a new execution snapshot after corpus setup')
     paths = {}

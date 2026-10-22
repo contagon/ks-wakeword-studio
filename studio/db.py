@@ -20,6 +20,11 @@ class Store:
         self._lock = threading.RLock()
         self._closed = False
 
+    @property
+    def data_dir(self) -> Path:
+        """The shared DATA_DIR holding studio/, tools, caches and corpora."""
+        return self.root.parent
+
     @classmethod
     def open(cls, root: Path) -> "Store":
         studio_root = Path(os.path.abspath(root)) / "studio"

@@ -19,8 +19,8 @@ from pathlib import Path, PurePosixPath
 
 from studio.jobs import JobQueue
 from studio.models import Conflict, Dataset, DatasetInput, Job, NotFound, Page, ValidationError
-from studio.storage import ensure_directory, open_directory
-from studio.workspaces import WorkspaceService
+from studio.storage import ensure_directory, fsync_directories, open_directory
+from studio.workspaces import require_word
 
 
 MAX_EXTRACTED_BYTES = 500 * 1024**3
@@ -127,12 +127,12 @@ class DatasetService:
 
     def list(self, word_id: str, search: str = '', status: str | None = None,
              offset: int = 0, limit: int = 50) -> Page[Dataset]:
-        WorkspaceService(self.store).get(word_id)
         if (type(offset) is not int or type(limit) is not int or offset < 0 or not 1 <= limit <= 100 or
                 not isinstance(search, str) or len(search) > 200 or
                 status not in (None, 'available', 'installed', 'queued', 'running', 'failed', 'selected')):
             raise ValidationError('Invalid dataset query')
         with self.store.transaction() as db:
+            require_word(db, word_id)
             selected = self._selected(db, word_id)
             installs = {r['dataset_id']: json.loads(r['manifest_json']) for r in db.execute('SELECT * FROM studio_dataset_installations')}
             latest = {}
@@ -157,12 +157,12 @@ class DatasetService:
         return Page(result[offset:offset + limit], len(result), offset, limit)
 
     def select(self, word_id: str, dataset_ids: list[str]) -> None:
-        WorkspaceService(self.store).get(word_id)
         if not isinstance(dataset_ids, list) or any(not isinstance(key, str) for key in dataset_ids) or len(set(dataset_ids)) != len(dataset_ids):
             raise ValidationError('Invalid dataset selection')
         for key in dataset_ids:
             self._entry(key)
         with self.store.transaction() as db:
+            require_word(db, word_id)
             db.execute('DELETE FROM studio_dataset_selections WHERE word_id=?', (word_id,))
             db.executemany('INSERT INTO studio_dataset_selections VALUES (?,?)', [(word_id, key) for key in dataset_ids])
             db.execute("INSERT INTO studio_dataset_preferences VALUES (?, 'negative', ?) ON CONFLICT(word_id,kind) DO UPDATE SET dataset_ids=excluded.dataset_ids",
@@ -264,9 +264,7 @@ class DatasetService:
                     handle.write(manifest + '\n')
                     handle.flush()
                     os.fsync(handle.fileno())
-                for directory_path in sorted((p for p in stage.rglob('*') if p.is_dir()), reverse=True) + [stage]:
-                    with open_directory(directory_path) as descriptor:
-                        os.fsync(descriptor)
+                fsync_directories(stage)
                 # Publish content before committing its reference. Never replace retained versions.
                 if cancelled():
                     raise Conflict('Dataset installation cancelled')
@@ -285,8 +283,8 @@ class DatasetService:
                 raise ValidationError('Invalid dataset archive') from exc
 
     def require_installed(self, word_id: str) -> None:
-        WorkspaceService(self.store).get(word_id)
         with self.store.transaction() as db:
+            require_word(db, word_id)
             installed = {row[0] for row in db.execute('SELECT dataset_id FROM studio_dataset_installations')}
             missing = self._selected(db, word_id) - installed
         if missing:
@@ -295,9 +293,8 @@ class DatasetService:
 
     def snapshot(self, word_id: str, *, _db=None) -> list[DatasetInput]:
         from contextlib import nullcontext
-        if _db is None:
-            WorkspaceService(self.store).get(word_id)
         with (self.store.transaction() if _db is None else nullcontext(_db)) as db:
+            require_word(db, word_id)
             selected = self._selected(db, word_id)
             installs = {row['dataset_id']: row['manifest_json'] for row in db.execute('SELECT dataset_id,manifest_json FROM studio_dataset_installations')}
             result = []

@@ -5,20 +5,13 @@ import shutil
 import stat
 import sys
 import wave
-from pathlib import Path
 
-from studio.augmentation import tree_fingerprint
+from studio import REPO
+from studio.augmentation import CATALOG, tree_fingerprint
 from studio.errors import OperationError
 from studio.models import Conflict, NotFound, ValidationError
 from studio.storage import ensure_directory, flock, open_directory
-from studio.workspaces import WorkspaceService
-
-CATALOG = {
-    'mit_rirs_16k': ('MIT room impulse responses', 'Room echoes and reverberation.', 'MIT environmental impulse responses (Hugging Face mirror)'),
-    'audioset_16k': ('AudioSet', 'Everyday environmental background sounds.', 'AudioSet balanced training subset (agkphysics mirror)'),
-    'fma_16k': ('Free Music Archive', 'Music mixed behind wakeword recordings.', 'FMA small, with an extra-small fallback mirror'),
-    'chime_16k': ('CHiME-Home', 'Real household background recordings.', 'CHiME-Home (Internet Archive mirror)'),
-}
+from studio.workspaces import require_word
 
 
 def audio_metrics(root, *, validate=False, cancelled=lambda: False):
@@ -75,19 +68,19 @@ class AugmentationDatasetService:
                 if json.loads(row['payload']).get('augmentation_id') == key]
 
     def selection(self, word_id):
-        WorkspaceService(self.store).get(word_id)
         with self.store.transaction() as db:
+            require_word(db, word_id)
             row = db.execute("SELECT dataset_ids FROM studio_dataset_preferences WHERE word_id=? AND kind='augmentation'", (word_id,)).fetchone()
         return json.loads(row[0]) if row else list(CATALOG)
 
     def select(self, word_id, dataset_ids):
-        WorkspaceService(self.store).get(word_id)
         if (not isinstance(dataset_ids, list) or any(not isinstance(key, str) for key in dataset_ids)
                 or len(set(dataset_ids)) != len(dataset_ids)):
             raise ValidationError('Invalid augmentation selection')
         for key in dataset_ids:
             self._entry(key)
         with self.store.transaction() as db:
+            require_word(db, word_id)
             db.execute("INSERT INTO studio_dataset_preferences VALUES (?, 'augmentation', ?) ON CONFLICT(word_id,kind) DO UPDATE SET dataset_ids=excluded.dataset_ids",
                        (word_id, json.dumps(dataset_ids)))
 
@@ -96,11 +89,11 @@ class AugmentationDatasetService:
         items = []
         with self.store.transaction() as db:
             latest = {key: self._attempts(db, key) for key in CATALOG}
-        for key, (name, description, source) in CATALOG.items():
+        for key, (_, name, description, source) in CATALOG.items():
             job = latest[key][-1] if latest[key] else None
             size = count = None
             error_code = None
-            target = self.store.root.parent / 'training_datasets' / key
+            target = self.store.data_dir / 'training_datasets' / key
             try:
                 size, count = audio_metrics(target)
                 status = 'installed'
@@ -118,7 +111,7 @@ class AugmentationDatasetService:
                               status=status, installed_bytes=size, file_count=count, download_bytes=None,
                               job_id=job['id'] if job else None, job_created_at=job['created_at'] if job else None,
                               error_code=(error_code or result.get('error_code')) if status == 'failed' else None))
-        storage = shutil.disk_usage(self.store.root.parent)
+        storage = shutil.disk_usage(self.store.data_dir)
         return dict(items=items, ready=all(row['status'] == 'installed' for row in items if row['selected']),
                     storage_free_bytes=storage.free, storage_total_bytes=storage.total)
 
@@ -133,7 +126,7 @@ class AugmentationDatasetService:
 
     def download(self, key):
         self._entry(key)
-        target = self.store.root.parent / 'training_datasets' / key
+        target = self.store.data_dir / 'training_datasets' / key
         try:
             audio_metrics(target)
             installed = True
@@ -156,7 +149,7 @@ class AugmentationDatasetService:
         self._entry(key)
         if context.cancelled():
             return {}
-        target = self.store.root.parent / 'training_datasets' / key
+        target = self.store.data_dir / 'training_datasets' / key
         if target.exists() or target.is_symlink():
             try:
                 audio_metrics(target)
@@ -168,8 +161,8 @@ class AugmentationDatasetService:
         ensure_directory(stage)
         context.log('Preparing training dependencies, downloading and converting augmentation audio to 16 kHz. This can take a long time; detailed output is retained privately.')
         try:
-            context.run([sys.executable, str(Path(__file__).resolve().parents[1] / 'cli/setup_augmentation.py'),
-                         f'--corpus={key}', f'--data-dir={self.store.root.parent}', f'--stage-dir={stage}'], cwd=str(stage))
+            context.run([sys.executable, str(REPO / 'cli/setup_augmentation.py'),
+                         f'--corpus={key}', f'--data-dir={self.store.data_dir}', f'--stage-dir={stage}'], cwd=str(stage))
             if context.cancelled():
                 raise Conflict('Dataset preparation cancelled')
             with open_directory(stage) as directory:

@@ -134,6 +134,13 @@ def ensure_directory(path: Path) -> None:
         pass
 
 
+def fsync_directories(root: Path) -> None:
+    """Fsync root and every directory beneath it, deepest first."""
+    for path in sorted((p for p in root.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True) + [root]:
+        with open_directory(path) as fd:
+            os.fsync(fd)
+
+
 @contextmanager
 def flock(directory: Path, name: str, *, blocking: bool = True) -> Iterator[bool]:
     """Hold an exclusive flock on directory/name; yields False when non-blocking and contended."""

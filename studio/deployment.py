@@ -15,13 +15,13 @@ from pathlib import Path
 from tempfile import TemporaryFile
 from zipfile import ZipFile, ZIP_DEFLATED
 
-from studio.jobs import aware_utc, utc_now
+from studio import REPO
 from studio.legacy_training import checked_file, sha256
-from studio.models import (Conflict, CredentialsRequired, IdentityMismatch, ModelVersion,
-                           NotFound, Publication, RemoteRejected, RemoteUnavailable,
-                           ValidationError)
+from studio.models import (Conflict, CredentialsRequired, IdentityMismatch, ModelVersion, NotFound,
+                           Publication, RemoteRejected, RemoteUnavailable, ValidationError, aware_utc,
+                           iso_now, utc_now)
 from studio.storage import flock
-from studio.workspaces import WorkspaceService
+from studio.workspaces import require_word
 
 
 def publication_lock(store, name):
@@ -38,9 +38,6 @@ class DeploymentService:
 
     def __init__(self, store, devices, training, *, clock=utc_now):
         self.store, self.devices, self.training, self.clock = store, devices, training, clock
-
-    def _now(self):
-        return aware_utc(self.clock()).isoformat()
 
     def version(self, version_id, word_id=None):
         with self.store.transaction() as db:
@@ -136,7 +133,7 @@ class DeploymentService:
     def _enroll(self, db, word_id, version_id, revision):
         for row in db.execute('SELECT id FROM devices').fetchall():
             db.execute("INSERT OR IGNORE INTO publications(word_id,device_id,desired_version,revision,state,updated_at) "
-                       "VALUES (?,?,?,?,'pending',?)", (word_id, row[0], version_id, revision, self._now()))
+                       "VALUES (?,?,?,?,'pending',?)", (word_id, row[0], version_id, revision, iso_now(self.clock)))
         # Terminal observations must not outlive current registry coverage.
         # This is local reconciliation only: never probe/refresh excluded or
         # removed followers just to discover that they are no longer eligible.
@@ -154,7 +151,7 @@ class DeploymentService:
                            "refresh_state='pending',runtime_state='unverified',error_code=?,updated_at=? "
                            'WHERE word_id=? AND device_id=?',
                            (blocked, row['staging_reason'] if blocked == 'staging_blocked' else blocked,
-                            self._now(), word_id, row['device_id']))
+                            iso_now(self.clock), word_id, row['device_id']))
                 record = dict(db.execute('SELECT * FROM publications WHERE word_id=? AND device_id=?',
                                          (word_id, row['device_id'])).fetchone())
                 db.execute('INSERT INTO publication_history(word_id,record) VALUES (?,?)', (word_id, json.dumps(record)))
@@ -235,8 +232,8 @@ class DeploymentService:
         import subprocess
         from dataclasses import replace
         from tempfile import TemporaryDirectory
-        from studio.legacy_training import REPO, training_environment
-        shared = self.store.root.parent
+        from studio.legacy_training import training_environment
+        shared = self.store.data_dir
         python = shared / '.venv/bin/python'
         if not python.is_file():
             raise ValidationError('Legacy validation requires the training environment; run bash cli/setup_python_venv --data-dir=' + str(shared))
@@ -255,7 +252,7 @@ class DeploymentService:
         self.artifacts(version)
         validated = replace(version, validation_state='validated')
         with self.store.transaction() as db:
-            db.execute('INSERT INTO legacy_model_validations VALUES (?,?) ON CONFLICT(version_id) DO UPDATE SET validated_at=excluded.validated_at', (version.id, self._now()))
+            db.execute('INSERT INTO legacy_model_validations VALUES (?,?) ON CONFLICT(version_id) DO UPDATE SET validated_at=excluded.validated_at', (version.id, iso_now(self.clock)))
         return validated
 
     def retry_due(self, now):
@@ -265,8 +262,8 @@ class DeploymentService:
             return self._run_due(now)
 
     def status(self, word_id):
-        WorkspaceService(self.store).get(word_id)
         with self.store.transaction() as db:
+            require_word(db, word_id)
             return [Publication(**dict(row)) for row in db.execute(
                 'SELECT p.*,j.run_number FROM publications p '
                 'LEFT JOIN model_versions v ON v.id=p.desired_version AND v.word_id=p.word_id '
@@ -279,7 +276,7 @@ class DeploymentService:
             return row and tuple(row) == (p.desired_version, p.revision)
 
     def _save(self, p, **changes):
-        data = {**asdict(p), **changes, 'updated_at': self._now()}
+        data = {**asdict(p), **changes, 'updated_at': iso_now(self.clock)}
         data.pop('cache_effect', None)
         updated = Publication(**data)
         with self.store.transaction() as db:

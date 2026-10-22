@@ -10,11 +10,10 @@ from typing import Callable, Protocol
 from threading import Event
 from uuid import uuid4
 
-from studio.jobs import utc_now, aware_utc
-from studio.models import (Conflict, DatasetInput, ModelVersion, NotFound, Page, RunManifest,
-                           TrainingAudio, TrainingResult, TrainingSettings, ValidationError)
+from studio.models import (Conflict, DatasetInput, ModelVersion, NotFound, Page, RunManifest, TrainingAudio,
+                           TrainingResult, TrainingSettings, ValidationError, check_page, iso_now, utc_now)
 from studio.storage import ensure_directory, open_directory
-from studio.workspaces import WorkspaceService
+from studio.workspaces import require_word
 
 
 def encode(value):
@@ -49,12 +48,9 @@ class TrainingService:
         self.store, self.blobs, self.jobs, self.datasets = store, blobs, jobs, datasets
         self.clock, self.adapter_factory = clock, adapter_factory
 
-    def _now(self):
-        return aware_utc(self.clock()).isoformat()
-
     def settings(self, word_id):
-        WorkspaceService(self.store).get(word_id)
         with self.store.transaction() as db:
+            require_word(db, word_id)
             row = db.execute('SELECT config FROM training_settings WHERE word_id=?', (word_id,)).fetchone()
             return load_settings(json.loads(row[0])) if row else TrainingSettings()
 
@@ -62,8 +58,8 @@ class TrainingService:
         if (not isinstance(settings, TrainingSettings) or type(settings.training_steps) is not int
                 or not 1 <= settings.training_steps <= 10000000):
             raise ValidationError('Invalid training settings')
-        WorkspaceService(self.store).get(word_id)
         with self.store.transaction() as db:
+            require_word(db, word_id)
             db.execute('INSERT INTO training_settings VALUES (?,?) ON CONFLICT(word_id) DO UPDATE SET config=excluded.config',
                        (word_id, encode(asdict(settings))))
         return settings
@@ -124,7 +120,7 @@ class TrainingService:
                               datasets=[asdict(d) for d in datasets], augmentation=[asdict(a) for a in augmentation], selected_batches=batches, adapter_version=3)
             fingerprint = hashlib.sha256(encode(effective).encode()).hexdigest()
             manifest = RunManifest(1, run_id, word_id, word['model_id'], word['phrase'], word['language'], settings,
-                                   seed, tuple(audio), datasets, batches, fingerprint, self._now(), augmentation)
+                                   seed, tuple(audio), datasets, batches, fingerprint, iso_now(self.clock), augmentation)
             db.execute('INSERT INTO training_runs VALUES (?,?,?)', (run_id, word_id, encode(asdict(manifest))))
             return manifest
 
@@ -136,8 +132,8 @@ class TrainingService:
             return load_manifest(row[0])
 
     def counts(self, word_id):
-        WorkspaceService(self.store).get(word_id)
         with self.store.transaction() as db:
+            require_word(db, word_id)
             counts = {'positive': 0, 'negative': 0, 'artificial': 0}
             for row in db.execute("SELECT s.label,count(*) FROM samples s LEFT JOIN recordings r ON r.id=s.recording_id "
                                   "WHERE s.word_id=? AND s.deleted=0 AND (r.id IS NULL OR r.quarantined=0) "
@@ -148,21 +144,16 @@ class TrainingService:
             return counts
 
     def runs(self, word_id, offset=0, limit=50):
-        WorkspaceService(self.store).get(word_id)
-        self._page(offset, limit)
+        check_page(offset, limit)
         with self.store.transaction() as db:
+            require_word(db, word_id)
             ids = [r[0] for r in db.execute("SELECT id FROM studio_jobs WHERE word_id=? AND kind='train' ORDER BY rowid DESC", (word_id,))]
         return Page([self.jobs.get(i) for i in ids[offset:offset + limit]], len(ids), offset, limit)
 
-    @staticmethod
-    def _page(offset, limit):
-        if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
-            raise ValidationError('Invalid pagination')
-
     def versions(self, word_id, offset=0, limit=50):
-        WorkspaceService(self.store).get(word_id)
-        self._page(offset, limit)
+        check_page(offset, limit)
         with self.store.transaction() as db:
+            require_word(db, word_id)
             rows = db.execute("SELECT v.version,j.run_number,EXISTS(SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id) legacy,EXISTS(SELECT 1 FROM legacy_model_validations a WHERE a.version_id=v.id) validated FROM model_versions v JOIN studio_jobs j ON j.id=v.run_id WHERE v.word_id=? AND j.status='complete' ORDER BY v.rowid DESC", (word_id,)).fetchall()
             items = []
             for row in rows[offset:offset + limit]:
@@ -204,7 +195,7 @@ class TrainingService:
         if context.cancelled():
             raise Conflict('Training cancelled')
         from studio.legacy_training import LegacyTrainingAdapter
-        adapter = self.adapter_factory(context) if self.adapter_factory else LegacyTrainingAdapter(context, self.store.root.parent)
+        adapter = self.adapter_factory(context) if self.adapter_factory else LegacyTrainingAdapter(context, self.store.data_dir)
         result = adapter.run(manifest, root, context.log, context.stop_event)
         if context.cancelled():
             raise Conflict('Training cancelled')
@@ -237,7 +228,7 @@ class TrainingService:
         (stage / 'metrics.json').write_text(encode(result.metrics))
         (stage / 'job.log').write_text(self.jobs.log_tail(context.job.id, 65536))
         checksums = {str(p.relative_to(stage)): sha256(p) for p in stage.rglob('*') if p.is_file()}
-        version = ModelVersion(version_id, manifest.word_id, slug, manifest.run_id, self._now(), str(destination),
+        version = ModelVersion(version_id, manifest.word_id, slug, manifest.run_id, iso_now(self.clock), str(destination),
                                manifest.fingerprint, checksums, result.metrics)
         (stage / 'archive.json').write_text(encode(asdict(version)))
         for p in stage.rglob('*'):

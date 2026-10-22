@@ -5,8 +5,9 @@ import os
 import re
 from itertools import zip_longest
 
-from studio.models import Conflict, GenerationSource, Page, ValidationError
+from studio.models import Conflict, GenerationSource, Page, ValidationError, check_page
 from studio.storage import open_directory, read_regular
+from studio.workspaces import require_word
 
 DIRECT_PROVIDERS = frozenset(('omnivoice', 'qwen3', 'piper'))
 
@@ -59,10 +60,9 @@ def reference_pool(service, db, word_id, phrase, recipe, required):
 
 
 def list_sources(service, word_id, language, offset=0, limit=50):
-    if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
-        raise ValidationError('Invalid source query')
+    check_page(offset, limit, 'Invalid source query')
     with service.store.transaction() as db:
-        word = service._word(db, word_id)
+        word = require_word(db, word_id)
         language = language if language is not None else word['language']
         if language not in service._languages():
             raise ValidationError('Invalid source query')

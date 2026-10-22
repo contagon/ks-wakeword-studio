@@ -12,8 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
 
-from studio.jobs import utc_now, aware_utc
-from studio.models import NotFound, Schedule, ValidationError
+from studio.models import NotFound, Schedule, ValidationError, aware_utc, utc_now
 
 
 class ScheduleService:

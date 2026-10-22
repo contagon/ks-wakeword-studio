@@ -18,9 +18,9 @@ from uuid import uuid4
 
 from studio.db import Store
 from studio.models import (CaptureMetadata, Conflict, DiagnosticClip, NotFound, Page, Recording, Sample,
-                           SampleQuery, ValidationError)
+                           SampleQuery, ValidationError, check_page, iso_now, utc_now)
 from studio.storage import BlobStore, normalize_audio
-from studio.workspaces import WorkspaceService, utc_now
+from studio.workspaces import WorkspaceService, require_word
 
 
 SAMPLE_SELECT = """SELECT s.*, CASE WHEN cm.sample_id IS NOT NULL THEN 'microphone'
@@ -70,19 +70,27 @@ def _recording(row: sqlite3.Row) -> Recording:
     return Recording(**values)
 
 
+def insert_audio(db: sqlite3.Connection, original: str, normalized: str, created_at: str, *,
+                 family: str | None = None, parent_id: str | None = None,
+                 start: float | None = None, end: float | None = None) -> str:
+    """Record an original/normalized blob pair; derivatives pass their parent's family."""
+    known = db.execute("SELECT family_id FROM audio_families WHERE content_hash=?", (normalized,)).fetchone()
+    family = family or (known[0] if known else normalized)
+    if known and known[0] != family:
+        # Never merge previously split evaluation families silently.
+        raise Conflict("Derivative collides with another audio family")
+    db.execute("INSERT OR IGNORE INTO audio_families VALUES (?,?)", (normalized, family))
+    audio_id = uuid4().hex
+    db.execute("INSERT INTO audio_records VALUES (?,?,?,?,?,?,?,?)",
+               (audio_id, original, normalized, family, parent_id, start, end, created_at))
+    return audio_id
+
+
 class SampleService:
     def __init__(self, store: Store, blobs: BlobStore, clock: Callable[[], datetime] = utc_now):
         self.store = store
         self.blobs = blobs
         self.clock = clock
-
-    def _now(self) -> str:
-        return self.clock().astimezone(timezone.utc).isoformat()
-
-    @staticmethod
-    def _word(db: sqlite3.Connection, word_id: str) -> None:
-        if db.execute("SELECT 1 FROM wakewords WHERE id=?", (word_id,)).fetchone() is None:
-            raise NotFound("Wakeword not found")
 
     @staticmethod
     def _label(label: str) -> None:
@@ -119,21 +127,6 @@ class SampleService:
         original = self.blobs.put(io.BytesIO(data))
         training = self.blobs.put(io.BytesIO(normalized))
         return original.sha256, training.sha256
-
-    def _audio(self, db: sqlite3.Connection, original: str, normalized: str,
-               parent: sqlite3.Row | None = None, start: float | None = None,
-               end: float | None = None) -> str:
-        known = db.execute("SELECT family_id FROM audio_families WHERE content_hash=?", (normalized,)).fetchone()
-        family = parent["family_id"] if parent else (known[0] if known else normalized)
-        if known and known[0] != family:
-            # Never merge previously split evaluation families silently.
-            raise Conflict("Derivative collides with another audio family")
-        db.execute("INSERT OR IGNORE INTO audio_families VALUES (?,?)", (normalized, family))
-        audio_id = uuid4().hex
-        db.execute("INSERT INTO audio_records VALUES (?,?,?,?,?,?,?,?)",
-                   (audio_id, original, normalized, family, parent["audio_id"] if parent else None,
-                    start, end, self._now()))
-        return audio_id
 
     def ingest(self, device_id: str, clip: DiagnosticClip, audio: BinaryIO, word_id: str | None,
                *, scoped_word_id: str | None = None, resolve_source: bool = False) -> Recording | None:
@@ -178,31 +171,31 @@ class SampleService:
             existing = db.execute(RECORDING_SELECT + " WHERE r.device_id=? AND r.clip_id=?", (device_id, clip_id)).fetchone()
             if existing:
                 if existing["original_hash"] != original:
-                    db.execute("INSERT OR IGNORE INTO recording_conflicts VALUES (?,?,?)", (existing["id"], original, self._now()))
+                    db.execute("INSERT OR IGNORE INTO recording_conflicts VALUES (?,?,?)", (existing["id"], original, iso_now(self.clock)))
                     db.execute("UPDATE recordings SET quarantined=1 WHERE id=?", (existing["id"],))
                 # No relabel/reassignment/resurrection on repeated collection.
                 return _recording(db.execute(RECORDING_SELECT + " WHERE r.id=?", (existing["id"],)).fetchone())
             if word_id is not None:
-                self._word(db, word_id)
-            audio_id = self._audio(db, original, normalized)
+                require_word(db, word_id)
+            audio_id = insert_audio(db, original, normalized, iso_now(self.clock))
             recording_id = uuid4().hex
             db.execute("INSERT INTO recordings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                        (recording_id, device_id, clip_id, timestamp, clip.phrase, clip.engine,
-                        int(clip.near_miss), scores, metadata, audio_id, word_id, 0, self._now()))
+                        int(clip.near_miss), scores, metadata, audio_id, word_id, 0, iso_now(self.clock)))
             if word_id is not None:
                 self._new_sample(db, word_id, recording_id, audio_id, "pending", "diagnostic")
             return _recording(db.execute(RECORDING_SELECT + " WHERE r.id=?", (recording_id,)).fetchone())
 
     def _new_sample(self, db: sqlite3.Connection, word_id: str, recording_id: str | None,
                     audio_id: str, label: str, source: str) -> Sample:
-        sample_id, now = uuid4().hex, self._now()
+        sample_id, now = uuid4().hex, iso_now(self.clock)
         db.execute("INSERT INTO samples VALUES (?,?,?,?,?,0,?,0,?,?)",
                    (sample_id, word_id, recording_id, audio_id, label, source, now, now))
         return _sample(db, db.execute(SAMPLE_SELECT + " WHERE s.id=?", (sample_id,)).fetchone())
 
     def assign(self, recording_id: str, word_id: str) -> Sample:
         with self.store.transaction() as db:
-            self._word(db, word_id)
+            require_word(db, word_id)
             row = db.execute("SELECT * FROM recordings WHERE id=?", (recording_id,)).fetchone()
             if row is None:
                 raise NotFound("Recording not found")
@@ -220,9 +213,9 @@ class SampleService:
         WorkspaceService(self.store).get(word_id)
         data, converted = self._normalize(audio)
         with self.store.transaction() as db:
-            self._word(db, word_id)
+            require_word(db, word_id)
             original, normalized = self._publish(data, converted)
-            return self._new_sample(db, word_id, None, self._audio(db, original, normalized), label, "import")
+            return self._new_sample(db, word_id, None, insert_audio(db, original, normalized, iso_now(self.clock)), label, "import")
 
     def capture_audio(self, word_id: str, label: str, audio: BinaryIO,
                       start_s: float, end_s: float, trim_method: str) -> Sample:
@@ -233,13 +226,13 @@ class SampleService:
         WorkspaceService(self.store).get(word_id)
         data, converted = self._normalize(audio, truncate=True)
         with self.store.transaction() as db:
-            self._word(db, word_id)
+            require_word(db, word_id)
             original, normalized = self._publish(data, converted)
             with wave.open(io.BytesIO(self.blobs.read(normalized)), 'rb') as source:
                 duration = source.getnframes() / 16000
             if end_s > duration or int(end_s * 16000) <= int(start_s * 16000):
                 raise ValidationError('Invalid trim interval')
-            sample = self._new_sample(db, word_id, None, self._audio(db, original, normalized), label, 'import')
+            sample = self._new_sample(db, word_id, None, insert_audio(db, original, normalized, iso_now(self.clock)), label, 'import')
             db.execute('INSERT INTO sample_capture_metadata VALUES (?,?,?,?,?)',
                        (sample.id, trim_method, start_s, end_s, duration))
             if start_s > 0 or end_s < duration:
@@ -264,7 +257,7 @@ class SampleService:
 
     def _change(self, db: sqlite3.Connection, row: sqlite3.Row, label: str, audio_id: str, action: str) -> Sample:
         self._editable(db, row)
-        revision, now = row["revision"] + 1, self._now()
+        revision, now = row["revision"] + 1, iso_now(self.clock)
         db.execute("INSERT INTO sample_history (sample_id,revision,action,old_label,old_audio_id,new_label,new_audio_id,created_at) VALUES (?,?,?,?,?,?,?,?)",
                    (row["id"], revision, action, row["label"], row["audio_id"], label, audio_id, now))
         db.execute("UPDATE samples SET label=?,audio_id=?,revision=?,updated_at=? WHERE id=?",
@@ -290,14 +283,14 @@ class SampleService:
                 raise Conflict("No change to undo")
             db.execute("UPDATE sample_history SET undone=1 WHERE id=?", (history["id"],))
             db.execute("UPDATE samples SET label=?,audio_id=?,revision=revision+1,updated_at=? WHERE id=?",
-                       (history["old_label"], history["old_audio_id"], self._now(), sample_id))
+                       (history["old_label"], history["old_audio_id"], iso_now(self.clock), sample_id))
             return _sample(db, self._get(db, sample_id))
 
     def delete(self, sample_id: str, expected_revision: int) -> None:
         with self.store.transaction() as db:
             row = self._get(db, sample_id)
             self._revision(row, expected_revision)
-            db.execute("UPDATE samples SET deleted=1,revision=revision+1,updated_at=? WHERE id=?", (self._now(), sample_id))
+            db.execute("UPDATE samples SET deleted=1,revision=revision+1,updated_at=? WHERE id=?", (iso_now(self.clock), sample_id))
 
     def audio(self, sample_id: str, word_id: str, original: bool = False) -> bytes:
         sample = self.get(sample_id, word_id)
@@ -323,12 +316,12 @@ class SampleService:
             target.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
             target.writeframes(pcm)
         normalized = self.blobs.put(io.BytesIO(output.getvalue())).sha256
-        audio_id = self._audio(db, row["original_hash"], normalized, row, start_s, end_s)
+        audio_id = insert_audio(db, row["original_hash"], normalized, iso_now(self.clock), family=row["family_id"],
+                                parent_id=row["audio_id"], start=start_s, end=end_s)
         return self._change(db, row, row["label"], audio_id, "trim")
 
     def _query(self, query: SampleQuery, created_at: str = "r.created_at") -> tuple[list[str], list[object]]:
-        if type(query.offset) is not int or query.offset < 0 or type(query.limit) is not int or not 1 <= query.limit <= 100:
-            raise ValidationError("Invalid pagination")
+        check_page(query.offset, query.limit)
         if query.label not in (None, "pending", "positive", "negative", "discarded") or query.source not in (None, "diagnostic", "import", "legacy", "microphone"):
             raise ValidationError("Invalid filter")
         if not isinstance(query.search, str) or len(query.search) > 200 or query.near_miss not in (None, True, False):
@@ -362,7 +355,7 @@ class SampleService:
                 params.append(query.source)
         where = " WHERE " + " AND ".join(clauses)
         with self.store.transaction() as db:
-            self._word(db, word_id)
+            require_word(db, word_id)
             total = db.execute("SELECT count(*) FROM (" + SAMPLE_SELECT + where + ")", params).fetchone()[0]
             rows = db.execute(SAMPLE_SELECT + where + " ORDER BY s.created_at,s.id LIMIT ? OFFSET ?", params + [query.limit, query.offset]).fetchall()
             return Page([_sample(db, row) for row in rows], total, query.offset, query.limit)

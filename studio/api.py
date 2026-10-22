@@ -55,15 +55,17 @@ class StudioRoute(APIRoute):
         return sanitized
 
 
-class CreateWakeword(BaseModel):
+class StrictBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class CreateWakeword(StrictBody):
     phrase: str
     language: str
     model_id: str | None = None
 
 
-class DeviceCredentials(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+class DeviceCredentials(StrictBody):
     password: SecretStr
 
 
@@ -72,13 +74,11 @@ class AddDevice(DeviceCredentials):
     role: str
 
 
-class UpdateDevice(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+class UpdateDevice(StrictBody):
     url: str
 
 
-class RevisionBody(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+class RevisionBody(StrictBody):
     expected_revision: int
 
 
@@ -91,13 +91,11 @@ class TrimBody(RevisionBody):
     end_s: float
 
 
-class AssignBody(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+class AssignBody(StrictBody):
     word_id: str
 
 
-class ScrapeBody(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+class ScrapeBody(StrictBody):
     device_ids: list[str] | None = None
 
 
@@ -106,15 +104,13 @@ class SourceMappingBody(AssignBody):
     source_phrase: str
 
 
-class ScheduleBody(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+class ScheduleBody(StrictBody):
     cron: str
     timezone: str = 'UTC'
     enabled: bool
 
 
-class ClassificationBody(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True)
+class ClassificationBody(StrictBody):
     enabled: bool
     trigger: Literal['after_collection', 'schedule']
     engine: Literal['faster_whisper', 'parakeet_onnx']
@@ -122,13 +118,11 @@ class ClassificationBody(BaseModel):
     promote_close_misses: bool
 
 
-class DeploymentPolicyBody(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True)
+class DeploymentPolicyBody(StrictBody):
     after_training: bool
 
 
-class AutomationBody(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True)
+class AutomationBody(StrictBody):
     collection: ScheduleBody
     classification: ClassificationBody
     classification_schedule: ScheduleBody
@@ -138,13 +132,11 @@ class AutomationBody(BaseModel):
     deployment_policy: DeploymentPolicyBody
 
 
-class DatasetSelectionBody(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True)
+class DatasetSelectionBody(StrictBody):
     dataset_ids: list[str]
 
 
-class GenerationRecipeBody(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True)
+class GenerationRecipeBody(StrictBody):
     language: str
     english_accent: str
     tts_mode: str
@@ -156,18 +148,15 @@ class GenerationRecipeBody(BaseModel):
     moss_samples: int | None = None
 
 
-class BatchSelectionBody(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True)
+class BatchSelectionBody(StrictBody):
     batch_ids: list[str]
 
 
-class TrainingSettingsBody(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True)
+class TrainingSettingsBody(StrictBody):
     training_steps: int
 
 
-class PublishBody(BaseModel):
-    model_config = ConfigDict(extra='forbid', strict=True)
+class PublishBody(StrictBody):
     version_id: str
 
 

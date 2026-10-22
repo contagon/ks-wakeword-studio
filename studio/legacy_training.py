@@ -14,10 +14,10 @@ import subprocess
 from dataclasses import asdict
 from pathlib import Path
 
+from studio import REPO
 from studio.models import DatasetInput, TrainingResult, ValidationError
 
 
-REPO = Path(__file__).resolve().parents[1]
 PREFLIGHT_MESSAGES = {
     'positive_counts': 'Positive audio requires training, validation and testing families; add more independent positive recordings or batches',
     'input_invalid': 'Training input validation failed; inspect retained inputs and engine compatibility',
@@ -244,8 +244,7 @@ def main(argv=None):
     _run([python, cli / 'wake_word_sample_augmenter', f'--data-dir={root}', f'--split-manifest={split_path}', f'--seed={manifest["seed"]}',
           f'--augmentation-ids={",".join(augmentation)}',
           f'--personal-dir={root / "work/personal_samples"}', f'--negative-dir={root / "work/reviewed_negatives"}',
-          *[f'--{flag}={augmentation[name]}' for flag, name in
-            (('mit-rirs-16k-dir', 'mit_rirs_16k'), ('audioset-16k-dir', 'audioset_16k'), ('fma-16k-dir', 'fma_16k'), ('chime-16k-dir', 'chime_16k')) if name in augmentation]], cwd=root, env=env)
+          *[f'--{name.replace("_", "-")}-dir={path}' for name, path in augmentation.items()]], cwd=root, env=env)
     _stage(env, 'training')
     _run([cli / 'wake_word_sample_trainer', f'--data-dir={root}', f'--tool-data-dir={shared}', f'--dataset-manifest={dataset_path}',
           f'--artifact-slug={manifest["model_id"]}', f'--language={manifest["language"]}',

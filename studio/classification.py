@@ -2,10 +2,10 @@
 from dataclasses import asdict
 import hashlib
 import json
-from pathlib import Path
 import sys
 
-from studio.models import Conflict, NotFound, ValidationError
+from studio import REPO
+from studio.models import Conflict, NotFound, ValidationError, iso_now
 from studio.speech import classify_transcript
 
 
@@ -37,14 +37,14 @@ class ClassificationService:
             context.log(f'Classifying batch {batch + 1}: {len(candidates)} recordings')
             eligible = [r for r in candidates if not json.loads(r['metadata']).get('blocked_by_vad')]
             manifest = {'engine': policy.engine, 'phrase': word['phrase'], 'language': word['language'],
-                        'cache_dir': str(self.store.root.parent / 'auto_train_models'),
+                        'cache_dir': str(self.store.data_dir / 'auto_train_models'),
                         'samples': [{'id': r['id'], 'path': str(self.samples.blobs.root / r['normalized_hash'])} for r in eligible]}
             input_path, output_path = root / f'classify-{batch}.json', root / f'result-{batch}.json'
             with input_path.open('x') as file:
                 json.dump(manifest, file)
             results = []
             if eligible:
-                context.run([sys.executable, str(Path(__file__).resolve().parent.parent / 'cli/studio_classify.py'),
+                context.run([sys.executable, str(REPO / 'cli/studio_classify.py'),
                              f'--input-manifest={input_path}', f'--output-json={output_path}'], cwd=str(root))
                 if output_path.is_symlink() or output_path.stat().st_size > 2 * 1024 * 1024:
                     raise ValidationError('Invalid speech results')
@@ -85,7 +85,7 @@ class ClassificationService:
                         counts[outcome] += 1
                     db.execute('INSERT OR IGNORE INTO automation_reviews VALUES (?,?,?,?,?,?,?)',
                         (snapshot['id'], snapshot['audio_id'], fingerprint, outcome, policy.engine,
-                         result.get('model', '')[:200], self.samples._now()))
+                         result.get('model', '')[:200], iso_now(self.samples.clock)))
             batch += 1
             context.log(f'Classification progress: {counts["reviewed"]} reviewed, {counts["conflicts"]} conflicts')
         return counts

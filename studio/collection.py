@@ -17,12 +17,12 @@ from uuid import uuid4
 
 from studio.db import Store
 from studio.devices import DeviceService
-from studio.models import (CollectionCounters, CollectionRun, CredentialsRequired,
-                           DeviceCollectionResult, IdentityMismatch, Page, RemoteRejected,
-                           RemoteUnavailable, ValidationError)
+from studio.models import (CollectionCounters, CollectionRun, CredentialsRequired, DeviceCollectionResult,
+                           IdentityMismatch, Page, RemoteRejected, RemoteUnavailable, ValidationError,
+                           check_page, iso_now, utc_now)
 from studio.samples import SampleService
 from studio.storage import flock, open_directory
-from studio.workspaces import WorkspaceService, utc_now
+from studio.workspaces import WorkspaceService
 
 
 COUNTERS = tuple(CollectionCounters.__dataclass_fields__)
@@ -49,9 +49,6 @@ class CollectionService:
         self.workspaces = WorkspaceService(store)
         self.clock = clock
 
-    def _now(self) -> str:
-        return self.clock().astimezone(timezone.utc).isoformat()
-
     def _lock(self, identity: str, *, blocking: bool = True):
         return flock(self.store.root / "collection-locks", hashlib.sha256(identity.encode()).hexdigest(),
                      blocking=blocking)
@@ -70,7 +67,7 @@ class CollectionService:
             status = "interrupted" if "interrupted" in states else (
                 "complete" if all(s == "complete" for s in states) else "partial")
             db.execute("UPDATE collection_runs SET finished_at=?,status=? WHERE id=?",
-                       (self._now(), status, run_id))
+                       (iso_now(self.clock), status, run_id))
 
     def _recover_device(self, device_id: str) -> None:
         # Probe run locks non-blockingly so a live run waiting on another device
@@ -137,7 +134,7 @@ class CollectionService:
         run_id = uuid4().hex
         with self._lock("run:" + run_id):
             with self.store.transaction() as db:
-                db.execute("INSERT INTO collection_runs VALUES (?,?,NULL,'running')", (run_id, self._now()))
+                db.execute("INSERT INTO collection_runs VALUES (?,?,NULL,'running')", (run_id, iso_now(self.clock)))
                 for device in selected:
                     result = DeviceCollectionResult(device_id=device.id, status="queued")
                     db.execute("INSERT INTO collection_devices VALUES (?,?,'queued',?)",
@@ -164,7 +161,7 @@ class CollectionService:
                           run_id=excluded.run_id,
                           attempts=excluded.attempts,next_retry_at=excluded.next_retry_at,
                           error_code=excluded.error_code,updated_at=excluded.updated_at""",
-                       (device_id, clip_id, run_id, state, attempts, retry, code, self._now()))
+                       (device_id, clip_id, run_id, state, attempts, retry, code, iso_now(self.clock)))
 
     def _seen(self, device_id: str, clip_id: str) -> bool:
         from studio.deletion import source_deleted
@@ -214,7 +211,7 @@ class CollectionService:
                 with self.store.transaction() as db:
                     attempt = db.execute("SELECT * FROM collection_attempts WHERE device_id=? AND clip_id=?",
                                          (device_id, clip.id)).fetchone()
-                if attempt and attempt["next_retry_at"] and attempt["next_retry_at"] > self._now():
+                if attempt and attempt["next_retry_at"] and attempt["next_retry_at"] > iso_now(self.clock):
                     result.failed += 1
                     result.errors.append("retry_deferred")
                     self._save(run_id, result)
@@ -237,8 +234,8 @@ class CollectionService:
                             staged.flush()
                             os.fsync(staged.fileno())
                             staged.seek(0)
-                            mapped = self.workspaces.resolve_source(device_id, clip.engine, clip.phrase)
-                            recording = self.samples.ingest(device_id, clip, staged, mapped, scoped_word_id=word_id,
+                            # Ingest resolves the source mapping inside its own transaction.
+                            recording = self.samples.ingest(device_id, clip, staged, None, scoped_word_id=word_id,
                                                             resolve_source=True)
                     if recording is None:
                         with self.store.transaction() as db:
@@ -296,8 +293,7 @@ class CollectionService:
         return CollectionRun(**dict(row), **totals, devices=devices)
 
     def list_runs(self, offset: int = 0, limit: int = 50) -> Page[CollectionRun]:
-        if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
-            raise ValidationError("Invalid pagination")
+        check_page(offset, limit)
         with self.store.transaction() as db:
             total = db.execute("SELECT count(*) FROM collection_runs").fetchone()[0]
             ids = [row[0] for row in db.execute("SELECT id FROM collection_runs ORDER BY rowid DESC LIMIT ? OFFSET ?", (limit, offset))]

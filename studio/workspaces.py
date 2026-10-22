@@ -4,15 +4,19 @@ import re
 import sqlite3
 import unicodedata
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import uuid4
 
 from studio.db import Store
-from studio.models import Conflict, NotFound, Page, SourceMapping, ValidationError, Wakeword, WakewordUpdate
+from studio.models import (Conflict, NotFound, Page, SourceMapping, ValidationError, Wakeword,
+                           WakewordUpdate, check_page, iso_now, utc_now)
 
 
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+def require_word(db, word_id):
+    row = db.execute("SELECT * FROM wakewords WHERE id=?", (word_id,)).fetchone()
+    if row is None:
+        raise NotFound("Wakeword not found")
+    return row
 
 
 class WorkspaceService:
@@ -20,9 +24,6 @@ class WorkspaceService:
         self.store = store
         self.clock = clock
         self.blobs = blobs
-
-    def _timestamp(self) -> str:
-        return self.clock().astimezone(timezone.utc).isoformat()
 
     def set_source_mapping(self, device_id: str, engine: str, source_phrase: str, word_id: str) -> None:
         # Exact per-device/engine names only. Display phrases are not identities.
@@ -83,7 +84,7 @@ class WorkspaceService:
             model_id = slug + '_' + uuid4().hex
         if not isinstance(model_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", model_id):
             raise ValidationError("Invalid model identifier")
-        now = self._timestamp()
+        now = iso_now(self.clock)
         word = Wakeword(uuid4().hex, phrase, language, model_id, now, now)
         try:
             with self.store.transaction() as db:
@@ -99,14 +100,10 @@ class WorkspaceService:
 
     def get(self, word_id: str) -> Wakeword:
         with self.store.transaction() as db:
-            row = db.execute("SELECT * FROM wakewords WHERE id = ?", (word_id,)).fetchone()
-            if row is None:
-                raise NotFound("Wakeword not found")
-            return Wakeword(**dict(row))
+            return Wakeword(**dict(require_word(db, word_id)))
 
     def list(self, offset: int = 0, limit: int = 50) -> Page[Wakeword]:
-        if not isinstance(offset, int) or not isinstance(limit, int) or offset < 0 or not 1 <= limit <= 100:
-            raise ValidationError("Invalid pagination")
+        check_page(offset, limit)
         with self.store.transaction() as db:
             total = db.execute("SELECT COUNT(*) FROM wakewords").fetchone()[0]
             rows = db.execute("SELECT * FROM wakewords ORDER BY created_at, id LIMIT ? OFFSET ?",
@@ -122,5 +119,5 @@ class WorkspaceService:
                 raise NotFound("Wakeword not found")
             db.execute("UPDATE wakewords SET phrase = ?, language = ?, updated_at = ? WHERE id = ?",
                        (phrase if phrase is not None else row["phrase"],
-                        language if language is not None else row["language"], self._timestamp(), word_id))
+                        language if language is not None else row["language"], iso_now(self.clock), word_id))
             return Wakeword(**dict(db.execute("SELECT * FROM wakewords WHERE id = ?", (word_id,)).fetchone()))
