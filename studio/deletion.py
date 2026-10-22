@@ -169,7 +169,6 @@ def _finish_workspace_cleanup(store, blobs, word_id, jobs, hashes):
     _delete_blobs(store, blobs, hashes)
     for job_id in jobs:
         _remove_tree(store, 'jobs', job_id)
-        _remove_tree(store, 'runs', job_id)
     _remove_tree(store, 'models', word_id)
     _remove_journal(store, 'workspace-deletions', word_id)
 
@@ -202,7 +201,7 @@ def delete_workspace(store, word_id, blobs=None):
             if any(not IDENTITY.fullmatch(identity) for identity in jobs | {word_id}):
                 raise ValidationError('Unsafe workspace storage identifier')
             # Refuse symlinked storage parents before any metadata is removed.
-            for category in ('jobs', 'runs', 'models'):
+            for category in ('jobs', 'models'):
                 ensure_directory(store.root / category)
             samples = 'SELECT id FROM samples WHERE word_id=?'
             recordings = 'SELECT id FROM recordings WHERE word_id=?'

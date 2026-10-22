@@ -129,7 +129,7 @@ class DeploymentTests(unittest.TestCase):
         job = self.runtime.training.enqueue(self.word.id)
         self.runtime.workers.run_once('gpu')
         self.assertEqual(self.runtime.jobs.get(job.id).status, 'complete')
-        return self.runtime.training.successful_version(job.id)
+        return self.runtime.training.versions(self.word.id).items[0]
 
     def status(self):
         return {p.device_id: p for p in self.service.status(self.word.id)}
@@ -473,7 +473,7 @@ class DeploymentTests(unittest.TestCase):
         job = self.runtime.training.enqueue(word.id)
         self.runtime.workers.run_once('gpu')
         self.assertEqual(self.runtime.jobs.get(job.id).status, 'complete')
-        return self.runtime.training.successful_version(job.id)
+        return self.runtime.training.versions(word.id).items[0]
 
     def stage_new_version_then_crash(self):
         class Crash(BaseException):

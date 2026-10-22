@@ -150,9 +150,6 @@ class CollectionService:
             self._finish(run_id)
         return self.get_run(run_id)
 
-    def collect_device(self, device_id: str) -> DeviceCollectionResult:
-        return self.run([device_id]).devices[0]
-
     def _attempt(self, run_id: str, device_id: str, clip_id: str, state: str, code: str | None = None) -> None:
         with self.store.transaction() as db:
             row = db.execute("SELECT attempts FROM collection_attempts WHERE device_id=? AND clip_id=?",
@@ -284,20 +281,26 @@ class CollectionService:
             result.errors = list(dict.fromkeys(result.errors))
             self._save(run_id, result)
 
-    def get_run(self, run_id: str) -> CollectionRun:
+    @staticmethod
+    def _runs(db, rows) -> list[CollectionRun]:
+        devices = {row["id"]: [] for row in rows}
+        if devices:
+            for item in db.execute(f"SELECT run_id,result FROM collection_devices WHERE run_id IN "
+                                   f"({','.join('?' * len(devices))}) ORDER BY rowid", list(devices)):
+                devices[item[0]].append(DeviceCollectionResult(**json.loads(item[1])))
+        return [CollectionRun(**dict(row), **{key: sum(getattr(device, key) for device in devices[row["id"]])
+                                              for key in COUNTERS}, devices=devices[row["id"]]) for row in rows]
 
+    def get_run(self, run_id: str) -> CollectionRun:
         with self.store.transaction() as db:
             row = db.execute("SELECT * FROM collection_runs WHERE id=?", (run_id,)).fetchone()
             if row is None:
                 raise NotFound("Collection run not found")
-            devices = [DeviceCollectionResult(**json.loads(item[0])) for item in db.execute(
-                "SELECT result FROM collection_devices WHERE run_id=? ORDER BY rowid", (run_id,))]
-        totals = {key: sum(getattr(device, key) for device in devices) for key in COUNTERS}
-        return CollectionRun(**dict(row), **totals, devices=devices)
+            return self._runs(db, [row])[0]
 
     def list_runs(self, offset: int = 0, limit: int = 50) -> Page[CollectionRun]:
         check_page(offset, limit)
         with self.store.transaction() as db:
             total = db.execute("SELECT count(*) FROM collection_runs").fetchone()[0]
-            ids = [row[0] for row in db.execute("SELECT id FROM collection_runs ORDER BY rowid DESC LIMIT ? OFFSET ?", (limit, offset))]
-        return Page([self.get_run(i) for i in ids], total, offset, limit)
+            rows = db.execute("SELECT * FROM collection_runs ORDER BY rowid DESC LIMIT ? OFFSET ?", (limit, offset)).fetchall()
+            return Page(self._runs(db, rows), total, offset, limit)

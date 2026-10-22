@@ -104,7 +104,7 @@ class Store:
                 raise
 
     def scoped_directory(self, category: str, opaque_id: str) -> Path:
-        if category not in ("jobs", "runs") or not re.fullmatch(r"[0-9a-f]{32}", opaque_id):
+        if category != "jobs" or not re.fullmatch(r"[0-9a-f]{32}", opaque_id):
             raise ValidationError("Invalid studio directory identifier")
         path = self.root / category / opaque_id
         ensure_directory(path)

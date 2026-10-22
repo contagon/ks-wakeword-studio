@@ -26,7 +26,8 @@ from studio.workspaces import WorkspaceService, clean_text, require_word, source
 
 SAMPLE_SELECT = """SELECT s.*, CASE WHEN cm.sample_id IS NOT NULL THEN 'microphone'
     ELSE COALESCE(mp.source, s.source) END AS migration_source,
-    a.original_hash, a.normalized_hash, a.family_id
+    a.original_hash, a.normalized_hash, a.family_id, cm.trim_method AS capture_trim_method,
+    cm.start_s AS capture_start_s, cm.end_s AS capture_end_s, cm.duration_s AS capture_duration_s
     FROM samples s JOIN audio_records a ON a.id=s.audio_id
     LEFT JOIN migration_sample_provenance mp ON mp.sample_id=s.id
     LEFT JOIN sample_capture_metadata cm ON cm.sample_id=s.id
@@ -52,14 +53,23 @@ def _public_metadata(raw: object) -> dict[str, object]:
             and minimum <= value <= maximum and math.isfinite(value)}
 
 
+def _samples(db: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[Sample]:
+    """Build public samples, fetching their source recordings in one query."""
+    ids = [row["recording_id"] for row in rows if row["recording_id"]]
+    recordings = {r["id"]: _recording(r) for r in db.execute(
+        RECORDING_SELECT + f" WHERE r.id IN ({','.join('?' * len(ids))})", ids)} if ids else {}
+    result = []
+    for row in rows:
+        values = {f.name: row[f.name] for f in fields(Sample) if f.name not in ("recording", "capture")}
+        values["source"] = row["migration_source"]
+        capture = (CaptureMetadata(row["capture_trim_method"], row["capture_start_s"], row["capture_end_s"],
+                                   row["capture_duration_s"]) if row["capture_trim_method"] is not None else None)
+        result.append(Sample(**values, recording=recordings.get(row["recording_id"]), capture=capture))
+    return result
+
+
 def _sample(db: sqlite3.Connection, row: sqlite3.Row) -> Sample:
-    values = {f.name: row[f.name] for f in fields(Sample) if f.name not in ("recording", "capture")}
-    values["source"] = row["migration_source"]
-    recording = None
-    if row["recording_id"]:
-        recording = _recording(db.execute(RECORDING_SELECT + " WHERE r.id=?", (row["recording_id"],)).fetchone())
-    capture = db.execute('SELECT trim_method,start_s,end_s,duration_s FROM sample_capture_metadata WHERE sample_id=?', (row['id'],)).fetchone()
-    return Sample(**values, recording=recording, capture=CaptureMetadata(**dict(capture)) if capture else None)
+    return _samples(db, [row])[0]
 
 
 def _recording(row: sqlite3.Row) -> Recording:
@@ -358,7 +368,7 @@ class SampleService:
             require_word(db, word_id)
             total = db.execute("SELECT count(*) FROM (" + SAMPLE_SELECT + where + ")", params).fetchone()[0]
             rows = db.execute(SAMPLE_SELECT + where + " ORDER BY s.created_at,s.id LIMIT ? OFFSET ?", params + [query.limit, query.offset]).fetchall()
-            return Page([_sample(db, row) for row in rows], total, query.offset, query.limit)
+            return Page(_samples(db, rows), total, query.offset, query.limit)
 
     def queue(self, word_id: str, query: SampleQuery) -> Page[Sample]:
         if query.label not in (None, "pending"):

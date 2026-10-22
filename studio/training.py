@@ -6,13 +6,11 @@ import os
 import shutil
 from dataclasses import asdict
 from pathlib import Path
-from typing import Callable, Protocol
-from threading import Event
 from uuid import uuid4
 
 from studio.augmentation import snapshot as augmentation_snapshot
 from studio.models import (AugmentationInput, Conflict, DatasetInput, LegacyRun, ModelVersion, NotFound, Page,
-                           RunManifest, TrainingAudio, TrainingResult, TrainingSettings, ValidationError, check_page,
+                           RunManifest, TrainingAudio, TrainingSettings, ValidationError, check_page,
                            iso_now, utc_now)
 from studio.mww_training import MwwTrainingAdapter, checked_file, sha256
 from studio.storage import ensure_directory, open_directory
@@ -38,10 +36,6 @@ def load_manifest(value):
     data['datasets'] = tuple(DatasetInput(**d) for d in data['datasets'])
     data['selected_batches'] = tuple(data['selected_batches'])
     return RunManifest(**data)
-
-
-class TrainingAdapter(Protocol):
-    def run(self, manifest: RunManifest, run_root: Path, on_log: Callable[[str], None], cancel: Event) -> TrainingResult: ...
 
 
 class TrainingService:
@@ -146,30 +140,29 @@ class TrainingService:
         check_page(offset, limit)
         with self.store.transaction() as db:
             require_word(db, word_id)
-            ids = [r[0] for r in db.execute("SELECT id FROM studio_jobs WHERE word_id=? AND kind='train' ORDER BY rowid DESC", (word_id,))]
-        return Page([self.jobs.get(i) for i in ids[offset:offset + limit]], len(ids), offset, limit)
+            total = db.execute("SELECT count(*) FROM studio_jobs WHERE word_id=? AND kind='train'", (word_id,)).fetchone()[0]
+            rows = db.execute("SELECT * FROM studio_jobs WHERE word_id=? AND kind='train' ORDER BY rowid DESC LIMIT ? OFFSET ?",
+                              (word_id, limit, offset)).fetchall()
+            return Page([self.jobs.record(row) for row in rows], total, offset, limit)
 
     def versions(self, word_id, offset=0, limit=50):
         check_page(offset, limit)
         with self.store.transaction() as db:
             require_word(db, word_id)
-            rows = db.execute("SELECT v.version,j.run_number,EXISTS(SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id) legacy,EXISTS(SELECT 1 FROM legacy_model_validations a WHERE a.version_id=v.id) validated FROM model_versions v JOIN studio_jobs j ON j.id=v.run_id WHERE v.word_id=? AND j.status='complete' ORDER BY v.rowid DESC", (word_id,)).fetchall()
+            complete = " FROM model_versions v JOIN studio_jobs j ON j.id=v.run_id WHERE v.word_id=? AND j.status='complete'"
+            total = db.execute('SELECT count(*)' + complete, (word_id,)).fetchone()[0]
+            rows = db.execute('SELECT v.version,j.run_number,'
+                              'EXISTS(SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id) legacy,'
+                              'EXISTS(SELECT 1 FROM legacy_model_validations a WHERE a.version_id=v.id) validated'
+                              + complete + ' ORDER BY v.rowid DESC LIMIT ? OFFSET ?', (word_id, limit, offset)).fetchall()
             items = []
-            for row in rows[offset:offset + limit]:
+            for row in rows:
                 data = json.loads(row[0])
                 data['run_number'] = row['run_number']
                 if row['legacy']:
                     data.update(origin='legacy', validation_state='validated' if row['validated'] else 'unvalidated')
                 items.append(ModelVersion(**data))
-            return Page(items, len(rows), offset, limit)
-
-    def successful_version(self, job_id):
-        """Task-9 completion hook lookup. Never returns running/partial archives."""
-        with self.store.transaction() as db:
-            row = db.execute("SELECT v.version FROM model_versions v JOIN studio_jobs j ON j.id=v.run_id WHERE v.run_id=? AND j.status='complete'", (job_id,)).fetchone()
-            if row and db.execute('SELECT 1 FROM migration_model_provenance WHERE version_id=json_extract(?,\'$.id\')', (row[0],)).fetchone():
-                return None
-            return ModelVersion(**json.loads(row[0])) if row else None
+            return Page(items, total, offset, limit)
 
     def execute(self, job, context=None):
         if (context is None or context.queue is not self.jobs or context.job.id != job.id or not self.jobs.owns(job.id)

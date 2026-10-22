@@ -118,7 +118,7 @@ class WorkspaceDeletionTests(unittest.TestCase):
         outsider = Path(self.temp.name) / 'kiosk-deployed'
         outsider.mkdir()
         (outsider / 'model.tflite').write_bytes(b'deployed')
-        for category, identity in (('jobs', job_id), ('runs', job_id), ('models', self.word.id)):
+        for category, identity in (('jobs', job_id), ('models', self.word.id)):
             directory = self.store.root / category / identity
             directory.mkdir(parents=True)
             (directory / 'owned').write_bytes(b'owned')
@@ -146,7 +146,7 @@ class WorkspaceDeletionTests(unittest.TestCase):
             db.execute("INSERT INTO studio_schedules VALUES (?,'0 2 * * *','UTC',1,'now')", ('train:' + self.word.id,))
             db.execute("INSERT INTO studio_schedule_occurrences VALUES (?,'now',?)", ('train:' + self.word.id, job_id))
         self.words.delete(self.word.id)
-        for category, identity in (('jobs', job_id), ('runs', job_id), ('models', self.word.id)):
+        for category, identity in (('jobs', job_id), ('models', self.word.id)):
             self.assertFalse((self.store.root / category / identity).exists())
         self.assertEqual((outsider / 'model.tflite').read_bytes(), b'deployed')
         with self.store.transaction() as db:

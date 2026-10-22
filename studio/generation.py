@@ -19,6 +19,11 @@ from studio.storage import canonical_wav, ensure_directory, open_directory, read
 from studio.workspaces import require_word
 
 
+BATCH_SELECT = ('SELECT b.*,j.status,j.created_at,j.finished_at,EXISTS(SELECT 1 FROM generation_selection s '
+                'WHERE s.word_id=b.word_id AND s.batch_id=b.id) selected '
+                'FROM generation_batches b JOIN studio_jobs j ON j.id=b.id')
+
+
 def _store_recipe(db, word_id, recipe):
     db.execute('INSERT INTO generation_recipes VALUES (?,?) ON CONFLICT(word_id) DO UPDATE SET recipe=excluded.recipe',
                (word_id, json.dumps(asdict(recipe), sort_keys=True)))
@@ -221,18 +226,27 @@ class GenerationService:
     def sources(self, word_id, language=None, offset=0, limit=50):
         return list_sources(self, word_id, language, offset, limit)
 
+    @staticmethod
+    def _batches(db, rows):
+        """Build public batches, fetching the audio of every ready batch in one query."""
+        ready = {row['id'] for row in rows if row['committed_at'] is not None and row['status'] == 'complete'}
+        audio = {batch_id: [] for batch_id in ready}
+        if ready:
+            for item in db.execute('SELECT b.batch_id,a.id,a.original_hash,a.normalized_hash,a.family_id '
+                                   'FROM generation_batch_audio b JOIN audio_records a ON a.id=b.audio_id '
+                                   f"WHERE batch_id IN ({','.join('?' * len(ready))}) ORDER BY batch_id,position",
+                                   list(ready)):
+                audio[item[0]].append(BatchAudio(*item[1:]))
+        return [Batch(row['id'], row['word_id'], row['phrase'], GenerationRecipe(**json.loads(row['recipe'])),
+                      'complete' if row['id'] in ready else ('failed' if row['status'] == 'complete' else row['status']),
+                      row['created_at'], row['finished_at'], audio.get(row['id'], []), bool(row['selected']))
+                for row in rows]
+
     def _batch(self, db, word_id, batch_id):
-        row = db.execute('SELECT b.*,j.status,j.created_at,j.finished_at FROM generation_batches b '
-                         'JOIN studio_jobs j ON j.id=b.id WHERE b.id=? AND b.word_id=?', (batch_id, word_id)).fetchone()
+        row = db.execute(BATCH_SELECT + ' WHERE b.id=? AND b.word_id=?', (batch_id, word_id)).fetchone()
         if row is None:
             raise NotFound('Batch not found')
-        ready = row['committed_at'] is not None and row['status'] == 'complete'
-        audio = db.execute('SELECT a.id,a.original_hash,a.normalized_hash,a.family_id FROM generation_batch_audio b '
-                           'JOIN audio_records a ON a.id=b.audio_id WHERE batch_id=? ORDER BY position', (batch_id,)).fetchall()
-        selected = db.execute('SELECT 1 FROM generation_selection WHERE word_id=? AND batch_id=?', (word_id, batch_id)).fetchone()
-        status = 'complete' if ready else ('failed' if row['status'] == 'complete' else row['status'])
-        return Batch(batch_id, word_id, row['phrase'], GenerationRecipe(**json.loads(row['recipe'])), status,
-                     row['created_at'], row['finished_at'], [BatchAudio(*a) for a in audio] if ready else [], bool(selected))
+        return self._batches(db, [row])[0]
 
     def get_batch(self, word_id, batch_id):
         with self.store.transaction() as db:
@@ -247,12 +261,13 @@ class GenerationService:
         with self.store.transaction() as db:
             require_word(db, word_id)
             # Failed, cancelled and interrupted datasets are unusable, so they are not listed.
-            visible = ("FROM generation_batches b JOIN studio_jobs j ON j.id=b.id WHERE b.word_id=? AND "
-                       "(j.status IN ('queued','running','cancelling') OR (j.status='complete' AND b.committed_at IS NOT NULL))")
-            total = db.execute(f'SELECT count(*) {visible}', (word_id,)).fetchone()[0]
-            rows = db.execute(f'SELECT b.id {visible} ORDER BY b.rowid DESC LIMIT ? OFFSET ?',
+            visible = (" WHERE b.word_id=? AND (j.status IN ('queued','running','cancelling') "
+                       "OR (j.status='complete' AND b.committed_at IS NOT NULL))")
+            total = db.execute('SELECT count(*) FROM generation_batches b JOIN studio_jobs j ON j.id=b.id' + visible,
+                               (word_id,)).fetchone()[0]
+            rows = db.execute(BATCH_SELECT + visible + ' ORDER BY b.rowid DESC LIMIT ? OFFSET ?',
                               (word_id, limit, offset)).fetchall()
-            return Page([self._batch(db, word_id, row[0]) for row in rows], total, offset, limit)
+            return Page(self._batches(db, rows), total, offset, limit)
 
     def selection(self, word_id):
         with self.store.transaction() as db:

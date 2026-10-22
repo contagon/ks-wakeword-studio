@@ -62,7 +62,6 @@ class LegacyVersionTests(unittest.TestCase):
         with self.runtime.training.store.transaction() as db:
             self.assertEqual(db.execute('SELECT count(*) FROM deployment_events').fetchone()[0], 0)
             self.assertEqual(db.execute('SELECT count(*) FROM deployment_intents').fetchone()[0], 0)
-        self.assertIsNone(self.runtime.training.successful_version(version.run_id))
         with self.assertRaisesRegex(ValidationError, 'validat'):
             self.runtime.deployment.publish(version.id)
         self.assertTrue(b''.join(self.runtime.deployment.archive(version.id, self.word.id)))

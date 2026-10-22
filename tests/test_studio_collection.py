@@ -301,10 +301,10 @@ class CollectionTests(unittest.TestCase):
         def collect_second():
             nonlocal second_thread
             second_thread = threading.get_ident()
-            return second.collect_device('a')
+            return second.run(['a']).devices[0]
 
         with patch('studio.storage.fcntl.flock', observe_lock), ThreadPoolExecutor(2) as pool:
-            first = pool.submit(self.service.collect_device, 'a')
+            first = pool.submit(lambda: self.service.run(['a']).devices[0])
             self.assertTrue(entered.wait(5))
             other = pool.submit(collect_second)
             try:

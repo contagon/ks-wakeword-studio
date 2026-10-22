@@ -23,7 +23,7 @@ def train(runtime, word):
     job = runtime.training.enqueue(word.id)
     runtime.workers.run_once('gpu')
     assert runtime.jobs.get(job.id).status == 'complete'
-    return runtime.training.successful_version(job.id)
+    return runtime.training.versions(word.id).items[0]
 
 
 def intent(runtime, word):
@@ -75,7 +75,7 @@ def test_skip_unchanged_can_be_disabled_for_scheduled_training(prepared):
     runtime.automation.save(word.id, replace(settings, skip_unchanged=False))
     job = runtime.jobs.enqueue('train', word.id, {'trigger': 'scheduled'})
     runtime.workers.run_once('gpu')
-    assert runtime.training.successful_version(job.id) is not None
+    assert runtime.training.versions(word.id).items[0].run_id == job.id
     assert runtime.training.versions(word.id).total == 2
 
 

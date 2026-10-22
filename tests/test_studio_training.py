@@ -224,7 +224,7 @@ class TrainingTests(unittest.TestCase):
         self.audio()
         seen = []
         def completed(job):
-            seen.append(self.service.successful_version(job.id))
+            seen.append(self.service.versions(job.word_id).items[0])
             raise RuntimeError('deployment failed')
         self.runtime.workers.register_completion('train', completed)
         job = self.run_job()
@@ -240,11 +240,10 @@ class TrainingTests(unittest.TestCase):
         job = self.runtime.jobs.claim('gpu', self.runtime.clock())
         result = self.service.execute(job, JobContext(self.runtime.jobs, job, threading.Event(), self.runner))
         self.assertTrue(Path(result.path).is_dir())
-        self.assertIsNone(self.service.successful_version(job.id))
         self.assertEqual(self.service.versions(self.word.id).total, 0)
         self.runtime.jobs.abandon()
         self.runtime.jobs.recover()
-        self.assertIsNone(self.service.successful_version(job.id))
+        self.assertEqual(self.service.versions(self.word.id).total, 0)
 
     def test_actual_v7_upgrade_preserves_words(self):
         import sqlite3
