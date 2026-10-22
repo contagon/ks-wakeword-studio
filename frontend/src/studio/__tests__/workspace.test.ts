@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
-import TrainerApp from "../../TrainerApp.vue";
+import StudioShell from '../components/StudioShell.vue';
 
 const words = [
   { id: "a", phrase: "Hey Cedar", language: "en", model_id: "cedar", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
@@ -61,7 +61,7 @@ function mediaQuery(initial: boolean) {
   vi.stubGlobal("matchMedia", vi.fn(() => query));
   return { set(matches: boolean) { query.matches = matches; listeners.forEach(listener => listener()); } };
 }
-async function open() { wrapper = mount(TrainerApp, { attachTo: document.body }); await flushPromises(); return wrapper; }
+async function open() { wrapper = mount(StudioShell, { attachTo: document.body }); await flushPromises(); return wrapper; }
 
 describe("compact studio workspace", () => {
   it("groups the approved navigation pages with Automate immediately after Deploy", async () => {

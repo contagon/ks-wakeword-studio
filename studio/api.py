@@ -12,8 +12,7 @@ from studio.models import (CollectionRun, Conflict, CredentialsRequired, Device,
                            RemoteRejected, RemoteUnavailable, NotFound, Page, Recording, Sample, SampleQuery,
                            ValidationError, Wakeword, WakewordUpdate, Job, Schedule, WorkerHealth, Dataset,
                            Batch, GenerationRecipe, GenerationSubmission, GenerationSource, TrainingSettings, RunManifest, ModelVersion, Publication,
-                           DeploymentCapabilities, StudioCapabilities, LegacyRun)
-from studio.migration import LegacyImportSelection, LegacyInventory, MigrationReport
+                           DeploymentCapabilities, LegacyRun)
 from studio.runtime import StudioRuntime
 from studio.automation import settings_from_dict
 from studio.models import AutomationStatus
@@ -166,13 +165,6 @@ class GenerationRecipeBody(BaseModel):
     moss_samples: int | None = None
 
 
-class MigrationImportBody(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    word_id: str
-    phrase_assignments: dict[str, str] = {}
-    model_assignments: dict[str, str] = {}
-
-
 class BatchSelectionBody(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     batch_ids: list[str]
@@ -210,22 +202,6 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.put('/wakewords/{word_id}/automation', response_model=AutomationStatus)
     def save_automation(word_id: str, body: AutomationBody):
         return runtime.automation.save(word_id, settings_from_dict(body.model_dump()))
-
-    @router.get('/capabilities', response_model=StudioCapabilities)
-    def capabilities() -> StudioCapabilities:
-        return runtime.capabilities()
-
-    @router.get('/migration', response_model=LegacyInventory)
-    def inspect_migration() -> LegacyInventory:
-        return runtime.migration.inspect()
-
-    @router.post('/migration/import', response_model=MigrationReport)
-    def import_migration(body: MigrationImportBody) -> MigrationReport:
-        # Workspace is chosen only through an explicit assignment, never browser state.
-        if any(value != body.word_id for value in (*body.phrase_assignments.values(), *body.model_assignments.values())):
-            raise ValidationError('Legacy assignments must use the chosen workspace')
-        return runtime.migration.import_into(body.word_id, LegacyImportSelection(
-            phrase_assignments=body.phrase_assignments, model_assignments=body.model_assignments))
 
     @router.get('/deployment/capabilities', response_model=DeploymentCapabilities)
     def deployment_capabilities():

@@ -4742,189 +4742,12 @@ var Hc = { class: "flex flex-wrap items-center justify-between gap-3 mb-4" }, Uc
 			])])) : Y("", !0)
 		]));
 	}
-});
-//#endregion
-//#region src/api.ts
-async function Dl(e, t = {}) {
-	let n = await fetch(e, {
-		credentials: "same-origin",
-		...t,
-		headers: {
-			Accept: "application/json",
-			...t.headers || {}
-		}
-	}), r = (n.headers.get("content-type") || "").includes("application/json") ? await n.json() : await n.text();
-	if (!n.ok) {
-		let e = typeof r == "object" && r ? r.error || r.detail || r.message : r;
-		throw Error(String(e || `Request failed (${n.status})`));
-	}
-	return r;
-}
-function Ol(e) {
-	return Dl(e);
-}
-//#endregion
-//#region src/trainerStore.ts
-var kl = () => ({
-	running: !1,
-	exit_code: null,
-	log_lines: []
-}), Al = () => ({
-	personal: [],
-	negative: [],
-	personal_count: 0,
-	negative_count: 0
-}), jl = /* @__PURE__ */ Nt({
-	activeView: "trainer",
-	initialized: !1,
-	busy: /* @__PURE__ */ new Set(),
-	phrase: "",
-	language: "en",
-	englishAccent: "mixed",
-	ttsMode: "hybrid",
-	languages: [{
-		code: "en",
-		label: "English (en)",
-		engines: ["omnivoice"]
-	}],
-	englishAccents: [
-		{
-			code: "mixed",
-			label: "Mixed English"
-		},
-		{
-			code: "australian",
-			label: "Australian"
-		},
-		{
-			code: "american",
-			label: "American"
-		},
-		{
-			code: "british",
-			label: "British"
-		},
-		{
-			code: "canadian",
-			label: "Canadian"
-		},
-		{
-			code: "irish",
-			label: "Irish"
-		},
-		{
-			code: "scottish",
-			label: "Scottish"
-		},
-		{
-			code: "new_zealand",
-			label: "New Zealand"
-		},
-		{
-			code: "indian",
-			label: "Indian"
-		},
-		{
-			code: "south_african",
-			label: "South African"
-		}
-	],
-	session: {},
-	samples: Al(),
-	captured: {
-		items: [],
-		captured_count: 0,
-		personal_count: 0,
-		negative_count: 0
-	},
-	training: kl(),
-	auto: {},
-	autoForm: {
-		enabled: !1,
-		wake_phrase: "",
-		language: "en",
-		english_accent: "mixed",
-		stt_engine: "faster_whisper",
-		minimum_transcript_chars: 2,
-		delete_confirmed_wakes: !1,
-		promote_close_misses: !1,
-		schedule_hours: 24,
-		minimum_new_negatives: 3,
-		advertised_base_url: "",
-		tater_url: "http://127.0.0.1:8501",
-		notify_satellites: !0
-	},
-	wakeWords: [],
-	managedData: {
-		items: [],
-		total_size_bytes: 0,
-		total_file_count: 0
-	},
-	selectedFiles: [],
-	sampleBucket: "personal",
-	samplePage: {
-		personal: 0,
-		negative: 0
-	},
-	uploadProgress: 0,
-	uploadLabel: "No upload in progress",
-	uploadDetail: "Choose files and upload when you are ready.",
-	consoleOpen: !1,
-	taterLinkOpen: !1,
-	trimItem: null,
-	trimBucket: "personal",
-	toast: {
-		message: "",
-		tone: "success",
-		serial: 0
-	}
-});
-function Ml(e, t) {
-	t ? jl.busy.add(e) : jl.busy.delete(e);
-}
-function Nl(e, t = "success") {
-	jl.toast = {
-		message: String(e || ""),
-		tone: t,
-		serial: jl.toast.serial + 1
-	};
-}
-async function Pl(e = !1) {
-	e || Ml("samples", !0);
-	try {
-		let e = await Ol("/api/samples");
-		jl.samples = {
-			...Al(),
-			...e
-		};
-		for (let e of ["personal", "negative"]) {
-			let t = Math.max(0, Math.ceil((jl.samples[e]?.length || 0) / 50) - 1);
-			jl.samplePage[e] = Math.min(jl.samplePage[e], t);
-		}
-		return e;
-	} finally {
-		e || Ml("samples", !1);
-	}
-}
-//#endregion
-//#region src/components/AudioTrimModal.vue?vue&type=script&setup=true&lang.ts
-var Fl = { class: "legacy-scope" }, Il = {
+}), Dl = { class: "legacy-scope" }, Ol = {
 	class: "modal trim-modal",
 	role: "dialog",
 	"aria-modal": "true",
 	"aria-label": "Trim audio"
-}, Ll = { class: "range-grid" }, Rl = ["max"], zl = ["min"], Bl = {
-	class: "modal trim-modal",
-	role: "dialog",
-	"aria-modal": "true",
-	"aria-label": "Trim audio"
-}, Vl = { class: "modal-head" }, Hl = {
-	key: 0,
-	class: "empty-state"
-}, Ul = { class: "range-grid" }, Wl = ["max"], Gl = ["min", "max"], Kl = { class: "row space" }, ql = { class: "pill" }, Jl = {
-	key: 0,
-	class: "pill success"
-}, Yl = { class: "row modal-actions" }, Xl = ["disabled"], Zl = /* @__PURE__ */ sr({
+}, kl = { class: "range-grid" }, Al = ["max"], jl = ["min"], Ml = /* @__PURE__ */ sr({
 	__name: "AudioTrimModal",
 	props: { studioTarget: {} },
 	emits: ["save", "close"],
@@ -4942,138 +4765,35 @@ var Fl = { class: "legacy-scope" }, Il = {
 				end: a.value
 			});
 		}
-		let c = /* @__PURE__ */ z(null), l = /* @__PURE__ */ z(null), u = /* @__PURE__ */ z(0), d = /* @__PURE__ */ z(0), f = /* @__PURE__ */ z(0), p = /* @__PURE__ */ z([]), m = /* @__PURE__ */ z(!1), h = /* @__PURE__ */ z(!1);
-		H(() => jl.trimItem, async (e) => {
-			if (!e) l.value = null;
-			else {
-				m.value = !0;
-				try {
-					let t = `/api/audio/${encodeURIComponent(jl.trimBucket)}/${encodeURIComponent(e.saved_as)}`, n = await fetch(t);
-					if (!n.ok) throw Error("Audio could not be loaded.");
-					let r = new (window.AudioContext || window.webkitAudioContext)();
-					l.value = await r.decodeAudioData(await n.arrayBuffer()), u.value = l.value.duration, d.value = 0, f.value = u.value, await r.close();
-					try {
-						let t = await Dl(`/api/samples/${encodeURIComponent(jl.trimBucket)}/${encodeURIComponent(e.saved_as)}/vad`, { method: "POST" });
-						p.value = Array.isArray(t.segments) ? t.segments : [], p.value.length && (d.value = Math.max(0, Number(p.value[0].start || 0)), f.value = Math.min(u.value, Number(p.value[0].end || u.value)));
-					} catch {
-						p.value = [];
-					}
-					await vn(), v();
-				} catch (e) {
-					Nl(e instanceof Error ? e.message : "Audio could not be loaded.", "error"), g();
-				} finally {
-					m.value = !1;
-				}
-			}
-		}, { immediate: !0 }), H([d, f], () => v());
-		function g() {
-			jl.trimItem = null, l.value = null, p.value = [];
-		}
-		function _() {
-			let e = p.value[0];
-			e && (d.value = Number(e.start), f.value = Number(e.end));
-		}
-		function v() {
-			let e = c.value, t = l.value;
-			if (!e || !t || !u.value) return;
-			let n = e.getBoundingClientRect();
-			if (!n.width || !n.height) return;
-			let r = window.devicePixelRatio || 1;
-			e.width = Math.round(n.width * r), e.height = Math.round(n.height * r);
-			let i = e.getContext("2d");
-			if (!i) return;
-			i.scale(r, r);
-			let a = n.width, o = n.height, s = o / 2, m = t.getChannelData(0), h = Math.max(1, Math.floor(m.length / a));
-			i.clearRect(0, 0, a, o), i.strokeStyle = "rgba(222, 218, 212, .24)", i.lineWidth = 1, i.beginPath();
-			for (let e = 0; e < a; e += 1) {
-				let t = 1, n = -1;
-				for (let r = 0; r < h; r += 1) {
-					let i = m[Math.floor(e) * h + r] || 0;
-					t = Math.min(t, i), n = Math.max(n, i);
-				}
-				i.moveTo(e, s + t * s * .84), i.lineTo(e, s + n * s * .84);
-			}
-			i.stroke();
-			let g = d.value / u.value * a, _ = f.value / u.value * a;
-			i.fillStyle = "rgba(8, 8, 9, .66)", i.fillRect(0, 0, g, o), i.fillRect(_, 0, a - _, o), i.fillStyle = "rgba(255, 145, 52, .12)", i.fillRect(g, 0, _ - g, o), i.strokeStyle = "#ff9134", i.lineWidth = 2;
-			for (let e of [g, _]) i.beginPath(), i.moveTo(e, 0), i.lineTo(e, o), i.stroke();
-			i.strokeStyle = "rgba(68, 225, 165, .55)";
-			for (let e of p.value) {
-				let t = e.start / u.value * a;
-				i.beginPath(), i.moveTo(t, 0), i.lineTo(t, o), i.stroke();
-			}
-		}
-		function y() {
-			let e = l.value;
-			if (!e) return;
-			let t = new (window.AudioContext || window.webkitAudioContext)(), n = t.createBufferSource();
-			n.buffer = e, n.connect(t.destination), n.start(0, d.value, Math.max(.01, f.value - d.value)), n.onended = () => void t.close();
-		}
-		async function b() {
-			let e = l.value;
-			if (!e) throw Error("Audio is not loaded.");
-			let t = Math.floor(d.value * e.sampleRate), n = Math.min(Math.floor(f.value * e.sampleRate), e.length), r = 16e3, i;
-			if (e.sampleRate === r) i = e.getChannelData(0).slice(t, n);
-			else {
-				let a = Math.max(1, Math.floor((n - t) * r / e.sampleRate)), o = new OfflineAudioContext(1, a, r), s = o.createBufferSource();
-				s.buffer = e, s.connect(o.destination), s.start(0, d.value, f.value - d.value), i = (await o.startRendering()).getChannelData(0);
-			}
-			let a = /* @__PURE__ */ new ArrayBuffer(44 + i.length * 2), o = new DataView(a);
-			o.setUint32(0, 1380533830, !1), o.setUint32(4, 36 + i.length * 2, !0), o.setUint32(8, 1463899717, !1), o.setUint32(12, 1718449184, !1), o.setUint32(16, 16, !0), o.setUint16(20, 1, !0), o.setUint16(22, 1, !0), o.setUint32(24, r, !0), o.setUint32(28, r * 2, !0), o.setUint16(32, 2, !0), o.setUint16(34, 16, !0), o.setUint32(36, 1684108385, !1), o.setUint32(40, i.length * 2, !0);
-			for (let e = 0; e < i.length; e += 1) o.setInt16(44 + e * 2, Math.max(-32768, Math.min(32767, Math.round(i[e] * 32767))), !0);
-			return new Blob([a], { type: "audio/wav" });
-		}
-		async function x() {
-			let e = jl.trimItem;
-			if (e) {
-				h.value = !0;
-				try {
-					let t = new FormData();
-					t.append("file", await b(), "trimmed.wav"), t.append("bucket", jl.trimBucket), t.append("source_file", e.saved_as), t.append("start_time", d.value.toFixed(3)), t.append("end_time", f.value.toFixed(3));
-					let n = await Dl("/api/samples/trim", {
-						method: "POST",
-						body: t
-					});
-					g(), await Pl(!0), Nl(n.message || "Trimmed sample saved.");
-				} catch (e) {
-					Nl(e instanceof Error ? e.message : "Trim failed.", "error");
-				} finally {
-					h.value = !1;
-				}
-			}
-		}
-		function S() {
-			jl.trimItem && v();
-		}
-		return window.addEventListener("resize", S), Er(() => window.removeEventListener("resize", S)), (t, n) => (G(), ca($n, { to: "body" }, [q("div", Fl, [e.studioTarget ? (G(), K("div", {
+		return (t, n) => (G(), ca($n, { to: "body" }, [q("div", Dl, [e.studioTarget ? (G(), K("div", {
 			key: 0,
 			class: "modal-backdrop",
 			onClick: Yo(o, ["self"])
-		}, [q("section", Il, [
-			q("header", { class: "modal-head" }, [n[4] ||= q("div", null, [q("span", { class: "eyebrow" }, "Studio audio editor"), q("h2", null, "Trim sample")], -1), q("button", {
+		}, [q("section", Ol, [
+			q("header", { class: "modal-head" }, [n[2] ||= q("div", null, [q("span", { class: "eyebrow" }, "Studio audio editor"), q("h2", null, "Trim sample")], -1), q("button", {
 				type: "button",
 				class: "button ghost",
 				onClick: o
 			}, "Close")]),
-			n[7] ||= q("p", { class: "muted" }, "Trimming is non-destructive: the original audio and provenance remain available.", -1),
-			q("div", Ll, [q("label", null, [n[5] ||= q("span", null, "Start seconds", -1), V(q("input", {
+			n[5] ||= q("p", { class: "muted" }, "Trimming is non-destructive: the original audio and provenance remain available.", -1),
+			q("div", kl, [q("label", null, [n[3] ||= q("span", null, "Start seconds", -1), V(q("input", {
 				"onUpdate:modelValue": n[0] ||= (e) => i.value = e,
 				type: "range",
 				min: "0",
 				max: Math.max(0, a.value - .01),
 				step: ".01"
-			}, null, 8, Rl), [[
+			}, null, 8, Al), [[
 				zo,
 				i.value,
 				void 0,
 				{ number: !0 }
-			]])]), q("label", null, [n[6] ||= q("span", null, "End seconds", -1), V(q("input", {
+			]])]), q("label", null, [n[4] ||= q("span", null, "End seconds", -1), V(q("input", {
 				"onUpdate:modelValue": n[1] ||= (e) => a.value = e,
 				type: "range",
 				min: i.value + .01,
 				max: "60",
 				step: ".01"
-			}, null, 8, zl), [[
+			}, null, 8, jl), [[
 				zo,
 				a.value,
 				void 0,
@@ -5087,109 +4807,50 @@ var Fl = { class: "legacy-scope" }, Il = {
 				type: "button",
 				onClick: o
 			}, "Cancel")])
-		])])) : B(jl).trimItem ? (G(), K("div", {
-			key: 1,
-			class: "modal-backdrop",
-			onClick: Yo(g, ["self"])
-		}, [q("section", Bl, [
-			q("header", Vl, [q("div", null, [n[8] ||= q("span", { class: "eyebrow" }, "Audio editor", -1), q("h2", null, "Trim " + I(B(jl).trimItem.saved_as), 1)]), q("button", {
-				type: "button",
-				class: "button ghost",
-				onClick: g
-			}, "Close")]),
-			n[9] ||= q("p", { class: "muted" }, "Keep the spoken wake phrase and remove excess silence or noise. VAD markers appear in green.", -1),
-			m.value ? (G(), K("div", Hl, "Loading waveform…")) : (G(), K(W, { key: 1 }, [
-				q("canvas", {
-					ref_key: "canvas",
-					ref: c,
-					class: "waveform"
-				}, null, 512),
-				q("div", Ul, [q("label", null, [q("span", null, "Start · " + I(d.value.toFixed(2)) + "s", 1), V(q("input", {
-					"onUpdate:modelValue": n[2] ||= (e) => d.value = e,
-					type: "range",
-					min: "0",
-					max: Math.max(0, f.value - .01),
-					step: ".01"
-				}, null, 8, Wl), [[
-					zo,
-					d.value,
-					void 0,
-					{ number: !0 }
-				]])]), q("label", null, [q("span", null, "End · " + I(f.value.toFixed(2)) + "s", 1), V(q("input", {
-					"onUpdate:modelValue": n[3] ||= (e) => f.value = e,
-					type: "range",
-					min: Math.min(u.value, d.value + .01),
-					max: u.value,
-					step: ".01"
-				}, null, 8, Gl), [[
-					zo,
-					f.value,
-					void 0,
-					{ number: !0 }
-				]])])]),
-				q("div", Kl, [q("span", ql, "Selection " + I(Math.max(0, f.value - d.value).toFixed(2)) + "s", 1), p.value.length ? (G(), K("span", Jl, I(p.value.length) + " speech segment" + I(p.value.length === 1 ? "" : "s"), 1)) : Y("", !0)]),
-				q("div", Yl, [
-					q("button", {
-						type: "button",
-						onClick: y
-					}, "Play selection"),
-					p.value.length ? (G(), K("button", {
-						key: 0,
-						type: "button",
-						onClick: _
-					}, "Select first VAD")) : Y("", !0),
-					q("button", {
-						type: "button",
-						class: "button primary",
-						disabled: h.value,
-						onClick: x
-					}, I(h.value ? "Saving…" : "Save trim"), 9, Xl)
-				])
-			], 64))
 		])])) : Y("", !0)])]));
 	}
-}), Ql = {
+}), Nl = {
 	key: 0,
 	"data-samples-status": "",
 	class: "studio-note",
 	role: "status",
 	"aria-live": "polite"
-}, $l = {
+}, Pl = {
 	key: 1,
 	"data-samples-error": "",
 	class: "studio-note",
 	role: "alert",
 	"aria-live": "assertive"
-}, eu = { class: "studio-card mb-4" }, tu = {
+}, Fl = { class: "studio-card mb-4" }, Il = {
 	"data-sample-filters": "",
 	class: "grid gap-3 sm:grid-cols-3 lg:grid-cols-5"
-}, nu = ["aria-busy"], ru = { key: 0 }, iu = {
+}, Ll = ["aria-busy"], Rl = { key: 0 }, zl = {
 	key: 1,
 	class: "w-full text-sm"
-}, au = ["data-row-id"], ou = {
+}, Bl = ["data-row-id"], Vl = {
 	key: 0,
 	class: "block studio-muted"
-}, su = {
+}, Hl = {
 	key: 0,
 	class: "block studio-muted"
-}, cu = { class: "flex flex-wrap gap-1" }, lu = [
+}, Ul = { class: "flex flex-wrap gap-1" }, Wl = [
 	"disabled",
 	"aria-pressed",
 	"aria-label",
 	"onClick"
-], uu = ["value", "onChange"], du = {
+], Gl = ["value", "onChange"], Kl = {
 	key: 0,
 	value: "pending",
 	disabled: ""
-}, fu = ["onClick"], pu = ["onClick"], mu = { key: 0 }, hu = {
+}, ql = ["onClick"], Jl = ["onClick"], Yl = { key: 0 }, Xl = {
 	key: 2,
 	class: "studio-modal-backdrop"
-}, gu = {
+}, Zl = {
 	class: "studio-card",
 	role: "dialog",
 	"aria-modal": "true",
 	"aria-label": "Confirm sample deletion"
-}, _u = /* @__PURE__ */ sr({
+}, Ql = /* @__PURE__ */ sr({
 	__name: "SamplesPage",
 	setup(e) {
 		let t = ws(), n = lc();
@@ -5307,9 +4968,9 @@ var Fl = { class: "legacy-scope" }, Il = {
 			g?.abort(), _?.abort(), S();
 		}), (e, t) => (G(), K("section", null, [
 			t[25] ||= q("div", { class: "flex flex-wrap items-center justify-between gap-3 mb-4" }, [q("div", null, [q("h1", null, "Samples"), q("p", { class: "studio-muted" }, "Library of collected, recorded and imported audio with non-destructive trims.")])], -1),
-			l.value ? (G(), K("p", Ql, I(l.value), 1)) : Y("", !0),
-			c.value ? (G(), K("p", $l, I(c.value), 1)) : Y("", !0),
-			q("div", eu, [q("div", tu, [
+			l.value ? (G(), K("p", Nl, I(l.value), 1)) : Y("", !0),
+			c.value ? (G(), K("p", Pl, I(c.value), 1)) : Y("", !0),
+			q("div", Fl, [q("div", Il, [
 				q("label", null, [t[10] ||= J("Label", -1), V(q("select", {
 					name: "label",
 					"onUpdate:modelValue": t[0] ||= (e) => u.value.label = e,
@@ -5361,7 +5022,7 @@ var Fl = { class: "legacy-scope" }, Il = {
 				role: "region",
 				"aria-label": "Samples table; scroll horizontally to view all actions",
 				tabindex: "0"
-			}, [s.value ? (G(), K("p", ru, "Loading samples…")) : (G(), K("table", iu, [t[22] ||= q("thead", null, [q("tr", null, [
+			}, [s.value ? (G(), K("p", Rl, "Loading samples…")) : (G(), K("table", zl, [t[22] ||= q("thead", null, [q("tr", null, [
 				q("th", null, "Sample"),
 				q("th", null, "Label"),
 				q("th", null, "Source"),
@@ -5371,11 +5032,11 @@ var Fl = { class: "legacy-scope" }, Il = {
 				key: e.id,
 				"data-row-id": e.id
 			}, [
-				q("td", null, [J(I(e.recording?.clip_id ?? e.id), 1), e.recording ? (G(), K("small", ou, I(e.recording.phrase) + " · " + I(e.recording.engine) + " · " + I(te(e)), 1)) : Y("", !0)]),
+				q("td", null, [J(I(e.recording?.clip_id ?? e.id), 1), e.recording ? (G(), K("small", Vl, I(e.recording.phrase) + " · " + I(e.recording.engine) + " · " + I(te(e)), 1)) : Y("", !0)]),
 				q("td", null, I(e.label), 1),
-				q("td", null, [J(I(j(e)), 1), e.capture ? (G(), K("small", su, I(e.capture.trim_method === "silero" ? "VAD trim" : e.capture.trim_method === "manual" ? "Manual trim" : "Full recording") + " · " + I(e.capture.duration_s.toFixed(2)) + " s original", 1)) : Y("", !0)]),
+				q("td", null, [J(I(j(e)), 1), e.capture ? (G(), K("small", Hl, I(e.capture.trim_method === "silero" ? "VAD trim" : e.capture.trim_method === "manual" ? "Manual trim" : "Full recording") + " · " + I(e.capture.duration_s.toFixed(2)) + " s original", 1)) : Y("", !0)]),
 				q("td", null, "rev " + I(e.revision), 1),
-				q("td", null, [q("div", cu, [
+				q("td", null, [q("div", Ul, [
 					q("button", {
 						type: "button",
 						"data-action": "play",
@@ -5383,29 +5044,29 @@ var Fl = { class: "legacy-scope" }, Il = {
 						"aria-pressed": m.value === e.id,
 						"aria-label": m.value === e.id ? "Stop sample" : "Play sample",
 						onClick: (t) => C(e)
-					}, I(h.value === e.id ? "Loading…" : m.value === e.id ? "Stop" : "Play"), 9, lu),
+					}, I(h.value === e.id ? "Loading…" : m.value === e.id ? "Stop" : "Play"), 9, Wl),
 					q("label", null, [t[20] ||= q("span", { class: "sr-only" }, "Relabel", -1), q("select", {
 						"data-action": "relabel",
 						value: e.label,
 						onChange: (t) => O(e, t)
 					}, [
-						e.label === "pending" ? (G(), K("option", du, "Set label…")) : Y("", !0),
+						e.label === "pending" ? (G(), K("option", Kl, "Set label…")) : Y("", !0),
 						t[17] ||= q("option", { value: "positive" }, "Positive", -1),
 						t[18] ||= q("option", { value: "negative" }, "Negative", -1),
 						t[19] ||= q("option", { value: "discarded" }, "Discarded", -1)
-					], 40, uu)]),
+					], 40, Gl)]),
 					q("button", {
 						type: "button",
 						"data-action": "trim",
 						onClick: (t) => d.value = e
-					}, "Trim", 8, fu),
+					}, "Trim", 8, ql),
 					q("button", {
 						type: "button",
 						"data-action": "delete",
 						onClick: (t) => f.value = e
-					}, "Delete", 8, pu)
+					}, "Delete", 8, Jl)
 				])])
-			], 8, au))), 128)), r.value.length ? Y("", !0) : (G(), K("tr", mu, [...t[21] ||= [q("td", { colspan: "5" }, "No samples match these filters.", -1)]]))])])), pa(mc, {
+			], 8, Bl))), 128)), r.value.length ? Y("", !0) : (G(), K("tr", Yl, [...t[21] ||= [q("td", { colspan: "5" }, "No samples match these filters.", -1)]]))])])), pa(mc, {
 				total: i.value,
 				offset: a.value,
 				limit: o.value,
@@ -5419,8 +5080,8 @@ var Fl = { class: "legacy-scope" }, Il = {
 				"offset",
 				"limit",
 				"loading"
-			])], 8, nu),
-			pa(Zl, {
+			])], 8, Ll),
+			pa(Ml, {
 				"studio-target": d.value ? {
 					wordId: d.value.word_id,
 					sampleId: d.value.id,
@@ -5430,7 +5091,7 @@ var Fl = { class: "legacy-scope" }, Il = {
 				onSave: t[6] ||= (e) => k(e),
 				onClose: t[7] ||= (e) => d.value = null
 			}, null, 8, ["studio-target"]),
-			f.value ? (G(), K("div", hu, [q("section", gu, [
+			f.value ? (G(), K("div", Xl, [q("section", Zl, [
 				t[23] ||= q("h2", null, "Remove sample?", -1),
 				t[24] ||= q("p", null, "This hides the sample but retains provenance and completed-run inputs.", -1),
 				q("button", {
@@ -5450,7 +5111,7 @@ var Fl = { class: "legacy-scope" }, Il = {
 });
 //#endregion
 //#region src/studio/capture.ts
-function vu() {
+function $l() {
 	let e = /* @__PURE__ */ z("idle"), t = /* @__PURE__ */ Gt(null), n = /* @__PURE__ */ z(""), r = /* @__PURE__ */ z(0), i = 0, a, o, s;
 	function c() {
 		clearInterval(s), s = void 0, a?.getTracks().forEach((e) => e.stop()), a = void 0;
@@ -5527,39 +5188,39 @@ function vu() {
 }
 //#endregion
 //#region src/studio/components/CaptureReview.vue?vue&type=script&setup=true&lang.ts
-var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items-center justify-between gap-2" }, xu = { class: "studio-muted text-xs" }, Su = {
+var eu = { class: "studio-capture-review" }, tu = { class: "flex flex-wrap items-center justify-between gap-2" }, nu = { class: "studio-muted text-xs" }, ru = {
 	key: 0,
 	class: "studio-note",
 	role: "status"
-}, Cu = {
+}, iu = {
 	key: 1,
 	class: "studio-note",
 	role: "status"
-}, wu = {
+}, au = {
 	key: 2,
 	class: "studio-muted",
 	role: "status"
-}, Tu = {
+}, ou = {
 	key: 3,
 	class: "studio-capture-wave",
 	viewBox: "0 0 640 80",
 	preserveAspectRatio: "none",
 	role: "img",
 	"aria-label": "Recorded audio waveform with selected trim region"
-}, Eu = [
+}, su = [
 	"x1",
 	"x2",
 	"y1",
 	"y2"
-], Du = ["width"], Ou = ["x", "width"], ku = {
+], cu = ["width"], lu = ["x", "width"], uu = {
 	key: 4,
 	role: "alert",
 	class: "studio-note"
-}, Au = ["disabled"], ju = { class: "flex flex-wrap gap-2 mb-3" }, Mu = ["disabled"], Nu = ["disabled", "aria-expanded"], Pu = ["disabled"], Fu = ["max"], Iu = ["max"], Lu = {
+}, du = ["disabled"], fu = { class: "flex flex-wrap gap-2 mb-3" }, pu = ["disabled"], mu = ["disabled", "aria-expanded"], hu = ["disabled"], gu = ["max"], _u = ["max"], vu = {
 	key: 6,
 	class: "studio-note",
 	role: "alert"
-}, Ru = /* @__PURE__ */ sr({
+}, yu = /* @__PURE__ */ sr({
 	__name: "CaptureReview",
 	props: {
 		audio: {},
@@ -5641,11 +5302,11 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 			e && v();
 		}), Er(() => {
 			g++, y();
-		}), (e, t) => (G(), K("div", yu, [
-			q("div", bu, [t[3] ||= q("h2", null, "Review your sample", -1), q("span", xu, I(s.value === "silero" ? "Auto-trimmed" : s.value === "manual" ? "Manual trim" : "Full clip") + " · " + I(Math.max(0, o.value - a.value).toFixed(2)) + " s retained", 1)]),
-			r.preview.duration_limited ? (G(), K("p", Su, "Training audio is limited to 10 minutes, including any delayed browser stop. Your full original recording is retained when saved.")) : Y("", !0),
-			r.preview.warning ? (G(), K("p", Cu, I(r.preview.warning === "no_speech" ? "No speech detected. The full clip is selected; background-noise negatives can still be saved." : "Automatic speech trimming is unavailable. The full clip is selected; adjust it manually if needed."), 1)) : Y("", !0),
-			l.value ? (G(), K("p", wu, "Preparing waveform…")) : f.value ? (G(), K("svg", Tu, [
+		}), (e, t) => (G(), K("div", eu, [
+			q("div", tu, [t[3] ||= q("h2", null, "Review your sample", -1), q("span", nu, I(s.value === "silero" ? "Auto-trimmed" : s.value === "manual" ? "Manual trim" : "Full clip") + " · " + I(Math.max(0, o.value - a.value).toFixed(2)) + " s retained", 1)]),
+			r.preview.duration_limited ? (G(), K("p", ru, "Training audio is limited to 10 minutes, including any delayed browser stop. Your full original recording is retained when saved.")) : Y("", !0),
+			r.preview.warning ? (G(), K("p", iu, I(r.preview.warning === "no_speech" ? "No speech detected. The full clip is selected; background-noise negatives can still be saved." : "Automatic speech trimming is unavailable. The full clip is selected; adjust it manually if needed."), 1)) : Y("", !0),
+			l.value ? (G(), K("p", au, "Preparing waveform…")) : f.value ? (G(), K("svg", ou, [
 				(G(!0), K(W, null, U(p.value, (e, t) => (G(), K("line", {
 					key: t,
 					x1: t * 4 + 2,
@@ -5654,7 +5315,7 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 					y2: 40 + e,
 					stroke: "currentColor",
 					"stroke-width": "2"
-				}, null, 8, Eu))), 128)),
+				}, null, 8, su))), 128)),
 				q("rect", {
 					x: "0",
 					y: "0",
@@ -5662,7 +5323,7 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 					height: "80",
 					fill: "var(--studio-bg)",
 					opacity: ".85"
-				}, null, 8, Du),
+				}, null, 8, cu),
 				q("rect", {
 					x: o.value / r.preview.duration_s * 640,
 					y: "0",
@@ -5670,26 +5331,26 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 					height: "80",
 					fill: "var(--studio-bg)",
 					opacity: ".85"
-				}, null, 8, Ou)
+				}, null, 8, lu)
 			])) : Y("", !0),
-			u.value ? (G(), K("p", ku, [J(I(u.value) + " ", 1), q("button", {
+			u.value ? (G(), K("p", uu, [J(I(u.value) + " ", 1), q("button", {
 				type: "button",
 				disabled: l.value || r.disabled,
 				onClick: b
-			}, "Retry preview", 8, Au)])) : Y("", !0),
-			q("div", ju, [q("button", {
+			}, "Retry preview", 8, du)])) : Y("", !0),
+			q("div", fu, [q("button", {
 				type: "button",
 				"data-action": "play-capture",
 				"aria-keyshortcuts": "Space",
 				disabled: !f.value || !_.value || r.disabled,
 				onClick: x
-			}, I(d.value ? "Stop preview" : "▶ Play trimmed sample"), 9, Mu), q("button", {
+			}, I(d.value ? "Stop preview" : "▶ Play trimmed sample"), 9, pu), q("button", {
 				type: "button",
 				"data-action": "adjust-trim",
 				disabled: r.disabled,
 				"aria-expanded": c.value,
 				onClick: t[0] ||= (e) => c.value = !c.value
-			}, "Adjust trim", 8, Nu)]),
+			}, "Adjust trim", 8, mu)]),
 			c.value ? (G(), K("fieldset", {
 				key: 5,
 				class: "studio-capture-bounds",
@@ -5704,7 +5365,7 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 					max: r.preview.duration_s,
 					step: "0.01",
 					onInput: S
-				}, null, 40, Fu), [[
+				}, null, 40, gu), [[
 					zo,
 					a.value,
 					void 0,
@@ -5718,52 +5379,52 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 					max: r.preview.duration_s,
 					step: "0.01",
 					onInput: S
-				}, null, 40, Iu), [[
+				}, null, 40, _u), [[
 					zo,
 					o.value,
 					void 0,
 					{ number: !0 }
 				]])])
-			], 8, Pu)) : Y("", !0),
-			_.value ? Y("", !0) : (G(), K("p", Lu, "Choose a start before the end, within the recorded duration.")),
+			], 8, hu)) : Y("", !0),
+			_.value ? Y("", !0) : (G(), K("p", vu, "Choose a start before the end, within the recorded duration.")),
 			t[7] ||= q("p", { class: "studio-muted text-xs" }, "Only the beginning and end are trimmed. Interior pauses stay intact. Original audio is retained.", -1)
 		]));
 	}
-}), zu = { class: "flex flex-wrap items-start justify-between gap-3 mb-4" }, Bu = ["href"], Vu = {
+}), bu = { class: "flex flex-wrap items-start justify-between gap-3 mb-4" }, xu = ["href"], Su = {
 	key: 0,
 	class: "studio-note"
-}, Hu = {
+}, Cu = {
 	key: 1,
 	class: "studio-note",
 	role: "status",
 	"aria-live": "polite"
-}, Uu = {
+}, wu = {
 	key: 2,
 	class: "studio-note",
 	role: "alert"
-}, Wu = { class: "studio-card mb-4" }, Gu = { class: "flex-1" }, Ku = ["disabled"], qu = ["disabled"], Ju = ["disabled"], Yu = ["aria-busy"], Xu = { class: "flex flex-wrap items-center justify-between gap-4" }, Zu = {
+}, Tu = { class: "studio-card mb-4" }, Eu = { class: "flex-1" }, Du = ["disabled"], Ou = ["disabled"], ku = ["disabled"], Au = ["aria-busy"], ju = { class: "flex flex-wrap items-center justify-between gap-4" }, Mu = {
 	class: "studio-capture-label",
 	role: "group",
 	"aria-label": "Recording sample label"
-}, Qu = [
+}, Nu = [
 	"data-label",
 	"aria-pressed",
 	"disabled",
 	"onClick"
-], $u = { class: "studio-capture-area" }, ed = {
+], Pu = { class: "studio-capture-area" }, Fu = {
 	class: "studio-muted",
 	role: "status"
-}, td = { class: "studio-capture-timer" }, nd = ["disabled"], rd = {
+}, Iu = { class: "studio-capture-timer" }, Lu = ["disabled"], Ru = {
 	key: 0,
 	class: "studio-note mt-3",
 	role: "status"
-}, id = {
+}, zu = {
 	key: 1,
 	class: "mt-4"
-}, ad = { class: "flex flex-wrap items-center justify-end gap-2 mt-3" }, od = ["disabled"], sd = ["disabled"], cd = /* @__PURE__ */ sr({
+}, Bu = { class: "flex flex-wrap items-center justify-end gap-2 mt-3" }, Vu = ["disabled"], Hu = ["disabled"], Uu = /* @__PURE__ */ sr({
 	__name: "RecordPage",
 	setup(e) {
-		let t = ws(), n = vu(), { state: r, audio: i, elapsed: a } = n, o = /* @__PURE__ */ z("positive"), s = /* @__PURE__ */ Gt(null), c = /* @__PURE__ */ z(null), l = /* @__PURE__ */ z(""), u = /* @__PURE__ */ z(""), d = /* @__PURE__ */ z(!1), f = /* @__PURE__ */ z(!1), p = /* @__PURE__ */ z(!1), m = /* @__PURE__ */ Gt(null), h = /* @__PURE__ */ z("positive"), g = /* @__PURE__ */ z(), _ = 0, v, y, b, x = X(() => d.value || f.value || p.value || r.value === "requesting" || r.value === "stopping"), S = X(() => !!t.selectedId.value && !x.value && !i.value), C = X(() => !!i.value && !d.value && r.value !== "recording"), w = /* @__PURE__ */ z(), T = X(() => `${String(Math.floor(a.value / 60)).padStart(2, "0")}:${String(a.value % 60).padStart(2, "0")}`);
+		let t = ws(), n = $l(), { state: r, audio: i, elapsed: a } = n, o = /* @__PURE__ */ z("positive"), s = /* @__PURE__ */ Gt(null), c = /* @__PURE__ */ z(null), l = /* @__PURE__ */ z(""), u = /* @__PURE__ */ z(""), d = /* @__PURE__ */ z(!1), f = /* @__PURE__ */ z(!1), p = /* @__PURE__ */ z(!1), m = /* @__PURE__ */ Gt(null), h = /* @__PURE__ */ z("positive"), g = /* @__PURE__ */ z(), _ = 0, v, y, b, x = X(() => d.value || f.value || p.value || r.value === "requesting" || r.value === "stopping"), S = X(() => !!t.selectedId.value && !x.value && !i.value), C = X(() => !!i.value && !d.value && r.value !== "recording"), w = /* @__PURE__ */ z(), T = X(() => `${String(Math.floor(a.value / 60)).padStart(2, "0")}:${String(a.value % 60).padStart(2, "0")}`);
 		function E() {
 			_++, v?.abort(), y?.abort(), n.reset(), s.value = null, c.value = null, d.value = !1, f.value = !1, l.value = "";
 		}
@@ -5834,14 +5495,14 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 		}), Cr(() => document.addEventListener("keydown", te)), Er(() => {
 			document.removeEventListener("keydown", te), E(), b?.abort();
 		}), (e, a) => (G(), K("section", null, [
-			q("div", zu, [a[4] ||= q("div", null, [q("h1", null, "Manual"), q("p", { class: "studio-muted" }, "Upload audio or record from your browser to the selected wakeword.")], -1), q("a", {
+			q("div", bu, [a[4] ||= q("div", null, [q("h1", null, "Manual"), q("p", { class: "studio-muted" }, "Upload audio or record from your browser to the selected wakeword.")], -1), q("a", {
 				href: B(t).routes.href("samples"),
 				onClick: a[0] ||= Yo((e) => B(t).routes.navigate("samples"), ["prevent"])
-			}, "View samples →", 8, Bu)]),
-			B(t).selectedId.value ? Y("", !0) : (G(), K("p", Vu, "Select or create a wakeword to record or upload samples.")),
-			u.value ? (G(), K("p", Hu, I(u.value), 1)) : Y("", !0),
-			l.value || B(n).error.value ? (G(), K("p", Uu, I(l.value || B(n).error.value), 1)) : Y("", !0),
-			q("section", Wu, [
+			}, "View samples →", 8, xu)]),
+			B(t).selectedId.value ? Y("", !0) : (G(), K("p", Su, "Select or create a wakeword to record or upload samples.")),
+			u.value ? (G(), K("p", Cu, I(u.value), 1)) : Y("", !0),
+			l.value || B(n).error.value ? (G(), K("p", wu, I(l.value || B(n).error.value), 1)) : Y("", !0),
+			q("section", Tu, [
 				a[8] ||= q("h2", null, "Upload audio", -1),
 				a[9] ||= q("p", { class: "studio-muted mb-3" }, "Uploads keep their own label and import provenance. Adjust trims later in Samples.", -1),
 				q("form", {
@@ -5849,7 +5510,7 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 					class: "flex flex-wrap gap-3 items-end",
 					onSubmit: Yo(A, ["prevent"])
 				}, [
-					q("label", Gu, [a[5] ||= J("Audio", -1), q("input", {
+					q("label", Eu, [a[5] ||= J("Audio", -1), q("input", {
 						ref_key: "uploadInput",
 						ref: g,
 						name: "import-file",
@@ -5858,24 +5519,24 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 						required: "",
 						disabled: p.value,
 						onChange: a[1] ||= (e) => m.value = e.target.files?.[0] ?? null
-					}, null, 40, Ku)]),
+					}, null, 40, Du)]),
 					q("label", null, [a[7] ||= J("Sample label", -1), V(q("select", {
 						name: "import-label",
 						"onUpdate:modelValue": a[2] ||= (e) => h.value = e,
 						disabled: p.value
-					}, [...a[6] ||= [q("option", { value: "positive" }, "Positive", -1), q("option", { value: "negative" }, "Negative", -1)]], 8, qu), [[Ho, h.value]])]),
+					}, [...a[6] ||= [q("option", { value: "positive" }, "Positive", -1), q("option", { value: "negative" }, "Negative", -1)]], 8, Ou), [[Ho, h.value]])]),
 					q("button", {
 						type: "submit",
 						class: "studio-primary",
 						disabled: !B(t).selectedId.value || !m.value || x.value || B(r) === "recording"
-					}, I(p.value ? "Uploading…" : "Upload audio"), 9, Ju)
+					}, I(p.value ? "Uploading…" : "Upload audio"), 9, ku)
 				], 32)
 			]),
 			q("section", {
 				class: "studio-card",
 				"aria-busy": d.value || f.value
 			}, [
-				q("div", Xu, [a[10] ||= q("div", null, [q("h2", null, "Microphone recording"), q("p", { class: "studio-muted" }, "One recording, one sample. You decide when to stop.")], -1), q("div", Zu, [(G(), K(W, null, U(["positive", "negative"], (e) => q("button", {
+				q("div", ju, [a[10] ||= q("div", null, [q("h2", null, "Microphone recording"), q("p", { class: "studio-muted" }, "One recording, one sample. You decide when to stop.")], -1), q("div", Mu, [(G(), K(W, null, U(["positive", "negative"], (e) => q("button", {
 					key: e,
 					type: "button",
 					"data-label": e,
@@ -5883,10 +5544,10 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 					class: F({ "studio-primary": o.value === e }),
 					disabled: f.value,
 					onClick: (t) => o.value = e
-				}, I(e === "positive" ? "Positive" : "Negative"), 11, Qu)), 64))])]),
-				q("div", $u, [
-					q("div", ed, I(B(r) === "recording" ? "Recording…" : B(r) === "requesting" ? "Waiting for microphone permission…" : B(r) === "stopping" ? "Finishing recording…" : B(i) ? "Recording ready for review" : "Ready · browser’s current microphone"), 1),
-					q("div", td, I(T.value), 1),
+				}, I(e === "positive" ? "Positive" : "Negative"), 11, Nu)), 64))])]),
+				q("div", Pu, [
+					q("div", Fu, I(B(r) === "recording" ? "Recording…" : B(r) === "requesting" ? "Waiting for microphone permission…" : B(r) === "stopping" ? "Finishing recording…" : B(i) ? "Recording ready for review" : "Ready · browser’s current microphone"), 1),
+					q("div", Iu, I(T.value), 1),
 					q("button", {
 						type: "button",
 						"data-action": "record-toggle",
@@ -5894,13 +5555,13 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 						disabled: B(r) !== "recording" && !S.value,
 						"aria-keyshortcuts": "Space",
 						onClick: D
-					}, I(B(r) === "recording" ? "■ Stop recording" : "● Start recording"), 11, nd),
+					}, I(B(r) === "recording" ? "■ Stop recording" : "● Start recording"), 11, Lu),
 					a[11] ||= q("p", { class: "studio-muted text-xs mt-3" }, [q("kbd", null, "Space"), J(" to start / stop · shortcut pauses while typing or using another control")], -1),
 					a[12] ||= q("p", { class: "studio-muted text-xs mt-2" }, "Microphone access requires HTTPS or localhost. Maximum recording length: 10 minutes.", -1)
 				]),
-				d.value ? (G(), K("p", rd, "Finding speech and trimming silence…")) : Y("", !0),
-				B(i) && !d.value ? (G(), K("div", id, [
-					s.value ? (G(), ca(Ru, {
+				d.value ? (G(), K("p", Ru, "Finding speech and trimming silence…")) : Y("", !0),
+				B(i) && !d.value ? (G(), K("div", zu, [
+					s.value ? (G(), ca(yu, {
 						key: 0,
 						ref_key: "review",
 						ref: w,
@@ -5913,7 +5574,7 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 						"preview",
 						"disabled"
 					])) : Y("", !0),
-					q("div", ad, [
+					q("div", Bu, [
 						s.value ? Y("", !0) : (G(), K("button", {
 							key: 0,
 							type: "button",
@@ -5926,7 +5587,7 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 							"aria-keyshortcuts": "D",
 							disabled: x.value,
 							onClick: E
-						}, "Retake", 8, od),
+						}, "Retake", 8, Vu),
 						s.value ? (G(), K("button", {
 							key: 1,
 							type: "button",
@@ -5935,7 +5596,7 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 							"aria-keyshortcuts": "K Enter",
 							disabled: x.value || !c.value,
 							onClick: k
-						}, I(f.value ? "Saving…" : "Save sample"), 9, sd)) : Y("", !0)
+						}, I(f.value ? "Saving…" : "Save sample"), 9, Hu)) : Y("", !0)
 					]),
 					a[13] ||= q("p", { class: "studio-muted text-xs mt-2 text-right" }, [
 						q("kbd", null, "Space"),
@@ -5949,44 +5610,44 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 					], -1)
 				])) : Y("", !0),
 				a[14] ||= q("p", { class: "studio-muted text-xs mt-4" }, "VAD trims leading and trailing silence with a small safety margin. No speech detected? Keep the full clip, especially for negative background-noise samples.", -1)
-			], 8, Yu),
+			], 8, Au),
 			a[15] ||= q("p", { class: "studio-muted text-xs mt-3" }, "Recordings and uploads appear alongside collected data in Samples, with distinct source metadata.", -1)
 		]));
 	}
-}), ld = ["inert"], ud = { class: "flex flex-wrap items-start justify-between gap-3" }, dd = {
+}), Wu = ["inert"], Gu = { class: "flex flex-wrap items-start justify-between gap-3" }, Ku = {
 	key: 0,
 	class: "studio-muted"
-}, fd = ["disabled"], pd = {
+}, qu = ["disabled"], Ju = {
 	key: 0,
 	class: "mt-3"
-}, md = {
+}, Yu = {
 	key: 0,
 	class: "studio-muted text-xs mt-3"
-}, hd = {
+}, Xu = {
 	key: 1,
 	class: "studio-note",
 	role: "status"
-}, gd = {
+}, Zu = {
 	key: 2,
 	class: "studio-note",
 	role: "alert"
-}, _d = { key: 0 }, vd = ["disabled"], yd = {
+}, Qu = { key: 0 }, $u = ["disabled"], ed = {
 	key: 3,
 	class: "studio-muted mt-3"
-}, bd = {
+}, td = {
 	key: 4,
 	class: "mt-4 grid gap-2"
-}, xd = ["data-device-id"], Sd = { class: "studio-muted text-xs" }, Cd = { class: "flex flex-wrap gap-2 items-center" }, wd = ["disabled", "onClick"], Td = ["onSubmit"], Ed = ["name"], Dd = ["disabled"], Od = { class: "flex gap-2" }, kd = ["disabled", "onClick"], Ad = ["disabled", "onClick"], jd = ["onSubmit"], Md = {
+}, nd = ["data-device-id"], rd = { class: "studio-muted text-xs" }, id = { class: "flex flex-wrap gap-2 items-center" }, ad = ["disabled", "onClick"], od = ["onSubmit"], sd = ["name"], cd = ["disabled"], ld = { class: "flex gap-2" }, ud = ["disabled", "onClick"], dd = ["disabled", "onClick"], fd = ["onSubmit"], pd = {
 	key: 0,
 	class: "studio-muted text-xs"
-}, Nd = { class: "flex gap-2" }, Pd = ["disabled"], Fd = ["disabled"], Id = {
+}, md = { class: "flex gap-2" }, hd = ["disabled"], gd = ["disabled"], _d = {
 	key: 0,
 	class: "studio-muted"
-}, Ld = { key: 0 }, Rd = { key: 1 }, zd = {
+}, vd = { key: 0 }, yd = { key: 1 }, bd = {
 	key: 2,
 	role: "alert",
 	class: "studio-note"
-}, Bd = { class: "flex gap-2" }, Vd = ["disabled"], Hd = ["disabled"], Ud = /* @__PURE__ */ sr({
+}, xd = { class: "flex gap-2" }, Sd = ["disabled"], Cd = ["disabled"], wd = /* @__PURE__ */ sr({
 	__name: "DeviceRegistry",
 	props: { surface: {} },
 	emits: ["changed"],
@@ -6085,26 +5746,26 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 			"data-device-registry-content": "",
 			inert: m.value ? !0 : void 0
 		}, [
-			q("div", ud, [q("div", null, [t[8] ||= q("h2", null, "Fleet setup", -1), n.surface === "kiosks" ? Y("", !0) : (G(), K("p", dd, "Register a fleet leader or standalone kiosks."))]), q("button", {
+			q("div", Gu, [q("div", null, [t[8] ||= q("h2", null, "Fleet setup", -1), n.surface === "kiosks" ? Y("", !0) : (G(), K("p", Ku, "Register a fleet leader or standalone kiosks."))]), q("button", {
 				type: "button",
 				"data-action": "refresh-registry",
 				disabled: B(i).loading.value,
 				onClick: t[0] ||= (e) => B(i).load(!0)
-			}, "Refresh registry", 8, fd)]),
-			n.surface === "kiosks" ? Y("", !0) : (G(), K("details", pd, [
+			}, "Refresh registry", 8, qu)]),
+			n.surface === "kiosks" ? Y("", !0) : (G(), K("details", Ju, [
 				t[9] ||= q("summary", null, "Fleet safety details", -1),
 				t[10] ||= q("p", { class: "studio-muted" }, "Register one fleet leader or standalone kiosks. A leader is authoritative: its existing mirror can propagate selections and remove follower-only models. This studio never edits enabled selections or uploads directly to followers.", -1),
-				n.surface === "deploy" ? (G(), K("p", md, "Publication staging prerequisite: upload staging must start clean and no concurrent manual uploads may occur while the trainer owns a publication. This condition cannot be checked automatically.")) : Y("", !0)
+				n.surface === "deploy" ? (G(), K("p", Yu, "Publication staging prerequisite: upload staging must start clean and no concurrent manual uploads may occur while the trainer owns a publication. This condition cannot be checked automatically.")) : Y("", !0)
 			])),
-			u.value ? (G(), K("p", hd, I(u.value), 1)) : Y("", !0),
-			d.value || B(i).error.value ? (G(), K("p", gd, I(d.value || B(i).error.value), 1)) : Y("", !0),
+			u.value ? (G(), K("p", Xu, I(u.value), 1)) : Y("", !0),
+			d.value || B(i).error.value ? (G(), K("p", Zu, I(d.value || B(i).error.value), 1)) : Y("", !0),
 			(G(), ca(Pr(n.surface === "kiosks" ? "div" : "details"), {
 				"data-device-registration": "",
 				class: "mt-3",
 				open: n.surface !== "kiosks" && !B(i).devices.value.length || void 0
 			}, {
 				default: Mn(() => [
-					n.surface === "kiosks" ? Y("", !0) : (G(), K("summary", _d, "Add device")),
+					n.surface === "kiosks" ? Y("", !0) : (G(), K("summary", Qu, "Add device")),
 					q("form", {
 						"data-device-add": "",
 						class: "studio-registration-row",
@@ -6133,13 +5794,13 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 							type: "submit",
 							class: "studio-primary",
 							disabled: l.value === "add"
-						}, "Add device", 8, vd)
+						}, "Add device", 8, $u)
 					], 32),
 					t[15] ||= q("p", { class: "studio-muted text-xs mt-2" }, "Use the kiosk's Remote Administration password. Studio saves only the resulting 10-year token, not your password. Submit only over a trusted connection.", -1)
 				]),
 				_: 1
 			}, 8, ["open"])),
-			B(i).loading.value ? (G(), K("p", yd, "Loading registered devices…")) : (G(), K("div", bd, [(G(!0), K(W, null, U(B(i).devices.value, (e) => (G(), K("article", {
+			B(i).loading.value ? (G(), K("p", ed, "Loading registered devices…")) : (G(), K("div", td, [(G(!0), K(W, null, U(B(i).devices.value, (e) => (G(), K("article", {
 				key: e.id,
 				class: "studio-device-row",
 				"data-device-id": e.id
@@ -6148,9 +5809,9 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 					q("strong", null, I(B(i).deviceLabel(e.id)), 1),
 					t[16] ||= J(),
 					q("span", { class: F(["studio-status", e.role === "follower" ? "studio-status-muted" : "studio-status-neutral"]) }, I(e.role === "follower" ? "Follower" : e.role), 3),
-					q("p", Sd, I(T(e)) + " · " + I(e.url) + I(e.active ? "" : " · Inactive member"), 1)
+					q("p", rd, I(T(e)) + " · " + I(e.url) + I(e.active ? "" : " · Inactive member"), 1)
 				]),
-				q("div", Cd, [
+				q("div", id, [
 					q("span", { class: F(["studio-status", e.credentials_status === "ready" ? "studio-status-neutral" : "studio-status-warning"]) }, I(e.credentials_status === "ready" ? "Credentials ready" : "Credentials required"), 3),
 					q("span", { class: F(["studio-status", e.model_eligible ? "studio-status-neutral" : "studio-status-warning"]) }, I(e.model_eligible ? "Profile covered" : "Not covered"), 3),
 					e.role === "leader" ? (G(), K("button", {
@@ -6158,7 +5819,7 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 						type: "button",
 						disabled: l.value === `refresh:${e.id}`,
 						onClick: (t) => O(e)
-					}, "Refresh followers", 8, wd)) : Y("", !0),
+					}, "Refresh followers", 8, ad)) : Y("", !0),
 					e.role === "follower" && e.credentials_status !== "ready" ? (G(), K("form", {
 						key: 1,
 						class: "flex gap-2",
@@ -6171,22 +5832,22 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 						type: "password",
 						autocomplete: "off",
 						"aria-label": "Follower admin password"
-					}, null, 8, Ed), q("button", {
+					}, null, 8, sd), q("button", {
 						type: "submit",
 						disabled: l.value === `credentials:${e.id}`
-					}, "Authenticate", 8, Dd)], 40, Td)) : Y("", !0)
+					}, "Authenticate", 8, cd)], 40, od)) : Y("", !0)
 				]),
-				q("div", Od, [q("button", {
+				q("div", ld, [q("button", {
 					type: "button",
 					"data-action": "edit-device",
 					disabled: !!l.value,
 					onClick: (t) => v(e)
-				}, "Edit", 8, kd), q("button", {
+				}, "Edit", 8, ud), q("button", {
 					type: "button",
 					"data-action": "delete-device",
 					disabled: !!l.value,
 					onClick: (t) => b(e, t)
-				}, "Delete", 8, Ad)]),
+				}, "Delete", 8, dd)]),
 				f.value === e.id ? (G(), K("form", {
 					key: 0,
 					"data-device-edit": "",
@@ -6203,20 +5864,20 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 						required: "",
 						type: "url"
 					}, null, 512), [[zo, p.value]])]),
-					e.role === "follower" ? (G(), K("p", Md, "Local override: this address is retained when followers refresh. Fleet membership stays leader-managed.")) : Y("", !0),
-					q("div", Nd, [q("button", {
+					e.role === "follower" ? (G(), K("p", pd, "Local override: this address is retained when followers refresh. Fleet membership stays leader-managed.")) : Y("", !0),
+					q("div", md, [q("button", {
 						class: "studio-primary",
 						disabled: !!l.value,
 						type: "submit"
-					}, "Save address", 8, Pd), q("button", {
+					}, "Save address", 8, hd), q("button", {
 						type: "button",
 						"data-action": "cancel-device-edit",
 						disabled: !!l.value,
 						onClick: t[4] ||= (e) => f.value = ""
-					}, "Cancel", 8, Fd)])
-				], 40, jd)) : Y("", !0)
-			], 8, xd))), 128)), B(i).devices.value.length ? Y("", !0) : (G(), K("p", Id, "No kiosks registered yet."))]))
-		], 8, ld), m.value ? (G(), K("dialog", {
+					}, "Cancel", 8, gd)])
+				], 40, fd)) : Y("", !0)
+			], 8, nd))), 128)), B(i).devices.value.length ? Y("", !0) : (G(), K("p", _d, "No kiosks registered yet."))]))
+		], 8, Wu), m.value ? (G(), K("dialog", {
 			key: 0,
 			ref_key: "confirmation",
 			ref: h,
@@ -6230,28 +5891,28 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 			onClick: t[7] ||= Yo((e) => !l.value && x(), ["self"])
 		}, [
 			q("h2", null, "Remove " + I(B(i).deviceLabel(m.value.id)) + " from Studio?", 1),
-			m.value.role === "leader" ? (G(), K("p", Ld, "This also removes its discovered followers from the Studio registry.")) : m.value.role === "follower" ? (G(), K("p", Rd, "This follower can be rediscovered on the next fleet refresh.")) : Y("", !0),
+			m.value.role === "leader" ? (G(), K("p", vd, "This also removes its discovered followers from the Studio registry.")) : m.value.role === "follower" ? (G(), K("p", yd, "This follower can be rediscovered on the next fleet refresh.")) : Y("", !0),
 			t[18] ||= q("p", null, "Saved recordings and models are kept. This does not change the kiosk itself.", -1),
-			d.value ? (G(), K("p", zd, I(d.value), 1)) : Y("", !0),
-			q("div", Bd, [q("button", {
+			d.value ? (G(), K("p", bd, I(d.value), 1)) : Y("", !0),
+			q("div", xd, [q("button", {
 				"data-action": "cancel-device-delete",
 				type: "button",
 				disabled: !!l.value,
 				onClick: x
-			}, "Keep kiosk", 8, Vd), q("button", {
+			}, "Keep kiosk", 8, Sd), q("button", {
 				"data-action": "confirm-device-delete",
 				type: "button",
 				disabled: !!l.value,
 				onClick: C
-			}, "Remove from Studio", 8, Hd)])
+			}, "Remove from Studio", 8, Cd)])
 		], 544)) : Y("", !0)], 512));
 	}
-}), Wd = /* @__PURE__ */ sr({
+}), Td = /* @__PURE__ */ sr({
 	__name: "KiosksPage",
 	setup(e) {
-		return (e, t) => (G(), K("section", null, [t[0] ||= q("div", { class: "mb-4" }, [q("h1", null, "Kiosks"), q("p", { class: "studio-muted" }, "Connect and manage your kiosk fleet.")], -1), pa(Ud, { surface: "kiosks" })]));
+		return (e, t) => (G(), K("section", null, [t[0] ||= q("div", { class: "mb-4" }, [q("h1", null, "Kiosks"), q("p", { class: "studio-muted" }, "Connect and manage your kiosk fleet.")], -1), pa(wd, { surface: "kiosks" })]));
 	}
-}), Gd = { class: "grid gap-3 sm:grid-cols-2 mt-3" }, Kd = ["name"], qd = ["name"], Jd = /* @__PURE__ */ sr({
+}), Ed = { class: "grid gap-3 sm:grid-cols-2 mt-3" }, Dd = ["name"], Od = ["name"], kd = /* @__PURE__ */ sr({
 	__name: "AutomationScheduleFields",
 	props: /*@__PURE__*/ Hr({ prefix: {} }, {
 		modelValue: { required: !0 },
@@ -6260,35 +5921,35 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 	emits: ["update:modelValue"],
 	setup(e) {
 		let t = ci(e, "modelValue");
-		return (n, r) => (G(), K("div", Gd, [q("label", null, [r[2] ||= J("Schedule (five-field cron)", -1), V(q("input", {
+		return (n, r) => (G(), K("div", Ed, [q("label", null, [r[2] ||= J("Schedule (five-field cron)", -1), V(q("input", {
 			"onUpdate:modelValue": r[0] ||= (e) => t.value.cron = e,
 			name: `${e.prefix}-cron`,
 			required: "",
 			placeholder: "*/30 * * * *",
 			maxlength: "256"
-		}, null, 8, Kd), [[zo, t.value.cron]])]), q("label", null, [r[3] ||= J("Time zone", -1), V(q("input", {
+		}, null, 8, Dd), [[zo, t.value.cron]])]), q("label", null, [r[3] ||= J("Time zone", -1), V(q("input", {
 			"onUpdate:modelValue": r[1] ||= (e) => t.value.timezone = e,
 			name: `${e.prefix}-timezone`,
 			required: "",
 			placeholder: "UTC",
 			maxlength: "100"
-		}, null, 8, qd), [[zo, t.value.timezone]])])]));
+		}, null, 8, Od), [[zo, t.value.timezone]])])]));
 	}
-}), Yd = {
+}), Ad = {
 	key: 0,
 	class: "studio-card"
-}, Xd = {
+}, jd = {
 	key: 1,
 	role: "status"
-}, Zd = {
+}, Md = {
 	key: 2,
 	class: "studio-note",
 	role: "alert"
-}, Qd = {
+}, Nd = {
 	key: 3,
 	class: "studio-note",
 	role: "status"
-}, $d = { class: "studio-card" }, ef = { class: "flex flex-wrap items-center justify-between gap-3" }, tf = { class: "studio-checkbox-label" }, nf = { class: "studio-muted" }, rf = { class: "studio-muted text-xs mt-3" }, af = { class: "studio-card" }, of = { class: "flex flex-wrap items-center justify-between gap-3" }, sf = { class: "studio-checkbox-label" }, cf = { class: "grid gap-3 sm:grid-cols-2 mt-3" }, lf = { class: "mt-3" }, uf = { class: "studio-checkbox-label my-3" }, df = { class: "studio-checkbox-label my-3" }, ff = { class: "studio-muted text-xs mt-3" }, pf = { class: "grid gap-4 lg:grid-cols-2" }, mf = { class: "studio-card" }, hf = { class: "flex flex-wrap items-center justify-between gap-3" }, gf = { class: "studio-checkbox-label" }, _f = { class: "studio-checkbox-label my-3" }, vf = { class: "studio-muted text-xs" }, yf = { class: "studio-card" }, bf = { class: "flex flex-wrap items-center justify-between gap-3" }, xf = { class: "studio-status studio-status-muted" }, Sf = { class: "studio-checkbox-label my-3" }, Cf = { class: "studio-checkbox-label my-3" }, wf = { class: "studio-muted text-xs" }, Tf = ["disabled"], Ef = /* @__PURE__ */ sr({
+}, Pd = { class: "studio-card" }, Fd = { class: "flex flex-wrap items-center justify-between gap-3" }, Id = { class: "studio-checkbox-label" }, Ld = { class: "studio-muted" }, Rd = { class: "studio-muted text-xs mt-3" }, zd = { class: "studio-card" }, Bd = { class: "flex flex-wrap items-center justify-between gap-3" }, Vd = { class: "studio-checkbox-label" }, Hd = { class: "grid gap-3 sm:grid-cols-2 mt-3" }, Ud = { class: "mt-3" }, Wd = { class: "studio-checkbox-label my-3" }, Gd = { class: "studio-checkbox-label my-3" }, Kd = { class: "studio-muted text-xs mt-3" }, qd = { class: "grid gap-4 lg:grid-cols-2" }, Jd = { class: "studio-card" }, Yd = { class: "flex flex-wrap items-center justify-between gap-3" }, Xd = { class: "studio-checkbox-label" }, Zd = { class: "studio-checkbox-label my-3" }, Qd = { class: "studio-muted text-xs" }, $d = { class: "studio-card" }, ef = { class: "flex flex-wrap items-center justify-between gap-3" }, tf = { class: "studio-status studio-status-muted" }, nf = { class: "studio-checkbox-label my-3" }, rf = { class: "studio-checkbox-label my-3" }, af = { class: "studio-muted text-xs" }, of = ["disabled"], sf = /* @__PURE__ */ sr({
 	__name: "AutomatePage",
 	setup(e) {
 		let t = ws(), n = X(() => t.selectedId.value), r = /* @__PURE__ */ z(null), i = /* @__PURE__ */ z(null), a = /* @__PURE__ */ z(!1), o = /* @__PURE__ */ z(!1), s = /* @__PURE__ */ z(""), c = /* @__PURE__ */ z(""), l, u, d = 0, f = X(() => r.value?.deployment.enabled ? r.value.deployment_policy.after_training ? "Scheduled + after training" : "Scheduled" : r.value?.deployment_policy.after_training ? "After training" : "Manual only");
@@ -6334,159 +5995,159 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 			d++, l?.abort(), u?.abort();
 		}), (e, i) => (G(), K("section", null, [
 			i[40] ||= q("div", { class: "mb-4" }, [q("h1", null, "Automate"), q("p", { class: "studio-muted" }, "Collection, classification, training, and deployment for the selected workspace.")], -1),
-			n.value ? Y("", !0) : (G(), K("p", Yd, "Choose a wakeword to configure automation.")),
-			a.value ? (G(), K("p", Xd, "Loading automation…")) : Y("", !0),
-			s.value ? (G(), K("p", Zd, [J(I(s.value) + " ", 1), r.value ? Y("", !0) : (G(), K("button", {
+			n.value ? Y("", !0) : (G(), K("p", Ad, "Choose a wakeword to configure automation.")),
+			a.value ? (G(), K("p", jd, "Loading automation…")) : Y("", !0),
+			s.value ? (G(), K("p", Md, [J(I(s.value) + " ", 1), r.value ? Y("", !0) : (G(), K("button", {
 				key: 0,
 				onClick: m
 			}, "Retry"))])) : Y("", !0),
-			c.value ? (G(), K("p", Qd, I(c.value), 1)) : Y("", !0),
+			c.value ? (G(), K("p", Nd, I(c.value), 1)) : Y("", !0),
 			r.value ? (G(), K("form", {
 				key: 4,
 				class: "grid gap-4",
 				onSubmit: Yo(h, ["prevent"])
 			}, [
-				q("section", $d, [
-					q("div", ef, [i[15] ||= q("h2", null, "Automatic collection", -1), q("label", tf, [V(q("input", {
+				q("section", Pd, [
+					q("div", Fd, [i[15] ||= q("h2", null, "Automatic collection", -1), q("label", Id, [V(q("input", {
 						"onUpdate:modelValue": i[0] ||= (e) => r.value.collection.enabled = e,
 						name: "collection-enabled",
 						type: "checkbox"
 					}, null, 512), [[Bo, r.value.collection.enabled]]), i[14] ||= J("Enabled", -1)])]),
-					q("p", nf, [
+					q("p", Ld, [
 						i[16] ||= J("Collect recordings mapped to ", -1),
 						q("strong", null, I(B(t).selected.value?.phrase ?? "this workspace"), 1),
 						i[17] ||= J(" from registered kiosks. Existing recordings are preserved when disabled.", -1)
 					]),
-					pa(Jd, {
+					pa(kd, {
 						modelValue: r.value.collection,
 						"onUpdate:modelValue": i[1] ||= (e) => r.value.collection = e,
 						prefix: "collection"
 					}, null, 8, ["modelValue"]),
-					q("p", rf, I(p("scrape")), 1)
+					q("p", Rd, I(p("scrape")), 1)
 				]),
-				q("section", af, [
-					q("div", of, [i[19] ||= q("h2", null, "Automatic classification", -1), q("label", sf, [V(q("input", {
+				q("section", zd, [
+					q("div", Bd, [i[19] ||= q("h2", null, "Automatic classification", -1), q("label", Vd, [V(q("input", {
 						"onUpdate:modelValue": i[2] ||= (e) => r.value.classification.enabled = e,
 						name: "classification-enabled",
 						type: "checkbox"
 					}, null, 512), [[Bo, r.value.classification.enabled]]), i[18] ||= J("Enabled", -1)])]),
 					i[28] ||= q("p", { class: "studio-muted" }, "Review pending diagnostic audio conservatively. Uncertain clips remain for manual review.", -1),
-					q("div", cf, [q("label", null, [i[21] ||= J("Speech recognition engine", -1), V(q("select", {
+					q("div", Hd, [q("label", null, [i[21] ||= J("Speech recognition engine", -1), V(q("select", {
 						"onUpdate:modelValue": i[3] ||= (e) => r.value.classification.engine = e,
 						name: "stt-engine"
 					}, [...i[20] ||= [q("option", { value: "faster_whisper" }, "Faster Whisper · recommended", -1), q("option", { value: "parakeet_onnx" }, "Parakeet ONNX", -1)]], 512), [[Ho, r.value.classification.engine]])]), q("label", null, [i[23] ||= J("Run", -1), V(q("select", {
 						"onUpdate:modelValue": i[4] ||= (e) => r.value.classification.trigger = e,
 						name: "classification-trigger"
 					}, [...i[22] ||= [q("option", { value: "after_collection" }, "After collection", -1), q("option", { value: "schedule" }, "On a schedule", -1)]], 512), [[Ho, r.value.classification.trigger]])])]),
-					r.value.classification.trigger === "schedule" ? (G(), ca(Jd, {
+					r.value.classification.trigger === "schedule" ? (G(), ca(kd, {
 						key: 0,
 						modelValue: r.value.classification_schedule,
 						"onUpdate:modelValue": i[5] ||= (e) => r.value.classification_schedule = e,
 						prefix: "classification"
 					}, null, 8, ["modelValue"])) : Y("", !0),
-					q("details", lf, [
+					q("details", Ud, [
 						i[26] ||= q("summary", null, "Classification rules", -1),
-						q("label", uf, [V(q("input", {
+						q("label", Wd, [V(q("input", {
 							"onUpdate:modelValue": i[6] ||= (e) => r.value.classification.auto_negatives = e,
 							type: "checkbox"
 						}, null, 512), [[Bo, r.value.classification.auto_negatives]]), i[24] ||= J("Label clear non-wake activations as negatives", -1)]),
-						q("label", df, [V(q("input", {
+						q("label", Gd, [V(q("input", {
 							"onUpdate:modelValue": i[7] ||= (e) => r.value.classification.promote_close_misses = e,
 							type: "checkbox"
 						}, null, 512), [[Bo, r.value.classification.promote_close_misses]]), i[25] ||= J("Promote confirmed close misses to positives", -1)]),
 						i[27] ||= q("p", { class: "studio-muted text-xs" }, "Empty or ambiguous transcripts stay pending. Close misses are never automatic negatives. No audio is automatically deleted.", -1)
 					]),
-					q("p", ff, I(p("classify")), 1)
+					q("p", Kd, I(p("classify")), 1)
 				]),
-				q("div", pf, [q("section", mf, [
-					q("div", hf, [i[30] ||= q("h2", null, "Automatic training", -1), q("label", gf, [V(q("input", {
+				q("div", qd, [q("section", Jd, [
+					q("div", Yd, [i[30] ||= q("h2", null, "Automatic training", -1), q("label", Xd, [V(q("input", {
 						"onUpdate:modelValue": i[8] ||= (e) => r.value.training.enabled = e,
 						name: "training-enabled",
 						type: "checkbox"
 					}, null, 512), [[Bo, r.value.training.enabled]]), i[29] ||= J("Enabled", -1)])]),
 					i[32] ||= q("p", { class: "studio-muted" }, "Create an archived model from reviewed and selected inputs.", -1),
-					pa(Jd, {
+					pa(kd, {
 						modelValue: r.value.training,
 						"onUpdate:modelValue": i[9] ||= (e) => r.value.training = e,
 						prefix: "training"
 					}, null, 8, ["modelValue"]),
-					q("label", _f, [V(q("input", {
+					q("label", Zd, [V(q("input", {
 						"onUpdate:modelValue": i[10] ||= (e) => r.value.skip_unchanged = e,
 						type: "checkbox"
 					}, null, 512), [[Bo, r.value.skip_unchanged]]), i[31] ||= J("Skip when inputs are unchanged", -1)]),
 					i[33] ||= q("p", { class: "studio-note text-xs" }, "Training and deployment are separate. Training alone does not publish a model.", -1),
-					q("p", vf, I(p("train")), 1)
-				]), q("section", yf, [
-					q("div", bf, [i[34] ||= q("h2", null, "Automatic deployment", -1), q("span", xf, I(f.value), 1)]),
+					q("p", Qd, I(p("train")), 1)
+				]), q("section", $d, [
+					q("div", ef, [i[34] ||= q("h2", null, "Automatic deployment", -1), q("span", tf, I(f.value), 1)]),
 					i[37] ||= q("p", { class: "studio-muted" }, "Publish eligible archives to your registered fleet targets.", -1),
-					q("label", Sf, [V(q("input", {
+					q("label", nf, [V(q("input", {
 						"onUpdate:modelValue": i[11] ||= (e) => r.value.deployment_policy.after_training = e,
 						name: "after-training",
 						type: "checkbox"
 					}, null, 512), [[Bo, r.value.deployment_policy.after_training]]), i[35] ||= J("Deploy after successful training", -1)]),
 					i[38] ||= q("p", { class: "studio-muted text-xs" }, "Optional. Failed, cancelled, or skipped runs do not trigger deployment.", -1),
-					q("label", Cf, [V(q("input", {
+					q("label", rf, [V(q("input", {
 						"onUpdate:modelValue": i[12] ||= (e) => r.value.deployment.enabled = e,
 						name: "deployment-enabled",
 						type: "checkbox"
 					}, null, 512), [[Bo, r.value.deployment.enabled]]), i[36] ||= J("Enable scheduled deployment", -1)]),
-					r.value.deployment.enabled ? (G(), ca(Jd, {
+					r.value.deployment.enabled ? (G(), ca(kd, {
 						key: 0,
 						modelValue: r.value.deployment,
 						"onUpdate:modelValue": i[13] ||= (e) => r.value.deployment = e,
 						prefix: "deployment"
 					}, null, 8, ["modelValue"])) : Y("", !0),
 					i[39] ||= q("p", { class: "studio-muted text-xs mt-3" }, "Publish the latest new eligible archive; skip if there is nothing new. Manual rollbacks are retained until a new archive is available.", -1),
-					q("p", wf, I(p("deploy")), 1)
+					q("p", af, I(p("deploy")), 1)
 				])]),
 				q("button", {
 					type: "submit",
 					class: "studio-primary",
 					disabled: o.value || a.value
-				}, I(o.value ? "Saving…" : "Save automation settings"), 9, Tf)
+				}, I(o.value ? "Saving…" : "Save automation settings"), 9, of)
 			], 32)) : Y("", !0)
 		]));
 	}
-}), Df = {
+}), cf = {
 	key: 0,
 	class: "studio-note",
 	role: "status"
-}, Of = {
+}, lf = {
 	key: 1,
 	class: "studio-note",
 	role: "alert"
-}, kf = { class: "mb-4" }, Af = ["href"], jf = { class: "studio-card mb-4" }, Mf = {
+}, uf = { class: "mb-4" }, df = ["href"], ff = { class: "studio-card mb-4" }, pf = {
 	key: 0,
 	class: "studio-muted"
-}, Nf = {
+}, mf = {
 	key: 1,
 	class: "grid gap-3"
-}, Pf = ["data-version-id"], Ff = { class: "flex flex-wrap justify-between gap-3" }, If = { class: "min-w-0 flex-1" }, Lf = {
+}, hf = ["data-version-id"], gf = { class: "flex flex-wrap justify-between gap-3" }, _f = { class: "min-w-0 flex-1" }, vf = {
 	key: 0,
 	"data-run-number": "",
 	class: "font-semibold"
-}, Rf = ["datetime", "title"], zf = {
+}, yf = ["datetime", "title"], bf = {
 	key: 1,
 	class: "studio-note text-xs"
-}, Bf = { class: "flex flex-wrap items-center gap-2" }, Vf = ["href"], Hf = ["disabled", "onClick"], Uf = {
+}, xf = { class: "flex flex-wrap items-center gap-2" }, Sf = ["href"], Cf = ["disabled", "onClick"], wf = {
 	key: 0,
 	class: "studio-muted text-xs"
-}, Wf = {
+}, Tf = {
 	key: 2,
 	class: "studio-muted"
-}, Gf = { class: "studio-card" }, Kf = ["data-device-status"], qf = {
+}, Ef = { class: "studio-card" }, Df = ["data-device-status"], Of = {
 	key: 0,
 	class: "studio-status studio-status-muted"
-}, Jf = { class: "flex items-center gap-2" }, Yf = {
+}, kf = { class: "flex items-center gap-2" }, Af = {
 	"data-run-number": "",
 	class: "text-xs"
-}, Xf = {
+}, jf = {
 	key: 0,
 	class: "studio-muted text-xs"
-}, Zf = { key: 0 }, Qf = {
+}, Mf = { key: 0 }, Nf = {
 	key: 0,
 	class: "studio-muted"
-}, $f = /* @__PURE__ */ sr({
+}, Pf = /* @__PURE__ */ sr({
 	__name: "DeployPage",
 	setup(e) {
 		let t = ws(), n = lc(), r = /* @__PURE__ */ z([]), i = /* @__PURE__ */ z([]), a = /* @__PURE__ */ z(!1), o = /* @__PURE__ */ z(""), s = /* @__PURE__ */ z(""), c = /* @__PURE__ */ z(""), l, u, d = 0, f = 0, p = !1, m = X(() => new Map(n.devices.value.map((e) => [e.id, e])));
@@ -6549,33 +6210,33 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 			p = !0, l?.abort(), u?.abort(), f += 1;
 		}), (e, l) => (G(), K("section", null, [
 			l[5] ||= q("div", { class: "mb-4" }, [q("h1", null, "Deploy"), q("p", { class: "studio-muted" }, "Archives are immutable dated training outputs. Publication makes files available; it never changes engines, enabled slots, thresholds, or wakeword selections.")], -1),
-			s.value ? (G(), K("p", Df, I(s.value), 1)) : Y("", !0),
-			o.value ? (G(), K("p", Of, I(o.value), 1)) : Y("", !0),
-			q("p", kf, [q("a", {
+			s.value ? (G(), K("p", cf, I(s.value), 1)) : Y("", !0),
+			o.value ? (G(), K("p", lf, I(o.value), 1)) : Y("", !0),
+			q("p", uf, [q("a", {
 				href: B(t).routes.href("kiosks"),
 				onClick: l[0] ||= Yo((e) => B(t).routes.navigate("kiosks"), ["prevent"])
-			}, "Manage kiosks →", 8, Af)]),
-			q("section", jf, [l[1] ||= q("h2", null, "Archived model versions", -1), a.value ? (G(), K("p", Mf, "Loading archives…")) : r.value.length ? (G(), K("div", Nf, [(G(!0), K(W, null, U(r.value, (e) => (G(), K("article", {
+			}, "Manage kiosks →", 8, df)]),
+			q("section", ff, [l[1] ||= q("h2", null, "Archived model versions", -1), a.value ? (G(), K("p", pf, "Loading archives…")) : r.value.length ? (G(), K("div", mf, [(G(!0), K(W, null, U(r.value, (e) => (G(), K("article", {
 				key: e.id,
 				class: "studio-history",
 				"data-version-id": e.id
-			}, [q("div", Ff, [q("div", If, [
-				e.run_number ? (G(), K("p", Lf, "Run #" + I(e.run_number), 1)) : Y("", !0),
+			}, [q("div", gf, [q("div", _f, [
+				e.run_number ? (G(), K("p", vf, "Run #" + I(e.run_number), 1)) : Y("", !0),
 				q("strong", null, [q("time", {
 					datetime: e.trained_at,
 					title: B(Ts)(e.trained_at)
-				}, I(B(Ts)(e.trained_at)), 9, Rf)]),
-				e.origin === "legacy" ? (G(), K("p", zf, "Legacy import · " + I(e.validation_state) + ". Never automatically published. Explicit publication first requires structural TensorFlow validation in the prepared training environment (cli/setup_python_venv); validation failure leaves the archive available without changing the desired version.", 1)) : Y("", !0)
-			]), q("div", Bf, [q("a", {
+				}, I(B(Ts)(e.trained_at)), 9, yf)]),
+				e.origin === "legacy" ? (G(), K("p", bf, "Legacy import · " + I(e.validation_state) + ". Never automatically published. Explicit publication first requires structural TensorFlow validation in the prepared training environment (cli/setup_python_venv); validation failure leaves the archive available without changing the desired version.", 1)) : Y("", !0)
+			]), q("div", xf, [q("a", {
 				class: "studio-button",
 				href: B($).archiveUrl(e.word_id, e.id)
-			}, "Download", 8, Vf), q("button", {
+			}, "Download", 8, Sf), q("button", {
 				type: "button",
 				class: "studio-primary",
 				disabled: c.value === e.id,
 				onClick: (t) => y(e)
-			}, I(e.origin === "legacy" ? "Validate and publish" : "Publish"), 9, Hf)])]), B(vs)(e.metrics).recall === null ? Y("", !0) : (G(), K("p", Uf, "Recall " + I(B(vs)(e.metrics).recall), 1))], 8, Pf))), 128))])) : (G(), K("p", Wf, "No archived model versions for this workspace."))]),
-			q("section", Gf, [
+			}, I(e.origin === "legacy" ? "Validate and publish" : "Publish"), 9, Cf)])]), B(vs)(e.metrics).recall === null ? Y("", !0) : (G(), K("p", wf, "Recall " + I(B(vs)(e.metrics).recall), 1))], 8, hf))), 128))])) : (G(), K("p", Tf, "No archived model versions for this workspace."))]),
+			q("section", Ef, [
 				l[3] ||= q("h2", null, "Target delivery", -1),
 				l[4] ||= q("p", { class: "studio-muted" }, "Delivery status for the requested training run. Delivery does not verify which model is active for detection.", -1),
 				(G(!0), K(W, null, U(i.value, (e) => (G(), K("article", {
@@ -6585,46 +6246,46 @@ var yu = { class: "studio-capture-review" }, bu = { class: "flex flex-wrap items
 				}, [q("div", null, [
 					q("strong", null, I(B(n).deviceLabel(e.device_id)), 1),
 					l[2] ||= J(),
-					m.value.get(e.device_id)?.role === "follower" ? (G(), K("span", qf, "Follower")) : Y("", !0)
-				]), q("div", null, [q("div", Jf, [q("span", { class: F(["studio-status", g(e)]) }, I(e.state), 3), q("span", Yf, I(e.run_number ? `Run #${e.run_number}` : "Run unavailable"), 1)]), e.error_code ? (G(), K("p", Xf, [J("Retry/error: " + I(e.error_code), 1), e.next_retry ? (G(), K("span", Zf, " · next " + I(B(Ts)(e.next_retry)), 1)) : Y("", !0)])) : Y("", !0)])], 8, Kf))), 128)),
-				i.value.length ? Y("", !0) : (G(), K("p", Qf, "No publication status yet."))
+					m.value.get(e.device_id)?.role === "follower" ? (G(), K("span", Of, "Follower")) : Y("", !0)
+				]), q("div", null, [q("div", kf, [q("span", { class: F(["studio-status", g(e)]) }, I(e.state), 3), q("span", Af, I(e.run_number ? `Run #${e.run_number}` : "Run unavailable"), 1)]), e.error_code ? (G(), K("p", jf, [J("Retry/error: " + I(e.error_code), 1), e.next_retry ? (G(), K("span", Mf, " · next " + I(B(Ts)(e.next_retry)), 1)) : Y("", !0)])) : Y("", !0)])], 8, Df))), 128)),
+				i.value.length ? Y("", !0) : (G(), K("p", Nf, "No publication status yet."))
 			])
 		]));
 	}
 });
 //#endregion
 //#region src/studio/datasetFormat.ts
-function ep(e) {
+function Ff(e) {
 	return e == null ? "Size unknown" : `${Number((e / 1e9).toPrecision(4))} GB`;
 }
-function tp(e) {
+function If(e) {
 	return e == null ? "Sample count unknown" : `${e.toLocaleString()} samples`;
 }
 //#endregion
 //#region src/studio/components/AugmentationDatasets.vue?vue&type=script&setup=true&lang.ts
-var np = {
+var Lf = {
 	"data-augmentation-datasets": "",
 	class: "studio-card mt-4"
-}, rp = { class: "studio-toolbar" }, ip = ["disabled"], ap = ["disabled"], op = {
+}, Rf = { class: "studio-toolbar" }, zf = ["disabled"], Bf = ["disabled"], Vf = {
 	key: 0,
 	class: "studio-muted mt-3"
-}, sp = {
+}, Hf = {
 	key: 1,
 	class: "studio-note mt-3",
 	role: "alert"
-}, cp = ["data-augmentation-id"], lp = { class: "studio-dataset-row" }, up = { class: "studio-checkbox-label" }, dp = [
+}, Uf = ["data-augmentation-id"], Wf = { class: "studio-dataset-row" }, Gf = { class: "studio-checkbox-label" }, Kf = [
 	"disabled",
 	"checked",
 	"onChange"
-], fp = { class: "studio-dataset-copy" }, pp = { class: "studio-muted text-xs" }, mp = { class: "studio-muted text-xs" }, hp = { class: "studio-dataset-actions" }, gp = [
+], qf = { class: "studio-dataset-copy" }, Jf = { class: "studio-muted text-xs" }, Yf = { class: "studio-muted text-xs" }, Xf = { class: "studio-dataset-actions" }, Zf = [
 	"aria-busy",
 	"disabled",
 	"onClick"
-], _p = ["onClick"], vp = {
+], Qf = ["onClick"], $f = {
 	key: 0,
 	class: "studio-note text-xs mt-3",
 	role: "alert"
-}, yp = /* @__PURE__ */ sr({
+}, ep = /* @__PURE__ */ sr({
 	__name: "AugmentationDatasets",
 	emits: ["catalog"],
 	setup(e, { emit: t }) {
@@ -6723,39 +6384,39 @@ var np = {
 			p?.abort(), c.value = !1, s.value = /* @__PURE__ */ new Set(), o.value = null, l.value = "", _(!1);
 		}, { immediate: !0 }), Er(() => {
 			h = !0, f?.abort(), p?.abort(), m.forEach((e) => e.abort());
-		}), (e, t) => (G(), K("section", np, [
-			q("div", rp, [
+		}), (e, t) => (G(), K("section", Lf, [
+			q("div", Rf, [
 				t[1] ||= q("h2", null, "Augmentation datasets", -1),
 				q("button", {
 					type: "button",
 					disabled: u.value,
 					onClick: t[0] ||= (e) => _()
-				}, "Refresh status", 8, ip),
+				}, "Refresh status", 8, zf),
 				q("button", {
 					type: "button",
 					"data-action": "save-augmentation",
 					class: "studio-primary studio-selection-action",
 					disabled: c.value || u.value || !i.value || !o.value,
 					onClick: y
-				}, I(c.value ? "Saving…" : "Save selection"), 9, ap)
+				}, I(c.value ? "Saving…" : "Save selection"), 9, Bf)
 			]),
 			t[2] ||= q("p", { class: "studio-muted mt-3" }, "Downloads are shared; select usage per wakeword. All are enabled by default. Training mixes selected backgrounds and room echoes into your samples before creating model features.", -1),
-			u.value && !o.value ? (G(), K("p", op, "Checking augmentation datasets…")) : Y("", !0),
-			l.value ? (G(), K("p", sp, I(l.value), 1)) : Y("", !0),
+			u.value && !o.value ? (G(), K("p", Vf, "Checking augmentation datasets…")) : Y("", !0),
+			l.value ? (G(), K("p", Hf, I(l.value), 1)) : Y("", !0),
 			(G(!0), K(W, null, U(o.value?.items ?? [], (e) => (G(), K("article", {
 				key: e.id,
 				"data-augmentation-id": e.id,
 				class: "studio-history mt-3"
-			}, [q("div", lp, [q("label", up, [q("input", {
+			}, [q("div", Wf, [q("label", Gf, [q("input", {
 				type: "checkbox",
 				disabled: !i.value || c.value,
 				checked: s.value.has(e.id),
 				onChange: (t) => v(e.id, t.target.checked)
-			}, null, 40, dp), q("div", fp, [
+			}, null, 40, Kf), q("div", qf, [
 				q("strong", null, I(e.name), 1),
-				q("p", pp, I(e.description) + " · " + I(e.source), 1),
-				q("p", mp, I(B(ep)(e.installed_bytes ?? e.download_bytes)) + I(e.installed_bytes === null ? "" : " installed") + " · " + I(B(tp)(e.file_count)), 1)
-			])]), q("div", hp, [
+				q("p", Jf, I(e.description) + " · " + I(e.source), 1),
+				q("p", Yf, I(B(Ff)(e.installed_bytes ?? e.download_bytes)) + I(e.installed_bytes === null ? "" : " installed") + " · " + I(B(If)(e.file_count)), 1)
+			])]), q("div", Xf, [
 				q("span", { class: F(["studio-status", `studio-status-${x(e)}`]) }, I(x(e)), 3),
 				x(e) === "installed" ? Y("", !0) : (G(), K("button", {
 					key: 0,
@@ -6767,45 +6428,45 @@ var np = {
 					"failed",
 					"cancelled",
 					"interrupted"
-				].includes(x(e)) ? "Retry download" : "Download & prepare"), 9, gp)),
+				].includes(x(e)) ? "Retry download" : "Download & prepare"), 9, Zf)),
 				C(e) ? (G(), K("button", {
 					key: 1,
 					type: "button",
 					onClick: (t) => B(a).show(C(e))
-				}, "View in queue", 8, _p)) : Y("", !0)
-			])]), S(e) ? (G(), K("p", vp, I(S(e)), 1)) : Y("", !0)], 8, cp))), 128))
+				}, "View in queue", 8, Qf)) : Y("", !0)
+			])]), S(e) ? (G(), K("p", $f, I(S(e)), 1)) : Y("", !0)], 8, Uf))), 128))
 		]));
 	}
-}), bp = {
+}), tp = {
 	key: 0,
 	"data-disk-warning": "",
 	class: "studio-note mb-4",
 	role: "status"
-}, xp = { class: "studio-card" }, Sp = { class: "studio-toolbar" }, Cp = ["disabled"], wp = {
+}, np = { class: "studio-card" }, rp = { class: "studio-toolbar" }, ip = ["disabled"], ap = {
 	key: 0,
 	class: "studio-muted mt-3"
-}, Tp = {
+}, op = {
 	key: 1,
 	class: "studio-note mt-3",
 	role: "alert"
-}, Ep = {
+}, sp = {
 	key: 2,
 	class: "studio-table mt-3 grid gap-3"
-}, Dp = { class: "studio-dataset-row" }, Op = { class: "studio-checkbox-label" }, kp = [
+}, cp = { class: "studio-dataset-row" }, lp = { class: "studio-checkbox-label" }, up = [
 	"data-dataset-id",
 	"checked",
 	"onChange"
-], Ap = { class: "studio-dataset-copy" }, jp = { class: "studio-muted text-xs" }, Mp = { class: "studio-muted text-xs" }, Np = {
+], dp = { class: "studio-dataset-copy" }, fp = { class: "studio-muted text-xs" }, pp = { class: "studio-muted text-xs" }, mp = {
 	key: 0,
 	class: "studio-note block text-xs"
-}, Pp = { class: "studio-dataset-actions" }, Fp = [
+}, hp = { class: "studio-dataset-actions" }, gp = [
 	"aria-busy",
 	"disabled",
 	"onClick"
-], Ip = ["onClick"], Lp = {
+], _p = ["onClick"], vp = {
 	key: 3,
 	class: "studio-muted mt-3"
-}, Rp = /* @__PURE__ */ sr({
+}, yp = /* @__PURE__ */ sr({
 	__name: "NegativeDatasetsPage",
 	setup(e) {
 		let t = ws(), n = Vc(), r = /* @__PURE__ */ z([]), i = /* @__PURE__ */ z(0), a = /* @__PURE__ */ z(0), o = /* @__PURE__ */ z(null), s = /* @__PURE__ */ z(/* @__PURE__ */ new Set()), c = /* @__PURE__ */ z(!1), l = /* @__PURE__ */ z(!1), u = /* @__PURE__ */ z(/* @__PURE__ */ new Set()), d = /* @__PURE__ */ z(""), f = /* @__PURE__ */ new Map(), p, m, h = 0, g = 0, _ = 0, v = X(() => t.selectedId.value), y = X(() => [...s.value].sort());
@@ -6925,33 +6586,33 @@ var np = {
 			p?.abort(), C();
 		}), (e, t) => (G(), K("section", null, [
 			t[4] ||= q("div", { class: "mb-4" }, [q("h1", null, "Downloaded"), q("p", { class: "studio-muted" }, "Download shared training resources. Choose negative, evaluation, and augmentation datasets per wakeword; all are enabled by default.")], -1),
-			o.value && o.value.storage_total_bytes > 0 && o.value.storage_free_bytes / o.value.storage_total_bytes < .1 ? (G(), K("p", bp, "Disk space is low: " + I(B(ep)(o.value.storage_free_bytes)) + " free of " + I(B(ep)(o.value.storage_total_bytes)) + " on the data volume. Free space before downloading large datasets or starting training.", 1)) : Y("", !0),
-			q("div", xp, [
+			o.value && o.value.storage_total_bytes > 0 && o.value.storage_free_bytes / o.value.storage_total_bytes < .1 ? (G(), K("p", tp, "Disk space is low: " + I(B(Ff)(o.value.storage_free_bytes)) + " free of " + I(B(Ff)(o.value.storage_total_bytes)) + " on the data volume. Free space before downloading large datasets or starting training.", 1)) : Y("", !0),
+			q("div", np, [
 				t[2] ||= q("h2", null, "Negative & evaluation datasets", -1),
 				t[3] ||= q("p", { class: "studio-muted mb-3" }, "Downloads are shared. Save a separate classifier selection for each wakeword.", -1),
-				q("div", Sp, [q("button", {
+				q("div", rp, [q("button", {
 					type: "button",
 					"data-action": "save-datasets",
 					class: "studio-primary studio-selection-action",
 					disabled: l.value || !v.value,
 					onClick: A
-				}, I(l.value ? "Saving…" : "Save selection"), 9, Cp)]),
-				c.value ? (G(), K("p", wp, "Loading catalog…")) : Y("", !0),
-				d.value ? (G(), K("p", Tp, I(d.value), 1)) : Y("", !0),
-				r.value.length ? (G(), K("div", Ep, [(G(!0), K(W, null, U(r.value, (e) => (G(), K("article", {
+				}, I(l.value ? "Saving…" : "Save selection"), 9, ip)]),
+				c.value ? (G(), K("p", ap, "Loading catalog…")) : Y("", !0),
+				d.value ? (G(), K("p", op, I(d.value), 1)) : Y("", !0),
+				r.value.length ? (G(), K("div", sp, [(G(!0), K(W, null, U(r.value, (e) => (G(), K("article", {
 					key: e.id,
 					class: "studio-history"
-				}, [q("div", Dp, [q("label", Op, [q("input", {
+				}, [q("div", cp, [q("label", lp, [q("input", {
 					"data-dataset-id": e.id,
 					type: "checkbox",
 					checked: s.value.has(e.id),
 					onChange: (t) => k(e.id, t.target.checked)
-				}, null, 40, kp), q("div", Ap, [
+				}, null, 40, up), q("div", dp, [
 					q("strong", null, I(e.name), 1),
-					q("p", jp, I(e.description) + " · " + I(e.source), 1),
-					q("p", Mp, I(B(ep)(e.installed_bytes ?? e.download_bytes)) + I(e.installed_bytes === null ? "" : " installed") + " · " + I(B(tp)(e.sample_count)), 1),
-					e.split === "evaluation" ? (G(), K("span", Np, "Evaluation-only: this dataset is not sampled as a training input.")) : Y("", !0)
-				])]), q("div", Pp, [
+					q("p", fp, I(e.description) + " · " + I(e.source), 1),
+					q("p", pp, I(B(Ff)(e.installed_bytes ?? e.download_bytes)) + I(e.installed_bytes === null ? "" : " installed") + " · " + I(B(If)(e.sample_count)), 1),
+					e.split === "evaluation" ? (G(), K("span", mp, "Evaluation-only: this dataset is not sampled as a training input.")) : Y("", !0)
+				])]), q("div", hp, [
 					q("span", { class: F(["studio-status", `studio-status-${T(e)}`]) }, I(T(e)), 3),
 					T(e) === "installed" ? Y("", !0) : (G(), K("button", {
 						key: 0,
@@ -6959,14 +6620,14 @@ var np = {
 						"aria-busy": E(e),
 						disabled: E(e),
 						onClick: (t) => ee(e)
-					}, I(E(e) ? "Downloading…" : "Download"), 9, Fp)),
+					}, I(E(e) ? "Downloading…" : "Download"), 9, gp)),
 					w(e)?.id || e.job_id ? (G(), K("button", {
 						key: 1,
 						type: "button",
 						"data-action": "view-dataset-job",
 						onClick: (t) => B(n).show(w(e)?.id ?? e.job_id)
-					}, "View in queue", 8, Ip)) : Y("", !0)
-				])])]))), 128))])) : c.value ? Y("", !0) : (G(), K("p", Lp, "No catalog datasets are available.")),
+					}, "View in queue", 8, _p)) : Y("", !0)
+				])])]))), 128))])) : c.value ? Y("", !0) : (G(), K("p", vp, "No catalog datasets are available.")),
 				pa(mc, {
 					total: i.value,
 					offset: a.value,
@@ -6979,79 +6640,79 @@ var np = {
 					"loading"
 				])
 			]),
-			pa(yp, { onCatalog: t[1] ||= (e) => o.value = e })
+			pa(ep, { onCatalog: t[1] ||= (e) => o.value = e })
 		]));
 	}
-}), zp = { class: "studio-card" }, Bp = {
+}), bp = { class: "studio-card" }, xp = {
 	"data-generation-phrase": "",
 	class: "studio-muted"
-}, Vp = { class: "grid gap-3 sm:grid-cols-2 lg:grid-cols-3" }, Hp = ["value"], Up = ["value"], Wp = ["disabled"], Gp = ["value"], Kp = {
+}, Sp = { class: "grid gap-3 sm:grid-cols-2 lg:grid-cols-3" }, Cp = ["value"], wp = ["value"], Tp = ["disabled"], Ep = ["value"], Dp = {
 	key: 1,
 	value: "mixed"
-}, qp = { class: "grid gap-3 sm:grid-cols-2" }, Jp = { class: "flex items-center justify-between gap-3" }, Yp = { class: "studio-checkbox-label" }, Xp = [
+}, Op = { class: "grid gap-3 sm:grid-cols-2" }, kp = { class: "flex items-center justify-between gap-3" }, Ap = { class: "studio-checkbox-label" }, jp = [
 	"data-engine",
 	"disabled",
 	"checked",
 	"onChange"
-], Zp = [
+], Mp = [
 	"data-preview",
 	"aria-busy",
 	"disabled",
 	"onClick"
-], Qp = {
+], Np = {
 	key: 0,
 	class: "studio-muted text-xs mt-2"
-}, $p = {
+}, Pp = {
 	key: 1,
 	role: "alert",
 	class: "studio-note mt-3"
-}, em = ["onClick"], tm = [
+}, Fp = ["onClick"], Ip = [
 	"data-preview-audio",
 	"src",
 	"aria-label"
-], nm = {
+], Lp = {
 	key: 0,
 	class: "studio-history"
-}, rm = { class: "studio-checkbox-label" }, im = ["checked"], am = {
+}, Rp = { class: "studio-checkbox-label" }, zp = ["checked"], Bp = {
 	key: 0,
 	class: "studio-muted"
-}, om = {
+}, Vp = {
 	key: 1,
 	"data-source-picker": ""
-}, sm = {
+}, Hp = {
 	key: 0,
 	role: "alert"
-}, cm = [
+}, Up = [
 	"data-source",
 	"checked",
 	"disabled",
 	"onChange"
-], lm = { key: 1 }, um = { class: "studio-muted text-xs" }, dm = ["aria-busy", "disabled"], fm = {
+], Wp = { key: 1 }, Gp = { class: "studio-muted text-xs" }, Kp = ["aria-busy", "disabled"], qp = {
 	key: 0,
 	class: "studio-note mt-3",
 	role: "alert"
-}, pm = { class: "studio-card mt-4" }, mm = { class: "flex flex-wrap items-center justify-between gap-3" }, hm = ["disabled"], gm = {
+}, Jp = { class: "studio-card mt-4" }, Yp = { class: "flex flex-wrap items-center justify-between gap-3" }, Xp = ["disabled"], Zp = {
 	key: 0,
 	class: "studio-muted mt-3"
-}, _m = { class: "studio-dataset-row" }, vm = { class: "studio-checkbox-label" }, ym = [
+}, Qp = { class: "studio-dataset-row" }, $p = { class: "studio-checkbox-label" }, em = [
 	"data-batch-id",
 	"checked",
 	"disabled",
 	"onChange"
-], bm = { class: "studio-muted block text-xs" }, xm = {
+], tm = { class: "studio-muted block text-xs" }, nm = {
 	key: 0,
 	class: "studio-muted block text-xs"
-}, Sm = [
+}, rm = [
 	"data-delete-batch",
 	"disabled",
 	"onClick"
-], Cm = {
+], im = {
 	key: 0,
 	class: "studio-muted text-xs"
-}, wm = { class: "flex gap-2 mt-3" }, Tm = ["disabled"], Em = ["disabled"], Dm = {
+}, am = { class: "flex gap-2 mt-3" }, om = ["disabled"], sm = ["disabled"], cm = {
 	key: 1,
 	class: "studio-muted mt-3"
-}, Om = /* @__PURE__ */ sr({
+}, lm = /* @__PURE__ */ sr({
 	__name: "ArtificialPage",
 	setup(e) {
 		let t = ws(), n = Vc(), r = X(() => n.activeJobs.value.some((e) => e.kind === "generation" && e.word_id === N.value));
@@ -7292,14 +6953,14 @@ var np = {
 			ne?.abort(), me();
 		}), (e, t) => (G(), K("section", null, [
 			t[23] ||= q("div", { class: "mb-4" }, [q("h1", null, "Artificial"), q("p", { class: "studio-muted" }, "Generate wakeword audio, then choose which datasets to use for training.")], -1),
-			q("div", zp, [
+			q("div", bp, [
 				t[19] ||= q("h2", null, "Generate data", -1),
-				q("p", Bp, [t[10] ||= J("Wake phrase: ", -1), q("strong", null, I(oe.value?.phrase ?? "No workspace selected"), 1)]),
+				q("p", xp, [t[10] ||= J("Wake phrase: ", -1), q("strong", null, I(oe.value?.phrase ?? "No workspace selected"), 1)]),
 				q("form", {
 					class: "grid gap-4 mt-3",
 					onSubmit: Yo(ye, ["prevent"])
 				}, [
-					q("div", Vp, [
+					q("div", Sp, [
 						q("label", null, [t[11] ||= J("Language", -1), q("select", {
 							name: "language",
 							value: l.value.language,
@@ -7307,7 +6968,7 @@ var np = {
 						}, [(G(!0), K(W, null, U(a.value, (e) => (G(), K("option", {
 							key: e.language,
 							value: e.language
-						}, I(e.name), 9, Up))), 128))], 40, Hp)]),
+						}, I(e.name), 9, wp))), 128))], 40, Cp)]),
 						q("label", null, [t[12] ||= J("English accent", -1), V(q("select", {
 							name: "english-accent",
 							"onUpdate:modelValue": t[1] ||= (e) => l.value.english_accent = e,
@@ -7315,7 +6976,7 @@ var np = {
 						}, [le.value ? (G(!0), K(W, { key: 0 }, U(se.value?.english_accents ?? [], (e) => (G(), K("option", {
 							key: e.code,
 							value: e.code
-						}, I(e.label), 9, Gp))), 128)) : (G(), K("option", Kp, "Not applicable"))], 8, Wp), [[Ho, l.value.english_accent]])]),
+						}, I(e.label), 9, Ep))), 128)) : (G(), K("option", Dp, "Not applicable"))], 8, Tp), [[Ho, l.value.english_accent]])]),
 						q("label", null, [t[13] ||= J("Samples per provider", -1), V(q("input", {
 							"onUpdate:modelValue": t[2] ||= (e) => l.value.samples = e,
 							name: "samples",
@@ -7329,30 +6990,30 @@ var np = {
 							{ number: !0 }
 						]])])
 					]),
-					q("fieldset", null, [t[14] ||= q("legend", { class: "mb-2 font-semibold" }, "Generation models", -1), q("div", qp, [(G(!0), K(W, null, U(P.value, (e) => (G(), K("article", {
+					q("fieldset", null, [t[14] ||= q("legend", { class: "mb-2 font-semibold" }, "Generation models", -1), q("div", Op, [(G(!0), K(W, null, U(P.value, (e) => (G(), K("article", {
 						key: e.engine,
 						class: "studio-history"
 					}, [
-						q("div", Jp, [q("label", Yp, [q("input", {
+						q("div", kp, [q("label", Ap, [q("input", {
 							type: "checkbox",
 							"data-engine": e.engine,
 							disabled: !e.available,
 							checked: l.value.engines?.includes(e.engine),
 							onChange: (t) => _e(e.engine, t.target.checked)
-						}, null, 40, Xp), q("strong", null, I(j[e.engine] ?? e.engine), 1)]), q("button", {
+						}, null, 40, jp), q("strong", null, I(j[e.engine] ?? e.engine), 1)]), q("button", {
 							type: "button",
 							"data-preview": e.engine,
 							"aria-busy": i(e.engine),
 							disabled: !e.available || e.engine === "moss" && (l.value.moss_after_current || !l.value.moss_source_batch_ids?.length) || i(e.engine) || !N.value,
 							onClick: (t) => be(e.engine)
-						}, I(i(e.engine) ? "Preparing preview…" : "Preview"), 9, Zp)]),
-						e.reason ? (G(), K("p", Qp, I(e.reason), 1)) : Y("", !0),
-						_.value[e.engine] ? (G(), K("p", $p, I(_.value[e.engine]), 1)) : Y("", !0),
+						}, I(i(e.engine) ? "Preparing preview…" : "Preview"), 9, Mp)]),
+						e.reason ? (G(), K("p", Np, I(e.reason), 1)) : Y("", !0),
+						_.value[e.engine] ? (G(), K("p", Pp, I(_.value[e.engine]), 1)) : Y("", !0),
 						h.value[e.engine] && h.value[e.engine].status !== "complete" ? (G(), K("button", {
 							key: 2,
 							type: "button",
 							onClick: (t) => B(n).show(h.value[e.engine].id)
-						}, "View preview in queue", 8, em)) : Y("", !0),
+						}, "View preview in queue", 8, Fp)) : Y("", !0),
 						h.value[e.engine]?.status === "complete" ? (G(), K("audio", {
 							key: 3,
 							"data-preview-audio": e.engine,
@@ -7361,9 +7022,9 @@ var np = {
 							controls: "",
 							autoplay: "",
 							"aria-label": `${j[e.engine] ?? e.engine} wakeword preview`
-						}, null, 8, tm)) : Y("", !0)
+						}, null, 8, Ip)) : Y("", !0)
 					]))), 128))])]),
-					E.value ? (G(), K("fieldset", nm, [
+					E.value ? (G(), K("fieldset", Lp, [
 						t[18] ||= q("legend", null, "MOSS references", -1),
 						q("label", null, [t[15] ||= J("MOSS samples", -1), V(q("input", {
 							name: "moss-samples",
@@ -7377,15 +7038,15 @@ var np = {
 							void 0,
 							{ number: !0 }
 						]])]),
-						q("label", rm, [q("input", {
+						q("label", Rp, [q("input", {
 							name: "moss-after-current",
 							type: "checkbox",
 							checked: l.value.moss_after_current,
 							onChange: t[4] ||= (e) => ee(e.target.checked)
-						}, null, 40, im), t[16] ||= J("Generate after current selection", -1)]),
-						l.value.moss_after_current ? (G(), K("p", am, "Uses only this submission’s direct providers after all succeed. Select completed sources instead to preview MOSS.")) : (G(), K("div", om, [
+						}, null, 40, zp), t[16] ||= J("Generate after current selection", -1)]),
+						l.value.moss_after_current ? (G(), K("p", Bp, "Uses only this submission’s direct providers after all succeed. Select completed sources instead to preview MOSS.")) : (G(), K("div", Vp, [
 							t[17] ||= q("p", { class: "studio-muted" }, "Select completed direct-provider datasets. Training selection is independent. MOSS needs at least one distinct reference clip per requested sample; duplicate clips count once.", -1),
-							w.value ? (G(), K("p", sm, I(w.value), 1)) : Y("", !0),
+							w.value ? (G(), K("p", Hp, I(w.value), 1)) : Y("", !0),
 							(G(!0), K(W, null, U(b.value, (e) => (G(), K("label", {
 								key: e.id,
 								class: "studio-checkbox-label"
@@ -7395,8 +7056,8 @@ var np = {
 								checked: l.value.moss_source_batch_ids?.includes(e.id),
 								disabled: !l.value.moss_source_batch_ids?.includes(e.id) && (l.value.moss_source_batch_ids?.length ?? 0) >= 100,
 								onChange: (t) => A(e.id, t.target.checked)
-							}, null, 40, cm), J(I(e.providers.map((e) => j[e] ?? e).join(", ")) + " · " + I(e.sample_count) + " clips · " + I(e.id), 1)]))), 128)),
-							!C.value && !b.value.length ? (G(), K("p", lm, "No eligible completed sources for this language.")) : Y("", !0),
+							}, null, 40, Up), J(I(e.providers.map((e) => j[e] ?? e).join(", ")) + " · " + I(e.sample_count) + " clips · " + I(e.id), 1)]))), 128)),
+							!C.value && !b.value.length ? (G(), K("p", Wp, "No eligible completed sources for this language.")) : Y("", !0),
 							q("p", null, I(l.value.moss_source_batch_ids?.length ?? 0) + " sources selected (maximum 100).", 1),
 							pa(mc, {
 								total: x.value,
@@ -7411,16 +7072,16 @@ var np = {
 							])
 						]))
 					])) : Y("", !0),
-					q("p", um, "Each direct provider generates the full samples per provider count into a separate dataset. Requested total: " + I(O.value) + ". MOSS has its own count. Preview generates one sample without adding training data.", 1),
+					q("p", Gp, "Each direct provider generates the full samples per provider count into a separate dataset. Requested total: " + I(O.value) + ". MOSS has its own count. Preview generates one sample without adding training data.", 1),
 					q("button", {
 						type: "submit",
 						"data-action": "generate",
 						class: "studio-primary justify-self-start",
 						"aria-busy": f.value || r.value,
 						disabled: f.value || r.value || d.value || !N.value
-					}, I(f.value ? "Starting…" : r.value ? "Generating…" : "Generate dataset"), 9, dm)
+					}, I(f.value ? "Starting…" : r.value ? "Generating…" : "Generate dataset"), 9, Kp)
 				], 32),
-				p.value ? (G(), K("p", fm, I(p.value), 1)) : Y("", !0),
+				p.value ? (G(), K("p", qp, I(p.value), 1)) : Y("", !0),
 				m.value ? (G(), K("button", {
 					key: 1,
 					type: "button",
@@ -7428,32 +7089,32 @@ var np = {
 					onClick: t[6] ||= (e) => B(n).show(m.value.id)
 				}, "View generation in queue")) : Y("", !0)
 			]),
-			q("div", pm, [
-				q("div", mm, [t[20] ||= q("h2", null, "Generated datasets", -1), q("button", {
+			q("div", Jp, [
+				q("div", Yp, [t[20] ||= q("h2", null, "Generated datasets", -1), q("button", {
 					type: "button",
 					"data-action": "save-batches",
 					class: "studio-selection-action",
 					disabled: f.value || d.value || !N.value,
 					onClick: L
-				}, "Save selection", 8, hm)]),
+				}, "Save selection", 8, Xp)]),
 				t[22] ||= q("p", { class: "studio-muted text-xs" }, "Select completed datasets to include in this wakeword’s training.", -1),
-				d.value ? (G(), K("p", gm, "Loading datasets…")) : Y("", !0),
+				d.value ? (G(), K("p", Zp, "Loading datasets…")) : Y("", !0),
 				(G(!0), K(W, null, U(o.value, (e) => (G(), K("article", {
 					key: e.id,
 					class: "studio-history mt-3"
 				}, [
-					q("div", _m, [q("label", vm, [
+					q("div", Qp, [q("label", $p, [
 						q("input", {
 							"data-batch-id": e.id,
 							type: "checkbox",
 							checked: u.value.has(e.id),
 							disabled: e.status !== "complete",
 							onChange: (t) => Se(e, t.target.checked)
-						}, null, 40, ym),
+						}, null, 40, em),
 						q("span", null, [
 							q("strong", null, I(e.phrase), 1),
-							q("span", bm, I(e.audio.length) + " samples · " + I(e.recipe.engines?.map((e) => j[e] ?? e).join(", ") || "Saved generation models") + " · " + I(B(Ts)(e.created_at)), 1),
-							e.status === "complete" ? Y("", !0) : (G(), K("span", xm, I(e.status) + " — only completed datasets can be selected.", 1))
+							q("span", tm, I(e.audio.length) + " samples · " + I(e.recipe.engines?.map((e) => j[e] ?? e).join(", ") || "Saved generation models") + " · " + I(B(Ts)(e.created_at)), 1),
+							e.status === "complete" ? Y("", !0) : (G(), K("span", nm, I(e.status) + " — only completed datasets can be selected.", 1))
 						]),
 						q("span", { class: F(["studio-status ml-auto", `studio-status-${e.status}`]) }, I(e.status), 3)
 					]), q("button", {
@@ -7465,8 +7126,8 @@ var np = {
 							"cancelling"
 						].includes(e.status),
 						onClick: (t) => v.value = e
-					}, "Delete dataset", 8, Sm)]),
-					e.recipe.moss_source_batch_ids?.length ? (G(), K("p", Cm, "MOSS sources: " + I(e.recipe.moss_source_batch_ids.join(", ")), 1)) : Y("", !0),
+					}, "Delete dataset", 8, rm)]),
+					e.recipe.moss_source_batch_ids?.length ? (G(), K("p", im, "MOSS sources: " + I(e.recipe.moss_source_batch_ids.join(", ")), 1)) : Y("", !0),
 					v.value?.id === e.id ? (G(), K("section", {
 						key: 1,
 						role: "alertdialog",
@@ -7476,20 +7137,20 @@ var np = {
 					}, [
 						q("h3", null, "Delete " + I(e.phrase) + " dataset permanently?", 1),
 						t[21] ||= q("p", null, "This removes the generated dataset and its training selection. Historical training inputs and shared audio are kept.", -1),
-						q("div", wm, [q("button", {
+						q("div", am, [q("button", {
 							type: "button",
 							"data-action": "cancel-batch-delete",
 							disabled: f.value,
 							onClick: t[7] ||= (e) => v.value = null
-						}, "Cancel", 8, Tm), q("button", {
+						}, "Cancel", 8, om), q("button", {
 							type: "button",
 							"data-action": "confirm-batch-delete",
 							disabled: f.value,
 							onClick: Ce
-						}, I(f.value ? "Deleting…" : "Delete permanently"), 9, Em)])
+						}, I(f.value ? "Deleting…" : "Delete permanently"), 9, sm)])
 					], 32)) : Y("", !0)
 				]))), 128)),
-				!d.value && !o.value.length ? (G(), K("p", Dm, "No generated datasets yet. Choose models above to create one.")) : Y("", !0),
+				!d.value && !o.value.length ? (G(), K("p", cm, "No generated datasets yet. Choose models above to create one.")) : Y("", !0),
 				pa(mc, {
 					total: s.value,
 					offset: c.value,
@@ -7504,42 +7165,42 @@ var np = {
 			])
 		]));
 	}
-}), km = { class: "studio-card" }, Am = {
+}), um = { class: "studio-card" }, dm = {
 	key: 0,
 	class: "studio-muted"
-}, jm = {
+}, fm = {
 	key: 1,
 	"data-effective-counts": "",
 	class: "grid gap-3 sm:grid-cols-2 lg:grid-cols-4 my-4"
-}, Mm = { class: "studio-muted" }, Nm = { class: "text-2xl font-semibold" }, Pm = { class: "studio-muted" }, Fm = { class: "text-2xl font-semibold" }, Im = { class: "studio-muted" }, Lm = { class: "text-2xl font-semibold" }, Rm = {
+}, pm = { class: "studio-muted" }, mm = { class: "text-2xl font-semibold" }, hm = { class: "studio-muted" }, gm = { class: "text-2xl font-semibold" }, _m = { class: "studio-muted" }, vm = { class: "text-2xl font-semibold" }, ym = {
 	"data-negative-datasets-count": "",
 	class: "studio-muted"
-}, zm = { class: "text-2xl font-semibold" }, Bm = {
+}, bm = { class: "text-2xl font-semibold" }, xm = {
 	key: 2,
 	class: "studio-muted text-xs"
-}, Vm = { class: "studio-card mt-4" }, Hm = { class: "grid gap-3 mt-3" }, Um = { class: "flex gap-2" }, Wm = ["disabled"], Gm = ["aria-busy", "disabled"], Km = {
+}, Sm = { class: "studio-card mt-4" }, Cm = { class: "grid gap-3 mt-3" }, wm = { class: "flex gap-2" }, Tm = ["disabled"], Em = ["aria-busy", "disabled"], Dm = {
 	key: 0,
 	"data-training-blocked": "",
 	class: "studio-note text-xs",
 	role: "alert"
-}, qm = ["href"], Jm = {
+}, Om = ["href"], km = {
 	key: 0,
 	class: "studio-note mt-3",
 	role: "alert"
-}, Ym = { class: "studio-card mt-4" }, Xm = ["data-run-id"], Zm = { class: "flex justify-between items-center gap-3" }, Qm = { "data-run-number": "" }, $m = {
+}, Am = { class: "studio-card mt-4" }, jm = ["data-run-id"], Mm = { class: "flex justify-between items-center gap-3" }, Nm = { "data-run-number": "" }, Pm = {
 	"data-run-time": "",
 	class: "studio-muted block text-xs"
-}, eh = ["onClick"], th = {
+}, Fm = ["onClick"], Im = {
 	key: 0,
 	class: "studio-note text-xs"
-}, nh = {
+}, Lm = {
 	key: 1,
 	class: "studio-note text-xs",
 	role: "alert"
-}, rh = {
+}, Rm = {
 	key: 0,
 	class: "studio-muted"
-}, ih = /* @__PURE__ */ sr({
+}, zm = /* @__PURE__ */ sr({
 	__name: "TrainPage",
 	setup(e) {
 		let t = ws(), n = Vc(), r = /* @__PURE__ */ z(null), i = /* @__PURE__ */ z(!1), a = /* @__PURE__ */ z(""), o;
@@ -7676,20 +7337,20 @@ var np = {
 			b?.abort(), x?.abort(), S?.abort();
 		}), (e, t) => (G(), K("section", null, [
 			t[11] ||= q("div", { class: "mb-4" }, [q("h1", null, "Train"), q("p", { class: "studio-muted" }, "Configure inputs and start a manual training run. Progress and logs are available in the global job queue.")], -1),
-			q("div", km, [
+			q("div", um, [
 				t[6] ||= q("h2", null, "Effective inputs for the next snapshot", -1),
-				h.value ? (G(), K("p", Am, "Loading effective inputs…")) : d.value ? (G(), K("div", jm, [
-					q("p", Mm, [q("strong", Nm, I(d.value.positive), 1), t[2] ||= J(" reviewed positives", -1)]),
-					q("p", Pm, [q("strong", Fm, I(d.value.negative), 1), t[3] ||= J(" reviewed negatives", -1)]),
-					q("p", Im, [q("strong", Lm, I(d.value.artificial), 1), t[4] ||= J(" selected artificial", -1)]),
-					q("p", Rm, [q("strong", zm, I(O.value), 1), t[5] ||= J(" selected negative datasets", -1)])
+				h.value ? (G(), K("p", dm, "Loading effective inputs…")) : d.value ? (G(), K("div", fm, [
+					q("p", pm, [q("strong", mm, I(d.value.positive), 1), t[2] ||= J(" reviewed positives", -1)]),
+					q("p", hm, [q("strong", gm, I(d.value.negative), 1), t[3] ||= J(" reviewed negatives", -1)]),
+					q("p", _m, [q("strong", vm, I(d.value.artificial), 1), t[4] ||= J(" selected artificial", -1)]),
+					q("p", ym, [q("strong", bm, I(O.value), 1), t[5] ||= J(" selected negative datasets", -1)])
 				])) : Y("", !0),
-				!h.value && d.value && k.value ? (G(), K("p", Bm, I(k.value) + " evaluation-only " + I(k.value === 1 ? "dataset" : "datasets") + " selected separately; not sampled for training.", 1)) : Y("", !0),
+				!h.value && d.value && k.value ? (G(), K("p", xm, I(k.value) + " evaluation-only " + I(k.value === 1 ? "dataset" : "datasets") + " selected separately; not sampled for training.", 1)) : Y("", !0),
 				t[7] ||= q("p", { class: "studio-muted text-xs" }, "Training uses reviewed positive/negative samples, completed selected artificial batches, and selected external negative datasets. Dataset totals count datasets, not individual audio samples. Pending and discarded recordings are not training inputs.", -1)
 			]),
-			q("div", Vm, [
+			q("div", Sm, [
 				t[9] ||= q("h2", null, "Training parameters", -1),
-				q("div", Hm, [
+				q("div", Cm, [
 					q("label", null, [t[8] ||= J("Training steps", -1), V(q("input", {
 						"onUpdate:modelValue": t[0] ||= (e) => f.value.training_steps = e,
 						name: "training-steps",
@@ -7703,22 +7364,22 @@ var np = {
 						void 0,
 						{ number: !0 }
 					]])]),
-					q("div", Um, [q("button", {
+					q("div", wm, [q("button", {
 						type: "button",
 						"data-action": "save-training-settings",
 						class: "studio-primary",
 						disabled: g.value,
 						onClick: N
-					}, I(g.value ? "Saving…" : "Save parameters"), 9, Wm), q("button", {
+					}, I(g.value ? "Saving…" : "Save parameters"), 9, Tm), q("button", {
 						type: "button",
 						"data-action": "start-training",
 						"aria-busy": D.value,
 						disabled: !E.value || D.value || i.value || !r.value?.ready || h.value || A.value.length > 0,
 						onClick: oe
-					}, I(_.value ? "Starting…" : D.value ? "Training…" : "Start training"), 9, Gm)]),
-					l.value ? (G(), K("p", Km, [J(I(l.value) + " ", 1), q("a", { href: c.value }, "Open Downloaded", 8, qm)])) : Y("", !0)
+					}, I(_.value ? "Starting…" : D.value ? "Training…" : "Start training"), 9, Em)]),
+					l.value ? (G(), K("p", Dm, [J(I(l.value) + " ", 1), q("a", { href: c.value }, "Open Downloaded", 8, Om)])) : Y("", !0)
 				]),
-				v.value ? (G(), K("p", Jm, I(v.value), 1)) : Y("", !0),
+				v.value ? (G(), K("p", km, I(v.value), 1)) : Y("", !0),
 				y.value ? (G(), K("button", {
 					key: 1,
 					type: "button",
@@ -7726,34 +7387,34 @@ var np = {
 					onClick: t[1] ||= (e) => B(n).show(y.value.id)
 				}, "View training in queue")) : Y("", !0)
 			]),
-			q("div", Ym, [
+			q("div", Am, [
 				t[10] ||= q("h2", null, "Run history", -1),
 				(G(!0), K(W, null, U(p.value, (e) => (G(), K("article", {
 					key: e.id,
 					class: "studio-history mt-3",
 					"data-run-id": e.id
 				}, [
-					q("div", Zm, [
-						q("span", null, [q("strong", Qm, I(e.run_number ? `Run #${e.run_number}` : "Run"), 1), q("span", $m, I(B(Ts)(u(e))), 1)]),
+					q("div", Mm, [
+						q("span", null, [q("strong", Nm, I(e.run_number ? `Run #${e.run_number}` : "Run"), 1), q("span", Pm, I(B(Ts)(u(e))), 1)]),
 						q("span", { class: F(["studio-status ml-auto", `studio-status-${e.status}`]) }, I(e.status), 3),
 						q("button", {
 							type: "button",
 							onClick: (t) => B(n).show(e.id)
-						}, "View in queue", 8, eh)
+						}, "View in queue", 8, Fm)
 					]),
-					se(e) ? (G(), K("p", th, "Skipped because inputs and configuration were unchanged.")) : Y("", !0),
-					B(ds)(e) ? (G(), K("p", nh, I(B(ds)(e)), 1)) : Y("", !0)
-				], 8, Xm))), 128)),
-				!h.value && !p.value.length ? (G(), K("p", rh, "No training runs for this workspace yet.")) : Y("", !0)
+					se(e) ? (G(), K("p", Im, "Skipped because inputs and configuration were unchanged.")) : Y("", !0),
+					B(ds)(e) ? (G(), K("p", Lm, I(B(ds)(e)), 1)) : Y("", !0)
+				], 8, jm))), 128)),
+				!h.value && !p.value.length ? (G(), K("p", Rm, "No training runs for this workspace yet.")) : Y("", !0)
 			])
 		]));
 	}
-}), ah = {
+}), Bm = {
 	viewBox: "0 0 780 260",
 	role: "img",
 	"aria-label": "Live detection probability over the last eight seconds, with a dashed threshold and red trace above threshold",
 	class: "probability-graph"
-}, oh = ["height"], sh = ["y1", "y2"], ch = ["y"], lh = ["y1", "y2"], uh = ["points"], dh = ["points", "clip-path"], fh = /*@__PURE__*/ sr({
+}, Vm = ["height"], Hm = ["y1", "y2"], Um = ["y"], Wm = ["y1", "y2"], Gm = ["points"], Km = ["points", "clip-path"], qm = /*@__PURE__*/ sr({
 	__name: "ProbabilityGraph",
 	props: {
 		samples: {},
@@ -7761,13 +7422,13 @@ var np = {
 	},
 	setup(e) {
 		let t = e, n = `probability-${cr().replace(/[^a-zA-Z0-9_-]/g, "")}`, r = (e) => Number((24 + (1 - e) * 180).toFixed(3)), i = X(() => t.samples.at(-1)?.seconds ?? 0), a = X(() => t.samples.filter((e) => e.seconds >= i.value - 8).map((e) => `${48 + (e.seconds - i.value + 8) / 8 * 700},${r(e.probability)}`).join(" "));
-		return (t, i) => (G(), K("svg", ah, [
+		return (t, i) => (G(), K("svg", Bm, [
 			q("defs", null, [q("clipPath", { id: n }, [q("rect", {
 				x: "48",
 				y: "24",
 				width: "700",
 				height: Math.max(0, r(e.threshold) - 24)
-			}, null, 8, oh)])]),
+			}, null, 8, Vm)])]),
 			(G(), K(W, null, U([
 				0,
 				.25,
@@ -7780,11 +7441,11 @@ var np = {
 				y1: r(e),
 				y2: r(e),
 				class: "grid-line"
-			}, null, 8, sh), q("text", {
+			}, null, 8, Hm), q("text", {
 				x: "37",
 				y: r(e) + 4,
 				"text-anchor": "end"
-			}, I(e.toFixed(2)), 9, ch)])), 64)),
+			}, I(e.toFixed(2)), 9, Um)])), 64)),
 			q("line", {
 				"data-threshold-line": "",
 				x1: "48",
@@ -7794,14 +7455,14 @@ var np = {
 				stroke: "#c18b26",
 				"stroke-width": "2",
 				"stroke-dasharray": "7 5"
-			}, null, 8, lh),
+			}, null, 8, Wm),
 			q("polyline", {
 				points: a.value,
 				fill: "none",
 				stroke: "#3898d5",
 				"stroke-width": "2.5",
 				"stroke-linejoin": "round"
-			}, null, 8, uh),
+			}, null, 8, Gm),
 			q("polyline", {
 				"data-red-trace": "",
 				points: a.value,
@@ -7810,15 +7471,15 @@ var np = {
 				stroke: "#e05260",
 				"stroke-width": "2.5",
 				"stroke-linejoin": "round"
-			}, null, 8, dh),
+			}, null, 8, Km),
 			i[0] ||= _a("<text x=\"48\" y=\"226\" data-v-9402a05b>−8s</text><text x=\"398\" y=\"226\" text-anchor=\"middle\" data-v-9402a05b>−4s</text><text x=\"748\" y=\"226\" text-anchor=\"end\" data-v-9402a05b>now</text><text x=\"48\" y=\"250\" data-v-9402a05b>Y: probability</text><text x=\"748\" y=\"250\" text-anchor=\"end\" data-v-9402a05b>X: time → newest</text>", 5)
 		]));
 	}
-}), ph = (e, t) => {
+}), Jm = (e, t) => {
 	let n = e.__vccOpts || e;
 	for (let [e, r] of t) n[e] = r;
 	return n;
-}, mh = /*#__PURE__*/ ph(fh, [["__scopeId", "data-v-9402a05b"]]), hh = [
+}, Ym = /*#__PURE__*/ Jm(qm, [["__scopeId", "data-v-9402a05b"]]), Xm = [
 	{
 		id: "slight",
 		label: "Slightly sensitive"
@@ -7832,14 +7493,14 @@ var np = {
 		label: "Very sensitive"
 	}
 ];
-function gh(e, t) {
+function Zm(e, t) {
 	return Math.max(.1, Math.min(.99, 1 - (1 - e) * {
 		slight: .5,
 		moderate: 1,
 		very: 2
 	}[t]));
 }
-function _h(e) {
+function Qm(e) {
 	let t = (e) => typeof e == "object" && !!e && !Array.isArray(e);
 	if (!t(e) || "micro" in e && !t(e.micro)) throw Error("Invalid model manifest.");
 	let n = t(e.micro) ? e.micro : {}, r = n.probability_cutoff ?? .9, i = n.sliding_window_size ?? 3, a = n.feature_step_size ?? 10;
@@ -7853,7 +7514,7 @@ function _h(e) {
 }
 //#endregion
 //#region src/studio/testing/capture.worklet.js?url
-var vh = "data:text/javascript;base64,LyoqIENhcHR1cmUgbW9ubyBQQ00gb25seTsgdGhlIG91dHB1dCByZW1haW5zIHNpbGVudCAobm8gbWljcm9waG9uZSBmZWVkYmFjaykuICovCmNsYXNzIFRlc3RpbmdDYXB0dXJlIGV4dGVuZHMgQXVkaW9Xb3JrbGV0UHJvY2Vzc29yIHsKICBjb25zdHJ1Y3RvcigpIHsKICAgIHN1cGVyKCk7CiAgICB0aGlzLmJ1ZmZlciA9IG5ldyBGbG9hdDMyQXJyYXkoMjA0OCk7CiAgICB0aGlzLm9mZnNldCA9IDA7CiAgfQogIHByb2Nlc3MoaW5wdXRzKSB7CiAgICBjb25zdCBjaGFubmVscyA9IGlucHV0c1swXTsKICAgIGlmICghY2hhbm5lbHM/Lmxlbmd0aCkgcmV0dXJuIHRydWU7CiAgICBmb3IgKGxldCBpID0gMDsgaSA8IGNoYW5uZWxzWzBdLmxlbmd0aDsgaSsrKSB7CiAgICAgIGxldCBzYW1wbGUgPSAwOwogICAgICBmb3IgKGNvbnN0IGNoYW5uZWwgb2YgY2hhbm5lbHMpIHNhbXBsZSArPSBjaGFubmVsW2ldOwogICAgICB0aGlzLmJ1ZmZlclt0aGlzLm9mZnNldCsrXSA9IHNhbXBsZSAvIGNoYW5uZWxzLmxlbmd0aDsKICAgICAgaWYgKHRoaXMub2Zmc2V0ID09PSB0aGlzLmJ1ZmZlci5sZW5ndGgpIHsKICAgICAgICB0aGlzLnBvcnQucG9zdE1lc3NhZ2UodGhpcy5idWZmZXIsIFt0aGlzLmJ1ZmZlci5idWZmZXJdKTsKICAgICAgICB0aGlzLmJ1ZmZlciA9IG5ldyBGbG9hdDMyQXJyYXkoMjA0OCk7CiAgICAgICAgdGhpcy5vZmZzZXQgPSAwOwogICAgICB9CiAgICB9CiAgICByZXR1cm4gdHJ1ZTsKICB9Cn0KcmVnaXN0ZXJQcm9jZXNzb3IoJ3N0dWRpby10ZXN0aW5nLWNhcHR1cmUnLCBUZXN0aW5nQ2FwdHVyZSk7Cg==", yh = class {
+var $m = "data:text/javascript;base64,LyoqIENhcHR1cmUgbW9ubyBQQ00gb25seTsgdGhlIG91dHB1dCByZW1haW5zIHNpbGVudCAobm8gbWljcm9waG9uZSBmZWVkYmFjaykuICovCmNsYXNzIFRlc3RpbmdDYXB0dXJlIGV4dGVuZHMgQXVkaW9Xb3JrbGV0UHJvY2Vzc29yIHsKICBjb25zdHJ1Y3RvcigpIHsKICAgIHN1cGVyKCk7CiAgICB0aGlzLmJ1ZmZlciA9IG5ldyBGbG9hdDMyQXJyYXkoMjA0OCk7CiAgICB0aGlzLm9mZnNldCA9IDA7CiAgfQogIHByb2Nlc3MoaW5wdXRzKSB7CiAgICBjb25zdCBjaGFubmVscyA9IGlucHV0c1swXTsKICAgIGlmICghY2hhbm5lbHM/Lmxlbmd0aCkgcmV0dXJuIHRydWU7CiAgICBmb3IgKGxldCBpID0gMDsgaSA8IGNoYW5uZWxzWzBdLmxlbmd0aDsgaSsrKSB7CiAgICAgIGxldCBzYW1wbGUgPSAwOwogICAgICBmb3IgKGNvbnN0IGNoYW5uZWwgb2YgY2hhbm5lbHMpIHNhbXBsZSArPSBjaGFubmVsW2ldOwogICAgICB0aGlzLmJ1ZmZlclt0aGlzLm9mZnNldCsrXSA9IHNhbXBsZSAvIGNoYW5uZWxzLmxlbmd0aDsKICAgICAgaWYgKHRoaXMub2Zmc2V0ID09PSB0aGlzLmJ1ZmZlci5sZW5ndGgpIHsKICAgICAgICB0aGlzLnBvcnQucG9zdE1lc3NhZ2UodGhpcy5idWZmZXIsIFt0aGlzLmJ1ZmZlci5idWZmZXJdKTsKICAgICAgICB0aGlzLmJ1ZmZlciA9IG5ldyBGbG9hdDMyQXJyYXkoMjA0OCk7CiAgICAgICAgdGhpcy5vZmZzZXQgPSAwOwogICAgICB9CiAgICB9CiAgICByZXR1cm4gdHJ1ZTsKICB9Cn0KcmVnaXN0ZXJQcm9jZXNzb3IoJ3N0dWRpby10ZXN0aW5nLWNhcHR1cmUnLCBUZXN0aW5nQ2FwdHVyZSk7Cg==", eh = class {
 	events;
 	state = "idle";
 	generation = 0;
@@ -7913,7 +7574,7 @@ var vh = "data:text/javascript;base64,LyoqIENhcHR1cmUgbW9ubyBQQ00gb25seTsgdGhlIG
 				let [o] = await Promise.all([fetch(e, {
 					signal: a.signal,
 					credentials: "same-origin"
-				}), i.audioWorklet.addModule(vh)]);
+				}), i.audioWorklet.addModule($m)]);
 				if (!r()) return;
 				if (!o.ok) throw Error("Unable to load the archived model. Refresh the version list and retry.");
 				let s = await o.arrayBuffer();
@@ -7971,27 +7632,27 @@ var vh = "data:text/javascript;base64,LyoqIENhcHR1cmUgbW9ubyBQQ00gb25seTsgdGhlIG
 			}
 		}
 	}
-}, bh = { class: "testing-page" }, xh = { class: "studio-card testing-card" }, Sh = { class: "studio-toolbar testing-controls" }, Ch = { for: "testing-version" }, wh = ["disabled"], Th = {
+}, th = { class: "testing-page" }, nh = { class: "studio-card testing-card" }, rh = { class: "studio-toolbar testing-controls" }, ih = { for: "testing-version" }, ah = ["disabled"], oh = {
 	key: 0,
 	value: ""
-}, Eh = ["value"], Dh = { class: "testing-sensitivity" }, Oh = ["disabled"], kh = {
+}, sh = ["value"], ch = { class: "testing-sensitivity" }, lh = ["disabled"], uh = {
 	key: 0,
 	class: "studio-note"
-}, Ah = {
+}, dh = {
 	key: 1,
 	class: "studio-note"
-}, jh = {
+}, fh = {
 	key: 2,
 	role: "alert",
 	class: "studio-note"
-}, Mh = { class: "testing-mic" }, Nh = ["value"], Ph = { class: "testing-stats" }, Fh = { "data-threshold": "" }, Ih = { class: "testing-actions" }, Lh = ["disabled"], Rh = { class: "studio-muted" }, zh = { class: "sensitivity-options" }, Bh = [
+}, ph = { class: "testing-mic" }, mh = ["value"], hh = { class: "testing-stats" }, gh = { "data-threshold": "" }, _h = { class: "testing-actions" }, vh = ["disabled"], yh = { class: "studio-muted" }, bh = { class: "sensitivity-options" }, xh = [
 	"data-sensitivity",
 	"aria-pressed",
 	"onClick"
-], Vh = /*#__PURE__*/ ph(/* @__PURE__ */ sr({
+], Sh = /*#__PURE__*/ Jm(/* @__PURE__ */ sr({
 	__name: "TestingPage",
 	setup(e) {
-		let t = ws(), n = /* @__PURE__ */ z([]), r = /* @__PURE__ */ z(""), i = /* @__PURE__ */ z(null), a = /* @__PURE__ */ z("moderate"), o = /* @__PURE__ */ z(), s = /* @__PURE__ */ z("idle"), c = /* @__PURE__ */ z(!1), l = /* @__PURE__ */ z(""), u = /* @__PURE__ */ z([]), d = /* @__PURE__ */ z(null), f, p, m = !1, h = X(() => n.value.find((e) => e.id === r.value)), g = X(() => gh(i.value?.cutoff ?? .9, a.value)), _ = X(() => hh.find((e) => e.id === a.value).label), v = X(() => s.value === "starting" || s.value === "listening"), y = X(() => Math.max(0, ...u.value.map((e) => e.probability))), b = X(() => !d.value?.warming && (d.value?.probability ?? 0) > g.value), x = X(() => s.value === "starting" ? "Loading model and requesting microphone…" : s.value === "error" ? "Testing stopped" : s.value === "listening" ? d.value?.warming || !d.value ? "Warming up…" : b.value ? "Above threshold" : "Listening…" : "Ready to test"), S = new yh({
+		let t = ws(), n = /* @__PURE__ */ z([]), r = /* @__PURE__ */ z(""), i = /* @__PURE__ */ z(null), a = /* @__PURE__ */ z("moderate"), o = /* @__PURE__ */ z(), s = /* @__PURE__ */ z("idle"), c = /* @__PURE__ */ z(!1), l = /* @__PURE__ */ z(""), u = /* @__PURE__ */ z([]), d = /* @__PURE__ */ z(null), f, p, m = !1, h = X(() => n.value.find((e) => e.id === r.value)), g = X(() => Zm(i.value?.cutoff ?? .9, a.value)), _ = X(() => Xm.find((e) => e.id === a.value).label), v = X(() => s.value === "starting" || s.value === "listening"), y = X(() => Math.max(0, ...u.value.map((e) => e.probability))), b = X(() => !d.value?.warming && (d.value?.probability ?? 0) > g.value), x = X(() => s.value === "starting" ? "Loading model and requesting microphone…" : s.value === "error" ? "Testing stopped" : s.value === "listening" ? d.value?.warming || !d.value ? "Warming up…" : b.value ? "Above threshold" : "Listening…" : "Ready to test"), S = new eh({
 			state: (e) => {
 				s.value = e;
 			},
@@ -8016,7 +7677,7 @@ var vh = "data:text/javascript;base64,LyoqIENhcHR1cmUgbW9ubyBQQ00gb25seTsgdGhlIG
 			p = r;
 			try {
 				let t = await $.testingManifest(n, e.id, e.model_id, r.signal);
-				!m && !r.signal.aborted && (i.value = _h(t));
+				!m && !r.signal.aborted && (i.value = Qm(t));
 			} catch (e) {
 				!m && !r.signal.aborted && (l.value = e instanceof Error ? e.message : "Unable to load model settings.");
 			}
@@ -8057,55 +7718,55 @@ var vh = "data:text/javascript;base64,LyoqIENhcHR1cmUgbW9ubyBQQ00gb25seTsgdGhlIG
 			flush: "sync"
 		}), Er(() => {
 			m = !0, f?.abort(), p?.abort(), o.value?.close(), S.stop();
-		}), (e, f) => (G(), K("section", bh, [
+		}), (e, f) => (G(), K("section", th, [
 			f[17] ||= q("h1", null, "Testing", -1),
 			f[18] ||= q("p", { class: "studio-muted testing-intro" }, "Test a trained wakeword using your microphone. Inference runs in this browser; audio is never uploaded or saved.", -1),
-			q("div", xh, [
+			q("div", nh, [
 				f[12] ||= q("h2", null, "Wake Word Tester", -1),
 				f[13] ||= q("p", { class: "studio-muted" }, "Speak your wakeword from your usual distance and watch the detection probability in real time.", -1),
-				q("div", Sh, [q("label", Ch, [f[4] ||= J("Wakeword version ", -1), V(q("select", {
+				q("div", rh, [q("label", ih, [f[4] ||= J("Wakeword version ", -1), V(q("select", {
 					id: "testing-version",
 					"onUpdate:modelValue": f[0] ||= (e) => r.value = e,
 					disabled: c.value || !n.value.length
-				}, [n.value.length ? Y("", !0) : (G(), K("option", Th, I(c.value ? "Loading versions…" : "No versions available"), 1)), (G(!0), K(W, null, U(n.value, (e) => (G(), K("option", {
+				}, [n.value.length ? Y("", !0) : (G(), K("option", oh, I(c.value ? "Loading versions…" : "No versions available"), 1)), (G(!0), K(W, null, U(n.value, (e) => (G(), K("option", {
 					key: e.id,
 					value: e.id
-				}, I(B(Ts)(e.trained_at)) + " · " + I(e.id.slice(0, 8)), 9, Eh))), 128))], 8, wh), [[Ho, r.value]])]), q("div", Dh, [f[5] ||= q("span", { class: "studio-muted" }, "Sensitivity", -1), q("button", {
+				}, I(B(Ts)(e.trained_at)) + " · " + I(e.id.slice(0, 8)), 9, sh))), 128))], 8, ah), [[Ho, r.value]])]), q("div", ch, [f[5] ||= q("span", { class: "studio-muted" }, "Sensitivity", -1), q("button", {
 					type: "button",
 					"data-action": "sensitivity",
 					disabled: !i.value,
 					"aria-haspopup": "dialog",
 					onClick: f[1] ||= (e) => o.value?.showModal()
-				}, I(_.value) + " ▾", 9, Oh)])]),
-				B(t).selectedId.value ? !c.value && !n.value.length && !l.value ? (G(), K("p", Ah, "Train a model to start live testing.")) : Y("", !0) : (G(), K("p", kh, "Select or create a wakeword to test.")),
-				l.value ? (G(), K("p", jh, [J(I(l.value) + " ", 1), v.value ? Y("", !0) : (G(), K("button", {
+				}, I(_.value) + " ▾", 9, lh)])]),
+				B(t).selectedId.value ? !c.value && !n.value.length && !l.value ? (G(), K("p", dh, "Train a model to start live testing.")) : Y("", !0) : (G(), K("p", uh, "Select or create a wakeword to test.")),
+				l.value ? (G(), K("p", fh, [J(I(l.value) + " ", 1), v.value ? Y("", !0) : (G(), K("button", {
 					key: 0,
 					type: "button",
 					onClick: E
 				}, "Reload versions"))])) : Y("", !0),
-				q("div", Mh, [
+				q("div", ph, [
 					f[6] ||= q("span", null, "Mic level", -1),
 					q("meter", {
 						min: "0",
 						max: ".2",
 						value: d.value?.rms ?? 0,
 						"aria-label": "Microphone level"
-					}, null, 8, Nh),
+					}, null, 8, mh),
 					q("span", null, I((d.value?.rms ?? 0).toFixed(3)), 1)
 				]),
-				q("div", Ph, [f[11] ||= q("span", null, "Detection probability (smoothed)", -1), q("span", null, [
+				q("div", hh, [f[11] ||= q("span", null, "Detection probability (smoothed)", -1), q("span", null, [
 					f[8] ||= J("latest ", -1),
 					q("b", null, I((d.value?.probability ?? 0).toFixed(3)), 1),
 					f[9] ||= J(" · peak ", -1),
 					q("b", null, I(y.value.toFixed(3)), 1),
 					f[10] ||= J(" · ", -1),
-					q("span", Fh, [f[7] ||= J("threshold ", -1), q("b", null, I(g.value.toFixed(2)), 1)])
+					q("span", gh, [f[7] ||= J("threshold ", -1), q("b", null, I(g.value.toFixed(2)), 1)])
 				])]),
-				pa(mh, {
+				pa(Ym, {
 					samples: u.value,
 					threshold: g.value
 				}, null, 8, ["samples", "threshold"]),
-				q("div", Ih, [v.value ? (G(), K("button", {
+				q("div", _h, [v.value ? (G(), K("button", {
 					key: 0,
 					type: "button",
 					class: "studio-record-stop",
@@ -8118,7 +7779,7 @@ var vh = "data:text/javascript;base64,LyoqIENhcHR1cmUgbW9ubyBQQ00gb25seTsgdGhlIG
 					"data-action": "start-testing",
 					disabled: !i.value || c.value,
 					onClick: D
-				}, "Start testing", 8, Lh)), q("span", {
+				}, "Start testing", 8, vh)), q("span", {
 					role: "status",
 					class: F({ "testing-above": b.value && s.value === "listening" })
 				}, I(x.value), 3)]),
@@ -8131,15 +7792,15 @@ var vh = "data:text/javascript;base64,LyoqIENhcHR1cmUgbW9ubyBQQ00gb25seTsgdGhlIG
 				"aria-labelledby": "testing-sensitivity-title"
 			}, [
 				f[15] ||= q("h2", { id: "testing-sensitivity-title" }, "Detection sensitivity", -1),
-				q("p", Rh, "Derived from this version’s saved cutoff (" + I((i.value?.cutoff ?? .9).toFixed(2)) + "), using Voice Satellite’s calculation.", 1),
-				q("div", zh, [(G(!0), K(W, null, U(B(hh), (e) => (G(), K("button", {
+				q("p", yh, "Derived from this version’s saved cutoff (" + I((i.value?.cutoff ?? .9).toFixed(2)) + "), using Voice Satellite’s calculation.", 1),
+				q("div", bh, [(G(!0), K(W, null, U(B(Xm), (e) => (G(), K("button", {
 					key: e.id,
 					type: "button",
 					"data-sensitivity": e.id,
 					"aria-pressed": a.value === e.id,
 					class: F({ "studio-selected": a.value === e.id }),
 					onClick: (t) => w(e.id)
-				}, [q("span", null, I(e.label), 1), q("strong", null, I(B(gh)(i.value?.cutoff ?? .9, e.id).toFixed(2)), 1)], 10, Bh))), 128))]),
+				}, [q("span", null, I(e.label), 1), q("strong", null, I(B(Zm)(i.value?.cutoff ?? .9, e.id).toFixed(2)), 1)], 10, xh))), 128))]),
 				f[16] ||= q("p", { class: "studio-muted" }, "Higher sensitivity lowers the threshold and may increase false detections.", -1),
 				q("button", {
 					type: "button",
@@ -8151,7 +7812,7 @@ var vh = "data:text/javascript;base64,LyoqIENhcHR1cmUgbW9ubyBQQ00gb25seTsgdGhlIG
 }), [["__scopeId", "data-v-fb617175"]]);
 //#endregion
 //#region src/studio/theme.ts
-function Hh() {
+function Ch() {
 	let e = typeof window.matchMedia == "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null, t = null;
 	try {
 		let e = localStorage.getItem("studio.theme");
@@ -8180,40 +7841,40 @@ function Hh() {
 }
 //#endregion
 //#region src/studio/components/ThemeToggle.vue?vue&type=script&setup=true&lang.ts
-var Uh = ["aria-pressed"], Wh = /* @__PURE__ */ sr({
+var wh = ["aria-pressed"], Th = /* @__PURE__ */ sr({
 	__name: "ThemeToggle",
 	setup(e) {
-		let { dark: t, toggle: n, dispose: r } = Hh();
+		let { dark: t, toggle: n, dispose: r } = Ch();
 		return Er(r), (e, r) => (G(), K("button", {
 			type: "button",
 			"aria-label": "Dark mode",
 			"aria-pressed": B(t),
 			onClick: r[0] ||= (...e) => B(n) && B(n)(...e)
-		}, I(B(t) ? "☀ Light mode" : "☾ Dark mode"), 9, Uh));
+		}, I(B(t) ? "☀ Light mode" : "☾ Dark mode"), 9, wh));
 	}
-}), Gh = ["data-job-id"], Kh = { class: "studio-job-heading" }, qh = ["aria-label", "disabled"], Jh = { class: "studio-job-meta" }, Yh = {
+}), Eh = ["data-job-id"], Dh = { class: "studio-job-heading" }, Oh = ["aria-label", "disabled"], kh = { class: "studio-job-meta" }, Ah = {
 	key: 0,
 	class: "studio-note",
 	role: "alert"
-}, Xh = { class: "studio-job-meta" }, Zh = {
+}, jh = { class: "studio-job-meta" }, Mh = {
 	key: 0,
 	class: "studio-job-meta"
-}, Qh = {
+}, Nh = {
 	key: 1,
 	class: "studio-log",
 	"aria-label": "Job log tail"
-}, $h = {
+}, Ph = {
 	key: 2,
 	class: "studio-job-meta"
-}, eg = {
+}, Fh = {
 	key: 3,
 	class: "studio-note",
 	role: "alert"
-}, tg = { class: "studio-job-meta" }, ng = {
+}, Ih = { class: "studio-job-meta" }, Lh = {
 	key: 1,
 	class: "studio-note",
 	role: "alert"
-}, rg = /* @__PURE__ */ sr({
+}, Rh = /* @__PURE__ */ sr({
 	__name: "JobQueueCard",
 	props: { job: {} },
 	setup(e) {
@@ -8252,7 +7913,7 @@ var Uh = ["aria-pressed"], Wh = /* @__PURE__ */ sr({
 			class: F(["studio-card studio-job-card", { "studio-selected": B(r).selectedJobId.value === e.job.id }]),
 			"data-job-id": e.job.id
 		}, [
-			q("div", Kh, [
+			q("div", Dh, [
 				q("h3", null, I(a[e.job.kind] ?? e.job.kind), 1),
 				q("span", { class: F(["studio-status", `studio-status-${e.job.status}`]) }, I(e.job.status), 3),
 				B(Rc)(e.job) ? (G(), K("button", {
@@ -8262,32 +7923,32 @@ var Uh = ["aria-pressed"], Wh = /* @__PURE__ */ sr({
 					"aria-label": `Cancel ${a[e.job.kind] ?? e.job.kind}`,
 					disabled: e.job.status === "cancelling" || B(r).cancelling.value.has(e.job.id),
 					onClick: n[0] ||= (t) => B(r).cancel(e.job.id)
-				}, "Cancel", 8, qh)) : Y("", !0)
+				}, "Cancel", 8, Oh)) : Y("", !0)
 			]),
-			q("p", Jh, I(o.value) + " · " + I(s.value), 1),
-			B(ds)(e.job) ? (G(), K("p", Yh, I(B(ds)(e.job)), 1)) : Y("", !0),
-			q("p", Xh, I(e.job.started_at ? "Started" : "Created") + " " + I(B(Ts)(e.job.started_at ?? e.job.created_at)), 1),
+			q("p", kh, I(o.value) + " · " + I(s.value), 1),
+			B(ds)(e.job) ? (G(), K("p", Ah, I(B(ds)(e.job)), 1)) : Y("", !0),
+			q("p", jh, I(e.job.started_at ? "Started" : "Created") + " " + I(B(Ts)(e.job.started_at ?? e.job.created_at)), 1),
 			q("details", { onToggle: n[1] ||= (e) => c.value = e.target.open }, [
 				n[2] ||= q("summary", null, "View logs", -1),
-				d.value && !l.value ? (G(), K("p", Zh, "Loading logs…")) : Y("", !0),
-				l.value ? (G(), K("pre", Qh, I(l.value), 1)) : !d.value && !u.value ? (G(), K("p", $h, "No retained log output.")) : Y("", !0),
-				u.value ? (G(), K("p", eg, [J(I(u.value) + " ", 1), q("button", {
+				d.value && !l.value ? (G(), K("p", Mh, "Loading logs…")) : Y("", !0),
+				l.value ? (G(), K("pre", Nh, I(l.value), 1)) : !d.value && !u.value ? (G(), K("p", Ph, "No retained log output.")) : Y("", !0),
+				u.value ? (G(), K("p", Fh, [J(I(u.value) + " ", 1), q("button", {
 					type: "button",
 					onClick: h
 				}, "Retry")])) : Y("", !0),
-				q("p", tg, "Job " + I(e.job.id), 1)
+				q("p", Ih, "Job " + I(e.job.id), 1)
 			], 32),
-			B(r).cancelErrors.value[e.job.id] ? (G(), K("p", ng, I(B(r).cancelErrors.value[e.job.id]), 1)) : Y("", !0)
-		], 10, Gh));
+			B(r).cancelErrors.value[e.job.id] ? (G(), K("p", Lh, I(B(r).cancelErrors.value[e.job.id]), 1)) : Y("", !0)
+		], 10, Eh));
 	}
-}), ig = { class: "studio-queue-header" }, ag = { class: "flex items-center justify-between gap-3" }, og = { class: "studio-queue-badge" }, sg = { class: "studio-queue-content" }, cg = {
+}), zh = { class: "studio-queue-header" }, Bh = { class: "flex items-center justify-between gap-3" }, Vh = { class: "studio-queue-badge" }, Hh = { class: "studio-queue-content" }, Uh = {
 	key: 0,
 	class: "studio-note",
 	role: "alert"
-}, lg = { class: "studio-queue-group" }, ug = { class: "studio-queue-group" }, dg = {
+}, Wh = { class: "studio-queue-group" }, Gh = { class: "studio-queue-group" }, Kh = {
 	key: 5,
 	class: "studio-muted text-sm mt-4"
-}, fg = ["disabled"], pg = /* @__PURE__ */ sr({
+}, qh = ["disabled"], Jh = /* @__PURE__ */ sr({
 	__name: "JobQueueDrawer",
 	setup(e) {
 		let t = Vc(), n = /* @__PURE__ */ z(), r = /* @__PURE__ */ z(), i = X(() => t.activeJobs.value.filter((e) => e.status !== "queued")), a = X(() => t.activeJobs.value.filter((e) => e.status === "queued")), o = X(() => {
@@ -8331,74 +7992,74 @@ var Uh = ["aria-pressed"], Wh = /* @__PURE__ */ sr({
 			role: "dialog",
 			"aria-modal": "true",
 			"aria-label": "Global job queue"
-		}, [q("header", ig, [q("div", ag, [q("h2", null, [s[2] ||= J("Job queue ", -1), q("span", og, I(B(t).activeCount.value) + " active", 1)]), q("button", {
+		}, [q("header", zh, [q("div", Bh, [q("h2", null, [s[2] ||= J("Job queue ", -1), q("span", Vh, I(B(t).activeCount.value) + " active", 1)]), q("button", {
 			ref_key: "closeButton",
 			ref: r,
 			type: "button",
 			"data-action": "close-job-queue",
 			"aria-label": "Close job queue",
 			onClick: l
-		}, "✕", 512)]), s[3] ||= q("p", { class: "studio-muted text-xs" }, "All kiosks · All followers · All wakewords", -1)]), q("div", sg, [
-			B(t).error.value ? (G(), K("p", cg, [J(I(B(t).error.value) + " ", 1), q("button", {
+		}, "✕", 512)]), s[3] ||= q("p", { class: "studio-muted text-xs" }, "All kiosks · All followers · All wakewords", -1)]), q("div", Hh, [
+			B(t).error.value ? (G(), K("p", Uh, [J(I(B(t).error.value) + " ", 1), q("button", {
 				type: "button",
 				onClick: s[0] ||= (...e) => B(t).refresh && B(t).refresh(...e)
 			}, "Retry")])) : Y("", !0),
-			o.value ? (G(), K(W, { key: 1 }, [s[4] ||= q("h3", { class: "studio-queue-group" }, "Selected job", -1), pa(rg, { job: o.value }, null, 8, ["job"])], 64)) : Y("", !0),
-			i.value.length ? (G(), K(W, { key: 2 }, [q("h3", lg, "Running · " + I(i.value.length), 1), (G(!0), K(W, null, U(i.value, (e) => (G(), ca(rg, {
+			o.value ? (G(), K(W, { key: 1 }, [s[4] ||= q("h3", { class: "studio-queue-group" }, "Selected job", -1), pa(Rh, { job: o.value }, null, 8, ["job"])], 64)) : Y("", !0),
+			i.value.length ? (G(), K(W, { key: 2 }, [q("h3", Wh, "Running · " + I(i.value.length), 1), (G(!0), K(W, null, U(i.value, (e) => (G(), ca(Rh, {
 				key: e.id,
 				job: e
 			}, null, 8, ["job"]))), 128))], 64)) : Y("", !0),
-			a.value.length ? (G(), K(W, { key: 3 }, [q("h3", ug, "Queued · " + I(a.value.length), 1), (G(!0), K(W, null, U(a.value, (e) => (G(), ca(rg, {
+			a.value.length ? (G(), K(W, { key: 3 }, [q("h3", Gh, "Queued · " + I(a.value.length), 1), (G(!0), K(W, null, U(a.value, (e) => (G(), ca(Rh, {
 				key: e.id,
 				job: e
 			}, null, 8, ["job"]))), 128))], 64)) : Y("", !0),
-			B(t).history.value.length ? (G(), K(W, { key: 4 }, [s[5] ||= q("h3", { class: "studio-queue-group" }, "Recent history", -1), (G(!0), K(W, null, U(B(t).history.value, (e) => (G(), ca(rg, {
+			B(t).history.value.length ? (G(), K(W, { key: 4 }, [s[5] ||= q("h3", { class: "studio-queue-group" }, "Recent history", -1), (G(!0), K(W, null, U(B(t).history.value, (e) => (G(), ca(Rh, {
 				key: e.id,
 				job: e
 			}, null, 8, ["job"]))), 128))], 64)) : Y("", !0),
-			!B(t).activeCount.value && !B(t).history.value.length && !o.value && !B(t).loading.value && !B(t).error.value ? (G(), K("p", dg, "No jobs yet.")) : Y("", !0),
+			!B(t).activeCount.value && !B(t).history.value.length && !o.value && !B(t).loading.value && !B(t).error.value ? (G(), K("p", Kh, "No jobs yet.")) : Y("", !0),
 			B(t).hasMore.value ? (G(), K("button", {
 				key: 6,
 				type: "button",
 				class: "studio-queue-more",
 				disabled: B(t).loading.value,
 				onClick: s[1] ||= (...e) => B(t).loadMore && B(t).loadMore(...e)
-			}, "Load older jobs", 8, fg)) : Y("", !0)
+			}, "Load older jobs", 8, qh)) : Y("", !0)
 		])], 512)], 64)) : Y("", !0);
 	}
-}), mg = ["inert"], hg = { class: "studio-sidebar" }, gg = { class: "flex items-center justify-between gap-3" }, _g = ["aria-expanded"], vg = ["hidden"], yg = {
+}), Yh = ["inert"], Xh = { class: "studio-sidebar" }, Zh = { class: "flex items-center justify-between gap-3" }, Qh = ["aria-expanded"], $h = ["hidden"], eg = {
 	key: 0,
 	class: "studio-nav-label"
-}, bg = [
+}, tg = [
 	"href",
 	"data-page",
 	"aria-current",
 	"onClick"
-], xg = { class: "studio-main" }, Sg = { class: "studio-header flex flex-wrap items-center justify-between gap-3" }, Cg = { class: "studio-muted text-xs" }, wg = { class: "flex flex-wrap items-center gap-3" }, Tg = {
+], ng = { class: "studio-main" }, rg = { class: "studio-header flex flex-wrap items-center justify-between gap-3" }, ig = { class: "studio-muted text-xs" }, ag = { class: "flex flex-wrap items-center gap-3" }, og = {
 	class: "flex items-center gap-3 text-xs",
 	for: "studio-word"
-}, Eg = ["value", "disabled"], Dg = {
+}, sg = ["value", "disabled"], cg = {
 	key: 0,
 	value: ""
-}, Og = ["value"], kg = ["aria-expanded"], Ag = {
+}, lg = ["value"], ug = ["aria-expanded"], dg = {
 	key: 0,
 	class: "studio-queue-badge"
-}, jg = {
+}, fg = {
 	key: 1,
 	title: "Job queue unavailable",
 	"aria-label": "Job queue unavailable"
-}, Mg = {
+}, pg = {
 	key: 0,
 	role: "status",
 	class: "studio-note"
-}, Ng = {
+}, mg = {
 	key: 1,
 	class: "studio-note",
 	role: "alert"
-}, Pg = {
+}, hg = {
 	key: 2,
 	role: "status"
-}, Fg = /* @__PURE__ */ sr({
+}, gg = /* @__PURE__ */ sr({
 	__name: "StudioShell",
 	setup(e) {
 		let t = ss(), n = Ss(t);
@@ -8434,8 +8095,8 @@ var Uh = ["aria-pressed"], Wh = /* @__PURE__ */ sr({
 				href: "#studio-content",
 				onClick: o[0] ||= Yo((e) => p.value?.focus(), ["prevent"])
 			}, "Skip to content"),
-			q("aside", hg, [
-				q("div", gg, [o[4] ||= q("div", { class: "studio-brand" }, [J("◈ Wakeword Studio"), q("small", null, "LISTEN · REFINE · DEPLOY")], -1), d.value ? (G(), K("button", {
+			q("aside", Xh, [
+				q("div", Zh, [o[4] ||= q("div", { class: "studio-brand" }, [J("◈ Wakeword Studio"), q("small", null, "LISTEN · REFINE · DEPLOY")], -1), d.value ? (G(), K("button", {
 					key: 0,
 					ref_key: "toggle",
 					ref: f,
@@ -8444,12 +8105,12 @@ var Uh = ["aria-pressed"], Wh = /* @__PURE__ */ sr({
 					"aria-controls": "studio-navigation",
 					"aria-expanded": u.value,
 					onClick: o[1] ||= (e) => u.value = !u.value
-				}, "Menu", 8, _g)) : Y("", !0)]),
+				}, "Menu", 8, Qh)) : Y("", !0)]),
 				q("nav", {
 					id: "studio-navigation",
 					"aria-label": "Main navigation",
 					hidden: h.value
-				}, [(G(!0), K(W, null, U(B(is), (e, n) => (G(), K(W, { key: e.id }, [(e.group === "Data" || e.group === "Models") && B(is)[n - 1]?.group !== e.group ? (G(), K("div", yg, I(e.group), 1)) : Y("", !0), q("a", {
+				}, [(G(!0), K(W, null, U(B(is), (e, n) => (G(), K(W, { key: e.id }, [(e.group === "Data" || e.group === "Models") && B(is)[n - 1]?.group !== e.group ? (G(), K("div", eg, I(e.group), 1)) : Y("", !0), q("a", {
 					href: B(t).href(e.id),
 					"data-page": e.id,
 					class: F({
@@ -8458,24 +8119,24 @@ var Uh = ["aria-pressed"], Wh = /* @__PURE__ */ sr({
 					}),
 					"aria-current": m.value.id === e.id ? "page" : void 0,
 					onClick: Yo((t) => b(e.id), ["prevent"])
-				}, I(e.name), 11, bg)], 64))), 128))], 8, vg),
+				}, I(e.name), 11, tg)], 64))), 128))], 8, $h),
 				o[5] ||= q("p", { class: "studio-sidebar-note" }, [
 					J("Independent workspaces."),
 					q("br"),
 					J("Device selections stay unchanged.")
 				], -1)
 			]),
-			q("div", xg, [q("header", Sg, [q("div", Cg, I(m.value.group) + " / " + I(m.value.name), 1), q("div", wg, [
-				q("label", Tg, [o[6] ||= J("WAKEWORD ", -1), q("select", {
+			q("div", ng, [q("header", rg, [q("div", ig, I(m.value.group) + " / " + I(m.value.name), 1), q("div", ag, [
+				q("label", og, [o[6] ||= J("WAKEWORD ", -1), q("select", {
 					id: "studio-word",
 					value: B(a),
 					disabled: !B(i).length,
 					onChange: o[2] ||= (e) => B(n).select(e.target.value)
-				}, [B(i).length ? Y("", !0) : (G(), K("option", Dg, "No wakewords")), (G(!0), K(W, null, U(B(i), (e) => (G(), K("option", {
+				}, [B(i).length ? Y("", !0) : (G(), K("option", cg, "No wakewords")), (G(!0), K(W, null, U(B(i), (e) => (G(), K("option", {
 					key: e.id,
 					value: e.id
-				}, I(e.phrase), 9, Og))), 128))], 40, Eg)]),
-				pa(Wh),
+				}, I(e.phrase), 9, lg))), 128))], 40, sg)]),
+				pa(Th),
 				q("button", {
 					type: "button",
 					class: "studio-queue-toggle",
@@ -8492,9 +8153,9 @@ var Uh = ["aria-pressed"], Wh = /* @__PURE__ */ sr({
 						"stroke-width": "1.7",
 						"aria-hidden": "true"
 					}, [q("path", { d: "M8 6h13M8 12h13M8 18h13M3 6h1M3 12h1M3 18h1" })], -1),
-					B(r).activeCount.value ? (G(), K("span", Ag, I(B(r).activeCount.value), 1)) : Y("", !0),
-					B(r).error.value ? (G(), K("span", jg, "!")) : Y("", !0)
-				], 8, kg)
+					B(r).activeCount.value ? (G(), K("span", dg, I(B(r).activeCount.value), 1)) : Y("", !0),
+					B(r).error.value ? (G(), K("span", fg, "!")) : Y("", !0)
+				], 8, ug)
 			])]), q("main", {
 				id: "studio-content",
 				ref_key: "content",
@@ -8502,19 +8163,14 @@ var Uh = ["aria-pressed"], Wh = /* @__PURE__ */ sr({
 				class: "studio-content",
 				tabindex: "-1"
 			}, [
-				B(l) ? (G(), K("p", Mg, I(B(l)), 1)) : Y("", !0),
-				B(c) ? (G(), K("div", Ng, I(B(c)), 1)) : Y("", !0),
-				B(s) ? (G(), K("p", Pg, "Loading workspaces…")) : Y("", !0),
-				m.value.id === "wakewords" ? (G(), ca(Xs, { key: 3 })) : m.value.id === "classify" ? (G(), ca(El, { key: 4 })) : m.value.id === "samples" ? (G(), ca(_u, { key: 5 })) : m.value.id === "manual" ? (G(), ca(cd, { key: 6 })) : m.value.id === "kiosks" ? (G(), ca(Wd, { key: 7 })) : m.value.id === "automate" ? (G(), ca(Ef, { key: 8 })) : m.value.id === "deploy" ? (G(), ca($f, { key: 9 })) : m.value.id === "online-datasets" ? (G(), ca(Rp, { key: 10 })) : m.value.id === "artificial" ? (G(), ca(Om, { key: 11 })) : m.value.id === "train" ? (G(), ca(ih, { key: 12 })) : m.value.id === "testing" ? (G(), ca(Vh, { key: 13 })) : Y("", !0)
+				B(l) ? (G(), K("p", pg, I(B(l)), 1)) : Y("", !0),
+				B(c) ? (G(), K("div", mg, I(B(c)), 1)) : Y("", !0),
+				B(s) ? (G(), K("p", hg, "Loading workspaces…")) : Y("", !0),
+				m.value.id === "wakewords" ? (G(), ca(Xs, { key: 3 })) : m.value.id === "classify" ? (G(), ca(El, { key: 4 })) : m.value.id === "samples" ? (G(), ca(Ql, { key: 5 })) : m.value.id === "manual" ? (G(), ca(Uu, { key: 6 })) : m.value.id === "kiosks" ? (G(), ca(Td, { key: 7 })) : m.value.id === "automate" ? (G(), ca(sf, { key: 8 })) : m.value.id === "deploy" ? (G(), ca(Pf, { key: 9 })) : m.value.id === "online-datasets" ? (G(), ca(yp, { key: 10 })) : m.value.id === "artificial" ? (G(), ca(lm, { key: 11 })) : m.value.id === "train" ? (G(), ca(zm, { key: 12 })) : m.value.id === "testing" ? (G(), ca(Sh, { key: 13 })) : Y("", !0)
 			], 512)])
-		], 8, mg), pa(pg)], 2));
+		], 8, Yh), pa(Jh)], 2));
 	}
-}), Ig = /* @__PURE__ */ sr({
-	__name: "TrainerApp",
-	setup(e) {
-		return (e, t) => (G(), ca(Fg));
-	}
-}), Lg = document.getElementById("trainer-app");
-if (!Lg) throw Error("Missing #trainer-app mount point");
-ts(Ig).mount(Lg);
+}), _g = document.getElementById("trainer-app");
+if (!_g) throw Error("Missing #trainer-app mount point");
+ts(gg).mount(_g);
 //#endregion

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
-import TrainerApp from '../../TrainerApp.vue';
+import StudioShell from '../components/StudioShell.vue';
 import { fakeMedia, fakeStudio, json, press, wav } from './fakeStudio';
 
 let ui: VueWrapper | undefined;
@@ -36,7 +36,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => { ui?.unmount(); ui = undefined; document.body.innerHTML = ''; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
-async function open() { ui = mount(TrainerApp, { attachTo: document.body }); await settle(); return ui; }
+async function open() { ui = mount(StudioShell, { attachTo: document.body }); await settle(); return ui; }
 async function record() { await ui!.get('[data-action=record-toggle]').trigger('click'); await settle(); await ui!.get('[data-action=record-toggle]').trigger('click'); await settle(); }
 const captures = () => server.mutations().filter(r => r.url.pathname.endsWith('/samples/capture'));
 

@@ -1,4 +1,3 @@
-import os
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -600,22 +599,6 @@ class JobBoundaryTests(unittest.TestCase):
                         'cron': '* * * * * *', 'timezone': 'UTC', 'enabled': True}).status_code, 422)
             finally:
                 runtime.shutdown()
-
-    def test_studio_lifespan_never_starts_legacy_stt_tater_worker(self):
-        import trainer_server
-        with patch.object(trainer_server.STUDIO_RUNTIME, 'startup'), \
-             patch.object(trainer_server.STUDIO_RUNTIME, 'start_workers') as start, \
-             patch.object(trainer_server, '_start_auto_train_worker') as legacy:
-            trainer_server.start_auto_train_worker_event()
-            start.assert_called_once()
-            legacy.assert_not_called()
-
-    def test_legacy_training_cannot_bypass_studio_gpu_queue(self):
-        import trainer_server
-        with patch('trainer_server.threading.Thread') as thread:
-            with self.assertRaisesRegex(RuntimeError, 'Studio'):
-                trainer_server._start_training_thread('hello', 'en', True, False, 'default')
-            thread.assert_not_called()
 
     def test_runtime_collection_handler_uses_existing_service_and_no_network_for_empty_selection(self):
         with tempfile.TemporaryDirectory() as root:

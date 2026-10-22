@@ -166,10 +166,17 @@ class WorkspaceAPITests(unittest.TestCase):
         for result in responses:
             self.assertNotIn(secret, result.text)
 
-    def test_legacy_app_registers_studio_without_starting_workers(self):
-        import trainer_server
+    def test_app_factory_serves_studio_and_ui_and_owns_worker_lifecycle(self):
+        from unittest.mock import patch
+        from trainer_server import create_app
 
-        paths = {route.path for route in trainer_server.app.routes}
-        self.assertIn("/api/studio/wakewords", paths)
-        self.assertIn("/api/studio/wakewords/{word_id}", paths)
-        self.assertIsNone(trainer_server.AUTO_TRAIN_WORKER)
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = StudioRuntime(Path(directory))
+            with patch.object(runtime, "start_workers") as start, patch.object(runtime, "shutdown") as stop:
+                with TestClient(create_app(runtime)) as client:
+                    start.assert_called_once()
+                    self.assertEqual(client.get("/api/studio/wakewords").status_code, 200)
+                    self.assertIn('id="trainer-app"', client.get("/").text)
+                    self.assertEqual(client.get("/api/auto_train").status_code, 404)
+                stop.assert_called_once()
+            runtime.shutdown()

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
-import TrainerApp from "../../TrainerApp.vue";
+import StudioShell from '../components/StudioShell.vue';
 import { fakeMedia, fakeStudio, press, recording, sample, json, type Req } from "./fakeStudio";
 
 let wrapper: VueWrapper | undefined;
@@ -16,7 +16,7 @@ beforeEach(() => {
 });
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; document.body.innerHTML = ""; });
 
-async function open() { wrapper = mount(TrainerApp, { attachTo: document.body }); await flushPromises(); await flushPromises(); return wrapper; }
+async function open() { wrapper = mount(StudioShell, { attachTo: document.body }); await flushPromises(); await flushPromises(); return wrapper; }
 const current = (ui: VueWrapper) => ui.find("[data-classify-current]").attributes("data-sample-id");
 const audioFetches = () => server.requests.filter(r => r.url.pathname.endsWith("/audio")).map(r => r.url.pathname.split("/")[6]);
 const labels = () => server.requests.filter(r => r.method === "POST" && r.url.pathname.endsWith("/label"));

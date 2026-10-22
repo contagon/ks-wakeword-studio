@@ -17,11 +17,6 @@ from unittest.mock import patch
 
 from tts_config import parse_omnivoice_catalog
 
-try:
-    import trainer_server as trainer
-except ModuleNotFoundError:
-    trainer = None
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GENERATOR_PATH = REPO_ROOT / "cli" / "tts_generate_samples.py"
@@ -534,44 +529,6 @@ class ModernTtsTests(unittest.TestCase):
         self.assertEqual(parsed["adx"]["iso_639_3"], "adx")
         self.assertEqual(parsed["adx"]["duration_hours"], 56.94)
 
-    @unittest.skipIf(trainer is None, "trainer server dependencies are not installed")
-    def test_language_catalog_merges_engine_coverage_and_quality(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            with (
-                patch.object(
-                    trainer,
-                    "_load_omnivoice_catalog",
-                    return_value={
-                        "en": {"name": "English"},
-                        "zu": {"name": "Zulu"},
-                    },
-                ),
-                patch.object(trainer, "_load_piper_catalog", return_value={}),
-                patch.object(trainer, "PIPER_ROOT", Path(temp_dir) / "piper"),
-                patch.object(trainer, "PIPER_VOICES_DIR", Path(temp_dir) / "voices"),
-            ):
-                catalog = {item["code"]: item for item in trainer._available_languages()}
-
-        self.assertEqual(catalog["en"]["quality"], "recommended")
-        self.assertEqual(catalog["en"]["engines"], ["omnivoice", "qwen3", "moss"])
-        self.assertEqual(catalog["zu"]["quality"], "experimental")
-        self.assertEqual(catalog["zu"]["engines"], ["omnivoice"])
-
-    @unittest.skipIf(trainer is None, "trainer server dependencies are not installed")
-    def test_server_resolves_unavailable_tts_modes_safely(self) -> None:
-        languages = [
-            {"code": "en", "engines": ["omnivoice", "qwen3", "moss"]},
-            {"code": "legacy", "engines": ["piper"]},
-        ]
-        self.assertEqual(
-            trainer._resolve_tts_mode_for_language("piper", "en", languages),
-            "modern",
-        )
-        self.assertEqual(
-            trainer._resolve_tts_mode_for_language("modern", "legacy", languages),
-            "piper",
-        )
-
     def test_generator_plan_and_piper_discovery_do_not_load_models(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
@@ -953,17 +910,11 @@ class ModernTtsTests(unittest.TestCase):
             self.assertTrue(any("timed out" in message for message in messages))
             self.assertTrue(any("1/2 accepted" in message for message in messages))
 
-    def test_docker_and_ui_are_wired_for_modern_tts(self) -> None:
+    def test_docker_images_are_wired_for_modern_tts(self) -> None:
         for dockerfile in ("dockerfile", "dockerfile.blackwell"):
             source = (REPO_ROOT / dockerfile).read_text(encoding="utf-8")
             self.assertIn("ffmpeg", source)
             self.assertIn("tts_config.py", source)
-
-        ui = (REPO_ROOT / "frontend" / "src" / "LegacyTrainer.vue").read_text(encoding="utf-8")
-        store = (REPO_ROOT / "frontend" / "src" / "trainerStore.ts").read_text(encoding="utf-8")
-        self.assertIn('v-model="trainer.ttsMode"', ui)
-        self.assertIn("tts_mode: trainer.ttsMode", store)
-        self.assertIn("OmniVoice", store)
 
 
 if __name__ == "__main__":

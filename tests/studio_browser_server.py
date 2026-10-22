@@ -11,7 +11,6 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -36,7 +35,6 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix='studio-browser-') as directory:
         os.environ['DATA_DIR'] = directory
-        os.environ.pop('TRAINER_LEGACY_MODE', None)
         follower = FixtureKiosk('fixture-follower', leader=False)
         leader = FixtureKiosk('fixture-leader', leader=True, follower=follower)
         augmentation_fixture(Path(directory))
@@ -48,23 +46,22 @@ def main():
         runtime._datasets = DatasetService(runtime._store,
             runtime.jobs, catalog=[dict(base, id=f'dataset_{i:03}', name=f'Corpus {i:03}') for i in range(200)])
         runtime.training.datasets = runtime._datasets
-        # Explicit dependency injection is local to this tests-only executable.
-        with patch('studio.runtime.StudioRuntime', return_value=runtime):
-            import trainer_server
+        from trainer_server import create_app
+        app = create_app(runtime)
 
-        @trainer_server.app.get('/__test/fixtures')
+        @app.get('/__test/fixtures')
         def fixtures():
             return {'leader': leader.url, 'follower': follower.url, 'password': PASSWORD}
 
-        @trainer_server.app.post('/__test/drain-gpu')
+        @app.post('/__test/drain-gpu')
         def drain_gpu():
             return {'ran': runtime.workers.run_once('gpu')}
 
-        @trainer_server.app.post('/__test/drain-collection')
+        @app.post('/__test/drain-collection')
         def drain_collection():
             return {'ran': runtime.workers.run_once('collection')}
 
-        @trainer_server.app.post('/__test/new-clips')
+        @app.post('/__test/new-clips')
         def new_clips():
             for device in (leader, follower):
                 device.clip_id += '-new'
@@ -72,7 +69,7 @@ def main():
             return {'ok': True}
 
         try:
-            uvicorn.run(trainer_server.app, host='127.0.0.1', port=args.port, log_level='warning')
+            uvicorn.run(app, host='127.0.0.1', port=args.port, log_level='warning')
         finally:
             runtime.shutdown()
             leader.close()

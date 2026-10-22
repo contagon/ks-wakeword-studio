@@ -8,7 +8,7 @@ export default defineConfig({
   webServer: {
     command: `${process.env.STUDIO_TEST_PYTHON ?? "python3"} tests/studio_browser_server.py --port 8798`,
     cwd: "..",
-    url: "http://127.0.0.1:8798/api/studio/capabilities",
+    url: "http://127.0.0.1:8798/api/studio/wakewords",
     reuseExistingServer: false,
   },
 });

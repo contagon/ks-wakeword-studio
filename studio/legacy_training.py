@@ -1,7 +1,7 @@
 """Explicit-input adapter. One owned command contains the entire subprocess tree.
 
 The CLI path uses subprocess only *inside* that owned command and never creates
-new sessions. Standalone legacy train_wake_word remains unchanged.
+new sessions.
 """
 
 import argparse
@@ -93,7 +93,7 @@ class LegacyTrainingAdapter:
             raise
         on_log('Preparing isolated training environment and retained inputs')
         try:
-            self.context.run(['bash', str(REPO / 'train_wake_word'),
+            self.context.run(['python3', str(REPO / 'cli/studio_train.py'),
                               f'--input-manifest={run_root / "run-manifest.json"}',
                               f'--data-dir={run_root}', f'--tool-data-dir={self.tool_data_dir}'], cwd=str(run_root))
         except Exception:

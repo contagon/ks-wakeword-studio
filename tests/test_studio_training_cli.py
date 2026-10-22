@@ -158,7 +158,7 @@ lite.Interpreter = Interpreter
             manifest = root / 'manifest.json'
             manifest.write_text(json.dumps({'schema_version': 1, 'audio': [{'label': 'positive', 'split': 'training'}],
                                            'datasets': [], 'config': {}}))
-            result = subprocess.run(['bash', str(REPO / 'train_wake_word'), f'--input-manifest={manifest}',
+            result = subprocess.run(['python3', str(REPO / 'cli/studio_train.py'), f'--input-manifest={manifest}',
                                      f'--data-dir={root / "run"}', f'--tool-data-dir={root / "shared"}'], capture_output=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(json.loads((root / 'run/preflight-error.json').read_text())['code'], 'positive_counts')
@@ -193,7 +193,6 @@ lite.Interpreter = Interpreter
             base = Path(directory)
             repo, shared, run = base / 'repo', base / 'shared', base / 'run'
             (repo / 'cli').mkdir(parents=True)
-            shutil.copy(REPO / 'train_wake_word', repo)
             shutil.copytree(REPO / 'studio', repo / 'studio')
             shutil.copy(REPO / 'cli/studio_train.py', repo / 'cli')
             (shared / '.venv/bin').mkdir(parents=True)
@@ -218,7 +217,7 @@ lite.Interpreter = Interpreter
                         'audio': audio, 'datasets': [], 'config': {'training_steps': 123}, 'seed': 10, 'augmentation': augmentation}
             path = base / 'manifest.json'
             path.write_text(json.dumps(manifest))
-            result = subprocess.run(['bash', str(repo / 'train_wake_word'), f'--input-manifest={path}',
+            result = subprocess.run(['python3', str(repo / 'cli/studio_train.py'), f'--input-manifest={path}',
                                      f'--data-dir={run}', f'--tool-data-dir={shared}'],
                                     env={**os.environ, 'CAPTURE': str(capture)}, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

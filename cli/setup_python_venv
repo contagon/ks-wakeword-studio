@@ -131,9 +131,6 @@ set -euo pipefail
 declare -a progfiles=( $(find "${PROGDIR}" -mindepth 1 -maxdepth 1 -executable -type f) )
 progfiles+=( "${PROGDIR}/shell.functions" )
 
-# Also symlink the top-level entrypoint if present
-[ -x "${ROOTDIR}/train_wake_word" ] && progfiles+=( "${ROOTDIR}/train_wake_word" )
-
 for f in "${progfiles[@]}" ; do
     ln -sfr "${f}" ".venv/bin/$(basename "${f}")"
 done
@@ -306,7 +303,6 @@ PY
     fi
 fi
 
-"${PROGDIR}/test_python" --data-dir="${DATA_DIR}"
 "${VENV}/bin/python" "${PROGDIR}/check_training_venv"
 
 touch .mww-data-dir

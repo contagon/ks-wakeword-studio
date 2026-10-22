@@ -34,7 +34,7 @@ class StudioPackagingTests(unittest.TestCase):
                 self.assertIn(['cli/', '/root/mww-scripts/cli/'], copies)
                 self.assertIn(['static/', '/root/mww-scripts/static/'], copies)
                 entrypoints = next(row[:-1] for row in copies if 'trainer_server.py' in row)
-                self.assertTrue({'run.sh', 'train_wake_word', 'trainer_server.py',
+                self.assertTrue({'run.sh', 'trainer_server.py',
                                  'requirements.txt'}.issubset(entrypoints))
                 self.assertIn('EXPOSE 8789', manifest)
                 self.assertNotIn('npm ', manifest)

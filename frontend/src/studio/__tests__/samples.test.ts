@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
-import TrainerApp from "../../TrainerApp.vue";
+import StudioShell from '../components/StudioShell.vue';
 import { fakeMedia, fakeStudio, recording, sample, wav } from "./fakeStudio";
 
 let wrapper: VueWrapper | undefined;
@@ -20,7 +20,7 @@ beforeEach(() => {
 });
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; document.body.innerHTML = ""; });
 
-async function open() { wrapper = mount(TrainerApp, { attachTo: document.body }); await settle(); return wrapper; }
+async function open() { wrapper = mount(StudioShell, { attachTo: document.body }); await settle(); return wrapper; }
 async function settle() { for (let i = 0; i < 5; i++) await flushPromises(); }
 const lists = () => server.requests.filter(r => r.method === "GET" && /\/wakewords\/[^/]+\/samples$/.test(r.url.pathname));
 const row = (ui: VueWrapper, id: string) => ui.get(`[data-row-id="${id}"]`);

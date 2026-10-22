@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
-import TrainerApp from '../../TrainerApp.vue';
+import StudioShell from '../components/StudioShell.vue';
 import { fakeStudio, press } from './fakeStudio';
 import type { Job } from '../types';
 import { useDeviceRegistry } from '../devices';
@@ -15,7 +15,7 @@ it('shows actionable failed-job guidance without diagnostics paths or raw error 
     job('generic', 'failed', { result: { error: 'handler_failed', error_code: 'handler_failed' } }),
     job('child', 'failed', { result: { error: 'handler_failed', error_code: 'child_command_failed' } })];
   history.replaceState(null, '', '/#/wakewords?word=a');
-  ui = mount(TrainerApp); await flushPromises();
+  ui = mount(StudioShell); await flushPromises();
   await ui.get('[data-action="open-job-queue"]').trigger('click'); await flushPromises();
   const card = ui.get('[data-job-id="broken-moss"]');
   expect(card.text()).toContain('GPU memory');
@@ -34,7 +34,7 @@ it('shows global compact job groups and loads logs only on expansion', async () 
   s.db.devices = ['kitchen', 'office'].map(id => ({ id, name: id === 'kitchen' ? 'Kitchen satellite' : 'Office satellite', url: `http://${id}`, role: 'standalone', active: true, leader_id: null, credentials_status: 'ready', profile_id: null, model_eligible: true }));
   await useDeviceRegistry().load(true);
   history.replaceState(null, '', '/#/wakewords?word=a');
-  ui = mount(TrainerApp, { attachTo: document.body }); await flushPromises();
+  ui = mount(StudioShell, { attachTo: document.body }); await flushPromises();
   expect(ui.get('[data-action="open-job-queue"]').text()).toContain('3');
   expect(s.requests.some(r => r.path.includes('/logs'))).toBe(false);
   await ui.get('[data-action="open-job-queue"]').trigger('click'); await flushPromises();
@@ -53,7 +53,7 @@ it('shows global compact job groups and loads logs only on expansion', async () 
 
 it('contains focus, makes the background inert, and restores focus on Escape and backdrop close', async () => {
   fakeStudio(); history.replaceState(null, '', '/#/wakewords');
-  ui = mount(TrainerApp, { attachTo: document.body }); await flushPromises();
+  ui = mount(StudioShell, { attachTo: document.body }); await flushPromises();
   const trigger = ui.get('[data-action="open-job-queue"]'); (trigger.element as HTMLButtonElement).focus();
   await trigger.trigger('click'); await flushPromises();
   expect(ui.get('[data-studio-background]').attributes('inert')).toBeDefined();

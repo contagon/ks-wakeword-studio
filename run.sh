@@ -152,20 +152,8 @@ PY
 if [[ -n "${WHISPER_CUDA_LIBRARY_PATH}" ]]; then
   export LD_LIBRARY_PATH="${WHISPER_CUDA_LIBRARY_PATH}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 fi
-# -----------------------------
-# Trainer server env
-# -----------------------------
-export DATA_DIR="${DATA_DIR}"
-export STATIC_DIR="${ROOTDIR}/static"
-export PERSONAL_DIR="${DATA_DIR}/personal_samples"
-export CAPTURED_DIR="${DATA_DIR}/captured_audio"
-export NEGATIVE_DIR="${DATA_DIR}/negative_samples"
-export TRAINED_WAKE_WORDS_DIR="${DATA_DIR}/trained_wake_words"
-
-# IMPORTANT: leave training venv creation to /api/train inside trainer_server.py
-# but still set TRAIN_CMD so the server knows how to invoke training once ready
-export TRAIN_CMD="source '${DATA_DIR}/.venv/bin/activate' && train_wake_word --data-dir='${DATA_DIR}'"
+export DATA_DIR
 
 echo "Launching uvicorn on ${HOST}:${PORT}"
 cd "${ROOTDIR}"
-exec "${VENV_DIR}/bin/uvicorn" trainer_server:app --host "${HOST}" --port "${PORT}"
+exec "${VENV_DIR}/bin/uvicorn" --factory trainer_server:create_app --host "${HOST}" --port "${PORT}"
