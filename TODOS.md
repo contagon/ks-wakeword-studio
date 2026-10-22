@@ -20,9 +20,9 @@
 - [x] move delete dataset button to the far right
 
 # record
-- [ ] rename tab to Manual
-- [ ] add keyboard shortcuts for playing, keeping, and discarding recorded samples to quickly be able to do them
-- [ ] move upload above the recording section
+- [x] rename tab to Manual
+- [x] add keyboard shortcuts for playing, keeping, and discarding recorded samples to quickly be able to do them
+- [x] move upload above the recording section
 
 # samples
 - [ ] Change "Provenance" to "Source"

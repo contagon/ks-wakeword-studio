@@ -23,7 +23,7 @@ class FakeRecorder {
 }
 const settle = async () => { for (let i = 0; i < 5; i++) await flushPromises(); };
 beforeEach(() => {
-  localStorage.clear(); history.replaceState(null, '', '/#/record?word=a');
+  localStorage.clear(); history.replaceState(null, '', '/#/manual?word=a');
   server = fakeStudio(); media = fakeMedia(); tracks = [{ stop: vi.fn() }]; recorders = []; empty = false;
   decodedPcm = new Float32Array(48000).fill(0.2);
   getUserMedia = vi.fn(async () => ({ getTracks: () => tracks }));
@@ -42,7 +42,7 @@ const captures = () => server.mutations().filter(r => r.url.pathname.endsWith('/
 
 describe('browser recording', () => {
   it('captures until explicit Stop, reviews and saves original plus chosen label and trim', async () => {
-    const app = await open(); expect(app.get('h1').text()).toBe('Record');
+    const app = await open(); expect(app.get('h1').text()).toBe('Manual');
     await app.get('[data-label=negative]').trigger('click');
     await app.get('[data-action=record-toggle]').trigger('click'); await settle();
     expect(getUserMedia).toHaveBeenCalledWith({ audio: true });
@@ -91,6 +91,30 @@ describe('browser recording', () => {
     expect(recorders[0].state).toBe('recording');
     await app.get('[data-action=close-job-queue]').trigger('click'); await settle(); press(' '); await settle();
     expect(recorders[0].state).toBe('inactive'); expect(app.text()).toContain('Review your sample');
+  });
+
+  it('reviews with keyboard shortcuts: Space plays, D discards, K keeps', async () => {
+    let started = 0;
+    vi.stubGlobal('AudioContext', class {
+      destination = {}; close = vi.fn(async () => {}); resume = vi.fn(async () => {});
+      async decodeAudioData() { return { duration: 3, sampleRate: 16000, length: 48000, getChannelData: () => decodedPcm }; }
+      createBufferSource() { return { buffer: null, connect() {}, start() { started++; }, stop() {}, disconnect() {}, onended: null }; }
+    });
+    const app = await open(); await record();
+    press(' '); await settle();
+    expect(started).toBe(1); expect(app.get('[data-action=play-capture]').text()).toContain('Stop preview');
+    expect(recorders).toHaveLength(1);
+    press('d'); await settle();
+    expect(app.text()).not.toContain('Review your sample'); expect(captures()).toHaveLength(0);
+    await record(); press('k'); await settle();
+    expect(captures()).toHaveLength(1); expect(app.text()).toContain('Sample saved');
+    await record(); press('k', {}, app.get('[name=import-label]').element); await settle();
+    expect(captures()).toHaveLength(1);
+  });
+
+  it('opens legacy #/record links on Manual', async () => {
+    history.replaceState(null, '', '/#/record?word=a');
+    const app = await open(); expect(app.get('h1').text()).toBe('Manual');
   });
 
   it('keeps full-length noise clips saveable with a warning', async () => {

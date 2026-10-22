@@ -91,7 +91,7 @@ describe("provenance-aware sample library", () => {
   it("links to Record instead of duplicating the upload form", async () => {
     const ui = await open();
     expect(ui.find('[data-form=import]').exists()).toBe(false);
-    expect(ui.get('a[href="#/record?word=a"]').text()).toBeTruthy();
+    expect(ui.get('a[href="#/manual?word=a"]').text()).toBeTruthy();
   });
 
   it("trims non-destructively through the server with the current revision", async () => {

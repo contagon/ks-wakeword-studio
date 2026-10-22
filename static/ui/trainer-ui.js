@@ -3207,8 +3207,8 @@ var is = [
 		group: "Data"
 	},
 	{
-		id: "record",
-		name: "Record",
+		id: "manual",
+		name: "Manual",
 		group: "Data"
 	},
 	{
@@ -3253,7 +3253,7 @@ function ss() {
 	let e = /* @__PURE__ */ R("wakewords"), t = /* @__PURE__ */ R(""), n = /* @__PURE__ */ R("review");
 	function r() {
 		let [r, i = ""] = location.hash.replace(/^#\/?/, "").split("?");
-		e.value = r === "scrape" ? "classify" : r === "negative-datasets" ? "online-datasets" : is.find((e) => e.id === r)?.id ?? "wakewords", t.value = new URLSearchParams(i).get("word") ?? os();
+		e.value = r === "scrape" ? "classify" : r === "negative-datasets" ? "online-datasets" : r === "record" ? "manual" : is.find((e) => e.id === r)?.id ?? "wakewords", t.value = new URLSearchParams(i).get("word") ?? os();
 		let a = r === "scrape" ? "collect" : new URLSearchParams(i).get("tab");
 		n.value = a === "collect" || a === "unmapped" ? a : "review";
 	}
@@ -5321,9 +5321,9 @@ var Nl = { class: "legacy-scope" }, Pl = {
 				}, null, 544), [[zo, u.value.before]])])
 			])])]),
 			K("p", nu, [m[23] ||= J("Add microphone recordings or upload audio on ", -1), K("a", {
-				href: z(t).routes.href("record"),
-				onClick: m[6] ||= Yo((e) => z(t).routes.navigate("record"), ["prevent"])
-			}, "Record →", 8, ru)]),
+				href: z(t).routes.href("manual"),
+				onClick: m[6] ||= Yo((e) => z(t).routes.navigate("manual"), ["prevent"])
+			}, "Manual →", 8, ru)]),
 			K("div", {
 				class: "studio-card overflow-x-auto",
 				"aria-busy": s.value,
@@ -5546,83 +5546,86 @@ var wu = { class: "studio-capture-review" }, Tu = { class: "flex flex-wrap items
 		disabled: { type: Boolean }
 	},
 	emits: ["selection"],
-	setup(e, { emit: t }) {
-		let n = e, r = t, i = /* @__PURE__ */ R(n.preview.start_s), a = /* @__PURE__ */ R(n.preview.end_s), o = /* @__PURE__ */ R(n.preview.trim_method), s = /* @__PURE__ */ R(!1), c = /* @__PURE__ */ R(!0), l = /* @__PURE__ */ R(""), u = /* @__PURE__ */ R(!1), d = /* @__PURE__ */ Kt(null), f = /* @__PURE__ */ R([]), p, m, h = 0, g = X(() => Number.isFinite(i.value) && Number.isFinite(a.value) && i.value >= 0 && a.value <= n.preview.duration_s && a.value > i.value && Math.floor(a.value * 16e3) > Math.floor(i.value * 16e3));
+	setup(e, { expose: t, emit: n }) {
+		let r = e, i = n, a = /* @__PURE__ */ R(r.preview.start_s), o = /* @__PURE__ */ R(r.preview.end_s), s = /* @__PURE__ */ R(r.preview.trim_method), c = /* @__PURE__ */ R(!1), l = /* @__PURE__ */ R(!0), u = /* @__PURE__ */ R(""), d = /* @__PURE__ */ R(!1), f = /* @__PURE__ */ Kt(null), p = /* @__PURE__ */ R([]), m, h, g = 0, _ = X(() => Number.isFinite(a.value) && Number.isFinite(o.value) && a.value >= 0 && o.value <= r.preview.duration_s && o.value > a.value && Math.floor(o.value * 16e3) > Math.floor(a.value * 16e3));
 		V([
-			i,
 			a,
-			o
-		], () => r("selection", g.value ? {
-			start_s: i.value,
-			end_s: a.value,
-			trim_method: o.value
+			o,
+			s
+		], () => i("selection", _.value ? {
+			start_s: a.value,
+			end_s: o.value,
+			trim_method: s.value
 		} : null), { immediate: !0 });
-		function _() {
-			let e = m;
-			m = void 0, e && (e.onended = null, e.stop(), e.disconnect()), u.value = !1;
-		}
 		function v() {
-			_(), p?.close().catch(() => void 0), p = void 0;
+			let e = h;
+			h = void 0, e && (e.onended = null, e.stop(), e.disconnect()), d.value = !1;
 		}
-		async function y() {
-			let e = ++h;
-			v(), c.value = !0, l.value = "", d.value = null;
+		function y() {
+			v(), m?.close().catch(() => void 0), m = void 0;
+		}
+		async function b() {
+			let e = ++g;
+			y(), l.value = !0, u.value = "", f.value = null;
 			try {
 				let t = await new Promise((e, t) => {
-					let r = new FileReader();
-					r.onload = () => e(r.result), r.onerror = () => t(/* @__PURE__ */ Error("decode")), r.readAsArrayBuffer(n.audio);
+					let n = new FileReader();
+					n.onload = () => e(n.result), n.onerror = () => t(/* @__PURE__ */ Error("decode")), n.readAsArrayBuffer(r.audio);
 				});
-				if (e !== h) return;
-				p = new AudioContext();
-				let r = await p.decodeAudioData(t);
-				if (e !== h) return;
-				d.value = r;
-				let i = r.getChannelData(0).subarray(0, Math.floor(n.preview.duration_s * r.sampleRate)), a = Math.max(1, Math.floor(i.length / 160));
-				f.value = Array.from({ length: 160 }, (e, t) => {
+				if (e !== g) return;
+				m = new AudioContext();
+				let n = await m.decodeAudioData(t);
+				if (e !== g) return;
+				f.value = n;
+				let i = n.getChannelData(0).subarray(0, Math.floor(r.preview.duration_s * n.sampleRate)), a = Math.max(1, Math.floor(i.length / 160));
+				p.value = Array.from({ length: 160 }, (e, t) => {
 					let n = 0;
 					for (let e = t * a; e < Math.min((t + 1) * a, i.length); e++) n = Math.max(n, Math.abs(i[e]));
 					return Math.max(1, n * 34);
 				});
 			} catch {
-				e === h && (l.value = "Audio preview could not be decoded in this browser. Your original is retained; retry playback or save the selected bounds.");
+				e === g && (u.value = "Audio preview could not be decoded in this browser. Your original is retained; retry playback or save the selected bounds.");
 			} finally {
-				e === h && (c.value = !1);
+				e === g && (l.value = !1);
 			}
 		}
-		async function b() {
-			if (u.value) {
-				_();
+		async function x() {
+			if (d.value) {
+				v();
 				return;
 			}
-			if (!d.value || !p || !g.value) return;
-			let e = h;
+			if (!f.value || !m || !_.value) return;
+			let e = g;
 			try {
-				if (await p.resume(), e !== h || !p || !d.value) return;
-				let t = p.createBufferSource();
-				t.buffer = d.value, t.connect(p.destination), m = t, u.value = !0, t.onended = () => {
-					m === t && (m = void 0, u.value = !1, t.disconnect());
-				}, t.start(0, i.value, Math.min(a.value, d.value.duration) - i.value);
+				if (await m.resume(), e !== g || !m || !f.value) return;
+				let t = m.createBufferSource();
+				t.buffer = f.value, t.connect(m.destination), h = t, d.value = !0, t.onended = () => {
+					h === t && (h = void 0, d.value = !1, t.disconnect());
+				}, t.start(0, a.value, Math.min(o.value, f.value.duration) - a.value);
 			} catch {
-				_(), l.value = "Playback failed. Try again, or save the sample and review it in Samples.";
+				v(), u.value = "Playback failed. Try again, or save the sample and review it in Samples.";
 			}
 		}
-		function x() {
-			_(), o.value = "manual";
+		function S() {
+			v(), s.value = "manual";
 		}
-		return V(() => n.audio, () => {
-			y();
-		}, { immediate: !0 }), V(() => n.preview, (e) => {
-			i.value = e.start_s, a.value = e.end_s, o.value = e.trim_method, s.value = !1;
-		}), V(() => n.disabled, (e) => {
-			e && _();
+		return t({
+			play: x,
+			canPlay: X(() => !!f.value && _.value && !r.disabled)
+		}), V(() => r.audio, () => {
+			b();
+		}, { immediate: !0 }), V(() => r.preview, (e) => {
+			a.value = e.start_s, o.value = e.end_s, s.value = e.trim_method, c.value = !1;
+		}), V(() => r.disabled, (e) => {
+			e && v();
 		}), Dr(() => {
-			h++, v();
+			g++, y();
 		}), (e, t) => (W(), G("div", wu, [
-			K("div", Tu, [t[3] ||= K("h2", null, "Review your sample", -1), K("span", Eu, F(o.value === "silero" ? "Auto-trimmed" : o.value === "manual" ? "Manual trim" : "Full clip") + " · " + F(Math.max(0, a.value - i.value).toFixed(2)) + " s retained", 1)]),
-			n.preview.duration_limited ? (W(), G("p", Du, "Training audio is limited to 10 minutes, including any delayed browser stop. Your full original recording is retained when saved.")) : Y("", !0),
-			n.preview.warning ? (W(), G("p", Ou, F(n.preview.warning === "no_speech" ? "No speech detected. The full clip is selected; background-noise negatives can still be saved." : "Automatic speech trimming is unavailable. The full clip is selected; adjust it manually if needed."), 1)) : Y("", !0),
-			c.value ? (W(), G("p", ku, "Preparing waveform…")) : d.value ? (W(), G("svg", Au, [
-				(W(!0), G(U, null, H(f.value, (e, t) => (W(), G("line", {
+			K("div", Tu, [t[3] ||= K("h2", null, "Review your sample", -1), K("span", Eu, F(s.value === "silero" ? "Auto-trimmed" : s.value === "manual" ? "Manual trim" : "Full clip") + " · " + F(Math.max(0, o.value - a.value).toFixed(2)) + " s retained", 1)]),
+			r.preview.duration_limited ? (W(), G("p", Du, "Training audio is limited to 10 minutes, including any delayed browser stop. Your full original recording is retained when saved.")) : Y("", !0),
+			r.preview.warning ? (W(), G("p", Ou, F(r.preview.warning === "no_speech" ? "No speech detected. The full clip is selected; background-noise negatives can still be saved." : "Automatic speech trimming is unavailable. The full clip is selected; adjust it manually if needed."), 1)) : Y("", !0),
+			l.value ? (W(), G("p", ku, "Preparing waveform…")) : f.value ? (W(), G("svg", Au, [
+				(W(!0), G(U, null, H(p.value, (e, t) => (W(), G("line", {
 					key: t,
 					x1: t * 4 + 2,
 					x2: t * 4 + 2,
@@ -5634,73 +5637,74 @@ var wu = { class: "studio-capture-review" }, Tu = { class: "flex flex-wrap items
 				K("rect", {
 					x: "0",
 					y: "0",
-					width: i.value / n.preview.duration_s * 640,
+					width: a.value / r.preview.duration_s * 640,
 					height: "80",
 					fill: "var(--studio-bg)",
 					opacity: ".85"
 				}, null, 8, Mu),
 				K("rect", {
-					x: a.value / n.preview.duration_s * 640,
+					x: o.value / r.preview.duration_s * 640,
 					y: "0",
-					width: (1 - a.value / n.preview.duration_s) * 640,
+					width: (1 - o.value / r.preview.duration_s) * 640,
 					height: "80",
 					fill: "var(--studio-bg)",
 					opacity: ".85"
 				}, null, 8, Nu)
 			])) : Y("", !0),
-			l.value ? (W(), G("p", Pu, [J(F(l.value) + " ", 1), K("button", {
+			u.value ? (W(), G("p", Pu, [J(F(u.value) + " ", 1), K("button", {
 				type: "button",
-				disabled: c.value || n.disabled,
-				onClick: y
+				disabled: l.value || r.disabled,
+				onClick: b
 			}, "Retry preview", 8, Fu)])) : Y("", !0),
 			K("div", Iu, [K("button", {
 				type: "button",
 				"data-action": "play-capture",
-				disabled: !d.value || !g.value || n.disabled,
-				onClick: b
-			}, F(u.value ? "Stop preview" : "▶ Play trimmed sample"), 9, Lu), K("button", {
+				"aria-keyshortcuts": "Space",
+				disabled: !f.value || !_.value || r.disabled,
+				onClick: x
+			}, F(d.value ? "Stop preview" : "▶ Play trimmed sample"), 9, Lu), K("button", {
 				type: "button",
 				"data-action": "adjust-trim",
-				disabled: n.disabled,
-				"aria-expanded": s.value,
-				onClick: t[0] ||= (e) => s.value = !s.value
+				disabled: r.disabled,
+				"aria-expanded": c.value,
+				onClick: t[0] ||= (e) => c.value = !c.value
 			}, "Adjust trim", 8, Ru)]),
-			s.value ? (W(), G("fieldset", {
+			c.value ? (W(), G("fieldset", {
 				key: 5,
 				class: "studio-capture-bounds",
-				disabled: n.disabled
+				disabled: r.disabled
 			}, [
 				t[6] ||= K("legend", { class: "sr-only" }, "Trim selection in seconds", -1),
 				K("label", null, [t[4] ||= J("Start (seconds)", -1), B(K("input", {
-					"onUpdate:modelValue": t[1] ||= (e) => i.value = e,
+					"onUpdate:modelValue": t[1] ||= (e) => a.value = e,
 					name: "trim-start",
 					type: "number",
 					min: "0",
-					max: n.preview.duration_s,
+					max: r.preview.duration_s,
 					step: "0.01",
-					onInput: x
+					onInput: S
 				}, null, 40, Bu), [[
-					zo,
-					i.value,
-					void 0,
-					{ number: !0 }
-				]])]),
-				K("label", null, [t[5] ||= J("End (seconds)", -1), B(K("input", {
-					"onUpdate:modelValue": t[2] ||= (e) => a.value = e,
-					name: "trim-end",
-					type: "number",
-					min: "0",
-					max: n.preview.duration_s,
-					step: "0.01",
-					onInput: x
-				}, null, 40, Vu), [[
 					zo,
 					a.value,
 					void 0,
 					{ number: !0 }
+				]])]),
+				K("label", null, [t[5] ||= J("End (seconds)", -1), B(K("input", {
+					"onUpdate:modelValue": t[2] ||= (e) => o.value = e,
+					name: "trim-end",
+					type: "number",
+					min: "0",
+					max: r.preview.duration_s,
+					step: "0.01",
+					onInput: S
+				}, null, 40, Vu), [[
+					zo,
+					o.value,
+					void 0,
+					{ number: !0 }
 				]])])
 			], 8, zu)) : Y("", !0),
-			g.value ? Y("", !0) : (W(), G("p", Hu, "Choose a start before the end, within the recorded duration.")),
+			_.value ? Y("", !0) : (W(), G("p", Hu, "Choose a start before the end, within the recorded duration.")),
 			t[7] ||= K("p", { class: "studio-muted text-xs" }, "Only the beginning and end are trimmed. Interior pauses stay intact. Original audio is retained.", -1)
 		]));
 	}
@@ -5716,36 +5720,36 @@ var wu = { class: "studio-capture-review" }, Tu = { class: "flex flex-wrap items
 	key: 2,
 	class: "studio-note",
 	role: "alert"
-}, Yu = ["aria-busy"], Xu = { class: "flex flex-wrap items-center justify-between gap-4" }, Zu = {
+}, Yu = { class: "studio-card mb-4" }, Xu = { class: "flex-1" }, Zu = ["disabled"], Qu = ["disabled"], $u = ["disabled"], ed = ["aria-busy"], td = { class: "flex flex-wrap items-center justify-between gap-4" }, nd = {
 	class: "studio-capture-label",
 	role: "group",
 	"aria-label": "Recording sample label"
-}, Qu = [
+}, rd = [
 	"data-label",
 	"aria-pressed",
 	"disabled",
 	"onClick"
-], $u = { class: "studio-capture-area" }, ed = {
+], id = { class: "studio-capture-area" }, ad = {
 	class: "studio-muted",
 	role: "status"
-}, td = { class: "studio-capture-timer" }, nd = ["disabled"], rd = {
+}, od = { class: "studio-capture-timer" }, sd = ["disabled"], cd = {
 	key: 0,
 	class: "studio-note mt-3",
 	role: "status"
-}, id = {
+}, ld = {
 	key: 1,
 	class: "mt-4"
-}, ad = { class: "flex flex-wrap items-center justify-end gap-2 mt-3" }, od = ["disabled"], sd = ["disabled"], cd = { class: "studio-card" }, ld = { class: "flex-1" }, ud = ["disabled"], dd = ["disabled"], fd = ["disabled"], pd = /* @__PURE__ */ cr({
+}, ud = { class: "flex flex-wrap items-center justify-end gap-2 mt-3" }, dd = ["disabled"], fd = ["disabled"], pd = /* @__PURE__ */ cr({
 	__name: "RecordPage",
 	setup(e) {
-		let t = Cs(), n = Cu(), { state: r, audio: i, elapsed: a } = n, o = /* @__PURE__ */ R("positive"), s = /* @__PURE__ */ Kt(null), c = /* @__PURE__ */ R(null), l = /* @__PURE__ */ R(""), u = /* @__PURE__ */ R(""), d = /* @__PURE__ */ R(!1), f = /* @__PURE__ */ R(!1), p = /* @__PURE__ */ R(!1), m = /* @__PURE__ */ Kt(null), h = /* @__PURE__ */ R("positive"), g = /* @__PURE__ */ R(), _ = 0, v, y, b, x = X(() => d.value || f.value || p.value || r.value === "requesting" || r.value === "stopping"), S = X(() => !!t.selectedId.value && !x.value && !i.value), C = X(() => `${String(Math.floor(a.value / 60)).padStart(2, "0")}:${String(a.value % 60).padStart(2, "0")}`);
-		function w() {
+		let t = Cs(), n = Cu(), { state: r, audio: i, elapsed: a } = n, o = /* @__PURE__ */ R("positive"), s = /* @__PURE__ */ Kt(null), c = /* @__PURE__ */ R(null), l = /* @__PURE__ */ R(""), u = /* @__PURE__ */ R(""), d = /* @__PURE__ */ R(!1), f = /* @__PURE__ */ R(!1), p = /* @__PURE__ */ R(!1), m = /* @__PURE__ */ Kt(null), h = /* @__PURE__ */ R("positive"), g = /* @__PURE__ */ R(), _ = 0, v, y, b, x = X(() => d.value || f.value || p.value || r.value === "requesting" || r.value === "stopping"), S = X(() => !!t.selectedId.value && !x.value && !i.value), C = X(() => !!i.value && !d.value && r.value !== "recording"), w = /* @__PURE__ */ R(), T = X(() => `${String(Math.floor(a.value / 60)).padStart(2, "0")}:${String(a.value % 60).padStart(2, "0")}`);
+		function E() {
 			_++, v?.abort(), y?.abort(), n.reset(), s.value = null, c.value = null, d.value = !1, f.value = !1, l.value = "";
 		}
-		async function T() {
+		async function D() {
 			r.value === "recording" ? n.stop() : S.value && (u.value = "", l.value = "", await n.start());
 		}
-		async function E() {
+		async function O() {
 			if (!i.value || d.value) return;
 			v?.abort();
 			let e = new AbortController();
@@ -5766,20 +5770,20 @@ var wu = { class: "studio-capture-review" }, Tu = { class: "flex flex-wrap items
 				n === _ && (d.value = !1);
 			}
 		}
-		async function D() {
+		async function ee() {
 			if (!i.value || !c.value || x.value) return;
 			let e = _, n = new AbortController();
 			y = n, f.value = !0, l.value = "";
 			try {
 				if (await $.saveCapture(t.selectedId.value, i.value, o.value, { ...c.value }, n.signal), e !== _ || n.signal.aborted) return;
-				w(), u.value = "Sample saved. Ready for the next recording.";
+				E(), u.value = "Sample saved. Ready for the next recording.";
 			} catch (t) {
 				e === _ && !n.signal.aborted && (l.value = t instanceof Error ? t.message : "Sample was not saved. Try again.");
 			} finally {
 				e === _ && (f.value = !1);
 			}
 		}
-		async function O() {
+		async function k() {
 			if (!m.value || !t.selectedId.value || x.value || r.value === "recording") return;
 			let e = _, n = new AbortController();
 			b = n, p.value = !0, l.value = "", u.value = "";
@@ -5792,96 +5796,39 @@ var wu = { class: "studio-capture-review" }, Tu = { class: "flex flex-wrap items
 				e === _ && (p.value = !1);
 			}
 		}
-		function ee(e) {
-			if (e.code !== "Space" || e.repeat || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.defaultPrevented) return;
-			let t = e.target;
-			t instanceof Element && t.closest("input,textarea,select,button,a,[contenteditable],[role=\"button\"],[inert]") || document.querySelector("[role=\"dialog\"],[aria-modal=\"true\"],dialog[open]") || (r.value === "recording" || S.value) && (e.preventDefault(), T());
+		function te(e) {
+			return !!e?.closest("input,textarea,select,[contenteditable],[inert]");
+		}
+		function ne(e) {
+			if (e.repeat || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.defaultPrevented) return;
+			let t = e.target instanceof Element ? e.target : null;
+			if (te(t) || document.querySelector("[role=\"dialog\"],[aria-modal=\"true\"],dialog[open]")) return;
+			let n = !!t?.closest("button:not(:disabled),a,[role=\"button\"]"), i = e.key.toLowerCase();
+			C.value ? e.code === "Space" && !n ? (e.preventDefault(), w.value?.canPlay && w.value.play()) : (i === "k" || i === "enter" && !n) && s.value && c.value && !x.value ? (e.preventDefault(), ee()) : i === "d" && !x.value && (e.preventDefault(), E()) : e.code === "Space" && !n && (r.value === "recording" || S.value) && (e.preventDefault(), D());
 		}
 		return V(i, (e) => {
-			e && E();
+			e && O();
 		}), V(t.selectedId, () => {
-			w(), b?.abort(), p.value = !1, m.value = null, g.value && (g.value.value = ""), u.value = "";
-		}), wr(() => document.addEventListener("keydown", ee)), Dr(() => {
-			document.removeEventListener("keydown", ee), w(), b?.abort();
+			E(), b?.abort(), p.value = !1, m.value = null, g.value && (g.value.value = ""), u.value = "";
+		}), wr(() => document.addEventListener("keydown", ne)), Dr(() => {
+			document.removeEventListener("keydown", ne), E(), b?.abort();
 		}), (e, a) => (W(), G("section", null, [
-			K("div", Wu, [a[4] ||= K("div", null, [K("h1", null, "Record"), K("p", { class: "studio-muted" }, "Record from your browser or upload audio to the selected wakeword.")], -1), K("a", {
+			K("div", Wu, [a[4] ||= K("div", null, [K("h1", null, "Manual"), K("p", { class: "studio-muted" }, "Upload audio or record from your browser to the selected wakeword.")], -1), K("a", {
 				href: z(t).routes.href("samples"),
 				onClick: a[0] ||= Yo((e) => z(t).routes.navigate("samples"), ["prevent"])
 			}, "View samples →", 8, Gu)]),
 			z(t).selectedId.value ? Y("", !0) : (W(), G("p", Ku, "Select or create a wakeword to record or upload samples.")),
 			u.value ? (W(), G("p", qu, F(u.value), 1)) : Y("", !0),
 			l.value || z(n).error.value ? (W(), G("p", Ju, F(l.value || z(n).error.value), 1)) : Y("", !0),
-			K("section", {
-				class: "studio-card mb-4",
-				"aria-busy": d.value || f.value
-			}, [
-				K("div", Xu, [a[5] ||= K("div", null, [K("h2", null, "Microphone recording"), K("p", { class: "studio-muted" }, "One recording, one sample. You decide when to stop.")], -1), K("div", Zu, [(W(), G(U, null, H(["positive", "negative"], (e) => K("button", {
-					key: e,
-					type: "button",
-					"data-label": e,
-					"aria-pressed": o.value === e,
-					class: P({ "studio-primary": o.value === e }),
-					disabled: f.value,
-					onClick: (t) => o.value = e
-				}, F(e === "positive" ? "Positive" : "Negative"), 11, Qu)), 64))])]),
-				K("div", $u, [
-					K("div", ed, F(z(r) === "recording" ? "Recording…" : z(r) === "requesting" ? "Waiting for microphone permission…" : z(r) === "stopping" ? "Finishing recording…" : z(i) ? "Recording ready for review" : "Ready · browser’s current microphone"), 1),
-					K("div", td, F(C.value), 1),
-					K("button", {
-						type: "button",
-						"data-action": "record-toggle",
-						class: P(z(r) === "recording" ? "studio-record-stop" : "studio-primary"),
-						disabled: z(r) !== "recording" && !S.value,
-						"aria-keyshortcuts": "Space",
-						onClick: T
-					}, F(z(r) === "recording" ? "■ Stop recording" : "● Start recording"), 11, nd),
-					a[6] ||= K("p", { class: "studio-muted text-xs mt-3" }, [K("kbd", null, "Space"), J(" to start / stop · shortcut pauses while typing or using another control")], -1),
-					a[7] ||= K("p", { class: "studio-muted text-xs mt-2" }, "Microphone access requires HTTPS or localhost. Maximum recording length: 10 minutes.", -1)
-				]),
-				d.value ? (W(), G("p", rd, "Finding speech and trimming silence…")) : Y("", !0),
-				z(i) && !d.value ? (W(), G("div", id, [s.value ? (W(), la(Uu, {
-					key: 0,
-					audio: z(i),
-					preview: s.value,
-					disabled: f.value,
-					onSelection: a[1] ||= (e) => c.value = e
-				}, null, 8, [
-					"audio",
-					"preview",
-					"disabled"
-				])) : Y("", !0), K("div", ad, [
-					s.value ? Y("", !0) : (W(), G("button", {
-						key: 0,
-						type: "button",
-						"data-action": "retry-analysis",
-						onClick: E
-					}, "Retry analysis")),
-					K("button", {
-						type: "button",
-						"data-action": "retake",
-						disabled: x.value,
-						onClick: w
-					}, "Retake", 8, od),
-					s.value ? (W(), G("button", {
-						key: 1,
-						type: "button",
-						"data-action": "save-capture",
-						class: "studio-primary",
-						disabled: x.value || !c.value,
-						onClick: D
-					}, F(f.value ? "Saving…" : "Save sample"), 9, sd)) : Y("", !0)
-				])])) : Y("", !0),
-				a[8] ||= K("p", { class: "studio-muted text-xs mt-4" }, "VAD trims leading and trailing silence with a small safety margin. No speech detected? Keep the full clip, especially for negative background-noise samples.", -1)
-			], 8, Yu),
-			K("section", cd, [
-				a[12] ||= K("h2", null, "Upload audio", -1),
-				a[13] ||= K("p", { class: "studio-muted mb-3" }, "Uploads keep their own label and import provenance. Adjust trims later in Samples.", -1),
+			K("section", Yu, [
+				a[8] ||= K("h2", null, "Upload audio", -1),
+				a[9] ||= K("p", { class: "studio-muted mb-3" }, "Uploads keep their own label and import provenance. Adjust trims later in Samples.", -1),
 				K("form", {
 					"data-form": "import",
 					class: "flex flex-wrap gap-3 items-end",
-					onSubmit: Yo(O, ["prevent"])
+					onSubmit: Yo(k, ["prevent"])
 				}, [
-					K("label", ld, [a[9] ||= J("Audio", -1), K("input", {
+					K("label", Xu, [a[5] ||= J("Audio", -1), K("input", {
 						ref_key: "uploadInput",
 						ref: g,
 						name: "import-file",
@@ -5889,21 +5836,100 @@ var wu = { class: "studio-capture-review" }, Tu = { class: "flex flex-wrap items
 						accept: "audio/*",
 						required: "",
 						disabled: p.value,
-						onChange: a[2] ||= (e) => m.value = e.target.files?.[0] ?? null
-					}, null, 40, ud)]),
-					K("label", null, [a[11] ||= J("Sample label", -1), B(K("select", {
+						onChange: a[1] ||= (e) => m.value = e.target.files?.[0] ?? null
+					}, null, 40, Zu)]),
+					K("label", null, [a[7] ||= J("Sample label", -1), B(K("select", {
 						name: "import-label",
-						"onUpdate:modelValue": a[3] ||= (e) => h.value = e,
+						"onUpdate:modelValue": a[2] ||= (e) => h.value = e,
 						disabled: p.value
-					}, [...a[10] ||= [K("option", { value: "positive" }, "Positive", -1), K("option", { value: "negative" }, "Negative", -1)]], 8, dd), [[Ho, h.value]])]),
+					}, [...a[6] ||= [K("option", { value: "positive" }, "Positive", -1), K("option", { value: "negative" }, "Negative", -1)]], 8, Qu), [[Ho, h.value]])]),
 					K("button", {
 						type: "submit",
 						class: "studio-primary",
 						disabled: !z(t).selectedId.value || !m.value || x.value || z(r) === "recording"
-					}, F(p.value ? "Uploading…" : "Upload audio"), 9, fd)
+					}, F(p.value ? "Uploading…" : "Upload audio"), 9, $u)
 				], 32)
 			]),
-			a[14] ||= K("p", { class: "studio-muted text-xs mt-3" }, "Recordings and uploads appear alongside collected data in Samples, with distinct source metadata.", -1)
+			K("section", {
+				class: "studio-card",
+				"aria-busy": d.value || f.value
+			}, [
+				K("div", td, [a[10] ||= K("div", null, [K("h2", null, "Microphone recording"), K("p", { class: "studio-muted" }, "One recording, one sample. You decide when to stop.")], -1), K("div", nd, [(W(), G(U, null, H(["positive", "negative"], (e) => K("button", {
+					key: e,
+					type: "button",
+					"data-label": e,
+					"aria-pressed": o.value === e,
+					class: P({ "studio-primary": o.value === e }),
+					disabled: f.value,
+					onClick: (t) => o.value = e
+				}, F(e === "positive" ? "Positive" : "Negative"), 11, rd)), 64))])]),
+				K("div", id, [
+					K("div", ad, F(z(r) === "recording" ? "Recording…" : z(r) === "requesting" ? "Waiting for microphone permission…" : z(r) === "stopping" ? "Finishing recording…" : z(i) ? "Recording ready for review" : "Ready · browser’s current microphone"), 1),
+					K("div", od, F(T.value), 1),
+					K("button", {
+						type: "button",
+						"data-action": "record-toggle",
+						class: P(z(r) === "recording" ? "studio-record-stop" : "studio-primary"),
+						disabled: z(r) !== "recording" && !S.value,
+						"aria-keyshortcuts": "Space",
+						onClick: D
+					}, F(z(r) === "recording" ? "■ Stop recording" : "● Start recording"), 11, sd),
+					a[11] ||= K("p", { class: "studio-muted text-xs mt-3" }, [K("kbd", null, "Space"), J(" to start / stop · shortcut pauses while typing or using another control")], -1),
+					a[12] ||= K("p", { class: "studio-muted text-xs mt-2" }, "Microphone access requires HTTPS or localhost. Maximum recording length: 10 minutes.", -1)
+				]),
+				d.value ? (W(), G("p", cd, "Finding speech and trimming silence…")) : Y("", !0),
+				z(i) && !d.value ? (W(), G("div", ld, [
+					s.value ? (W(), la(Uu, {
+						key: 0,
+						ref_key: "review",
+						ref: w,
+						audio: z(i),
+						preview: s.value,
+						disabled: f.value,
+						onSelection: a[3] ||= (e) => c.value = e
+					}, null, 8, [
+						"audio",
+						"preview",
+						"disabled"
+					])) : Y("", !0),
+					K("div", ud, [
+						s.value ? Y("", !0) : (W(), G("button", {
+							key: 0,
+							type: "button",
+							"data-action": "retry-analysis",
+							onClick: O
+						}, "Retry analysis")),
+						K("button", {
+							type: "button",
+							"data-action": "retake",
+							"aria-keyshortcuts": "D",
+							disabled: x.value,
+							onClick: E
+						}, "Retake", 8, dd),
+						s.value ? (W(), G("button", {
+							key: 1,
+							type: "button",
+							"data-action": "save-capture",
+							class: "studio-primary",
+							"aria-keyshortcuts": "K Enter",
+							disabled: x.value || !c.value,
+							onClick: ee
+						}, F(f.value ? "Saving…" : "Save sample"), 9, fd)) : Y("", !0)
+					]),
+					a[13] ||= K("p", { class: "studio-muted text-xs mt-2 text-right" }, [
+						K("kbd", null, "Space"),
+						J(" play / stop · "),
+						K("kbd", null, "K"),
+						J(" or "),
+						K("kbd", null, "Enter"),
+						J(" keep · "),
+						K("kbd", null, "D"),
+						J(" discard")
+					], -1)
+				])) : Y("", !0),
+				a[14] ||= K("p", { class: "studio-muted text-xs mt-4" }, "VAD trims leading and trailing silence with a small safety margin. No speech detected? Keep the full clip, especially for negative background-noise samples.", -1)
+			], 8, ed),
+			a[15] ||= K("p", { class: "studio-muted text-xs mt-3" }, "Recordings and uploads appear alongside collected data in Samples, with distinct source metadata.", -1)
 		]));
 	}
 }), md = ["inert"], hd = { class: "flex flex-wrap items-start justify-between gap-3" }, gd = {
@@ -8514,7 +8540,7 @@ var cg = ["aria-pressed"], lg = /* @__PURE__ */ cr({
 				z(l) ? (W(), G("p", Qg, F(z(l)), 1)) : Y("", !0),
 				z(c) ? (W(), G("div", $g, F(z(c)), 1)) : Y("", !0),
 				z(s) ? (W(), G("p", e_, "Loading workspaces…")) : Y("", !0),
-				m.value.id === "wakewords" ? (W(), la(Js, { key: 3 })) : m.value.id === "classify" ? (W(), la(wl, { key: 4 })) : m.value.id === "samples" ? (W(), la(Su, { key: 5 })) : m.value.id === "record" ? (W(), la(pd, { key: 6 })) : m.value.id === "kiosks" ? (W(), la(Yd, { key: 7 })) : m.value.id === "automate" ? (W(), la(jf, { key: 8 })) : m.value.id === "deploy" ? (W(), la(fp, { key: 9 })) : m.value.id === "online-datasets" ? (W(), la(Zp, { key: 10 })) : m.value.id === "artificial" ? (W(), la(Hm, { key: 11 })) : m.value.id === "train" ? (W(), la(Ch, { key: 12 })) : m.value.id === "testing" ? (W(), la(og, { key: 13 })) : Y("", !0)
+				m.value.id === "wakewords" ? (W(), la(Js, { key: 3 })) : m.value.id === "classify" ? (W(), la(wl, { key: 4 })) : m.value.id === "samples" ? (W(), la(Su, { key: 5 })) : m.value.id === "manual" ? (W(), la(pd, { key: 6 })) : m.value.id === "kiosks" ? (W(), la(Yd, { key: 7 })) : m.value.id === "automate" ? (W(), la(jf, { key: 8 })) : m.value.id === "deploy" ? (W(), la(fp, { key: 9 })) : m.value.id === "online-datasets" ? (W(), la(Zp, { key: 10 })) : m.value.id === "artificial" ? (W(), la(Hm, { key: 11 })) : m.value.id === "train" ? (W(), la(Ch, { key: 12 })) : m.value.id === "testing" ? (W(), la(og, { key: 13 })) : Y("", !0)
 			], 512)])
 		], 8, Pg), q(Ng)], 2));
 	}

@@ -10,8 +10,8 @@ test('records through real browser media, trims, saves and finds microphone prov
   await page.route('**/samples/capture/preview', async route => {
     await route.fulfill({ json: { duration_s: 3, start_s: 0.2, end_s: 2.8, trim_method: 'silero', warning: null } });
   });
-  await page.goto(`/#/record?word=${word.id}`);
-  await expect(page.getByRole('heading', { name: 'Record', exact: true })).toBeVisible();
+  await page.goto(`/#/manual?word=${word.id}`);
+  await expect(page.getByRole('heading', { name: 'Manual', exact: true })).toBeVisible();
   await page.locator('[data-label=negative]').click();
   await page.locator('#studio-content').focus(); await page.keyboard.press('Space');
   await expect(page.locator('[data-action=record-toggle]')).toContainText('Stop recording');

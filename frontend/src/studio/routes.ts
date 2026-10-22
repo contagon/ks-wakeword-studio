@@ -5,7 +5,7 @@ export const pages = [
   { id: "kiosks", name: "Kiosks", group: "Fleet" },
   { id: "online-datasets", name: "Downloaded", group: "Data" },
   { id: "artificial", name: "Artificial", group: "Data" },
-  { id: "record", name: "Record", group: "Data" },
+  { id: "manual", name: "Manual", group: "Data" },
   { id: "classify", name: "Classify", group: "Data" },
   { id: "samples", name: "Samples", group: "Data" },
   { id: "train", name: "Train", group: "Models" },
@@ -25,7 +25,7 @@ export function useStudioRoutes() {
   const classifyTab = ref<ClassifyTab>('review');
   function read() {
     const [path, search = ""] = location.hash.replace(/^#\/?/, "").split("?");
-    page.value = path === 'scrape' ? 'classify' : path === 'negative-datasets' ? 'online-datasets' : pages.find(p => p.id === path)?.id ?? "wakewords";
+    page.value = path === 'scrape' ? 'classify' : path === 'negative-datasets' ? 'online-datasets' : path === 'record' ? 'manual' : pages.find(p => p.id === path)?.id ?? "wakewords";
     selectedId.value = new URLSearchParams(search).get("word") ?? storedSelection();
     const tab = path === 'scrape' ? 'collect' : new URLSearchParams(search).get('tab');
     classifyTab.value = tab === 'collect' || tab === 'unmapped' ? tab : 'review';
