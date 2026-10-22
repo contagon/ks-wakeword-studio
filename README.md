@@ -453,15 +453,10 @@ incompatible feature reuse. Real training also requires independent positive tra
 validation and testing families (and corresponding reviewed-negative splits when
 used); a tiny smoke-test corpus is not sufficient for actual ML training.
 
-The production bundle is committed under `static/ui`, so neither NVIDIA Docker image needs Node.js. To change the UI, edit `frontend/src` and rebuild it before building the image:
-
-```bash
-cd frontend
-npm install
-npm run build
-```
-
-`npm run build` type-checks every Vue component before writing the offline bundle copied into both the standard CUDA and Blackwell images.
+The UI bundle in `static/ui` is build output and is not committed. Both dockerfiles build it in a
+`node` stage (`npm ci && npm run build`) and copy only the result into the runtime image, so
+neither NVIDIA image ships Node.js. For local development run `just ui` (or
+`npm --prefix frontend run build`); the build type-checks every Vue component first.
 
 ### Offline integration verification (no CUDA or live kiosks)
 
@@ -470,17 +465,17 @@ not install the CUDA training requirements just to test the app. Python 3.12,
 `ffmpeg`, `openssl`, Bash, and Node/npm (development only) are used by the suite:
 
 ```bash
-just test   # creates .venv-test from requirements-dev.txt, runs pytest, vitest and the type check
+just test   # creates .venv-test from requirements-dev.txt, type-checks and builds the UI, runs pytest and vitest
 just ui     # rebuilds static/ui
 just e2e    # Playwright browser suite (install Chromium once: npx --prefix frontend playwright install chromium)
 ```
 
 Without `just`: `python3 -m venv .venv-test && .venv-test/bin/pip install -r requirements-dev.txt`,
 then `.venv-test/bin/python -m pytest` (`tests/conftest.py` points `DATA_DIR` at a
-temporary directory unless you set it), `npm --prefix frontend test -- --run` and
-`npm --prefix frontend run typecheck`.
+temporary directory unless you set it), `npm --prefix frontend run build` and
+`npm --prefix frontend test -- --run`.
 
-Playwright launches the real app and committed static UI with a tests-only,
+Playwright rebuilds `static/ui`, then launches the real app with a tests-only,
 constructor-injected GPU command runner, fresh temporary data in the system temp directory,
 and deterministic loopback HTTP kiosks. There is no production environment variable
 that enables fake GPU success; test code is not copied into either Docker image.
@@ -489,7 +484,7 @@ container build, or real-device behavior. Live-device checks are opt-in only; re
 the test's environment variables and required authorization before enabling them,
 especially cache clearing/publication. Do not point the integration fixtures at a
 real LAN device. Neither image requires Node at runtime; both ship the complete
-`studio/` package, SQL/JSON resources, CLI helpers and prebuilt `static/ui` assets.
+`studio/` package, SQL/JSON resources, CLI helpers and the built `static/ui` assets.
 
 ---
 

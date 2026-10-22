@@ -39,14 +39,14 @@ jobs:
           python -m pip install -r requirements-dev.txt
           npm --prefix frontend ci
 
+      - name: Type check and build UI
+        run: npm --prefix frontend run build
+
       - name: Python tests
         run: python -m pytest -q
 
       - name: Frontend unit tests
         run: npm --prefix frontend test -- --run
-
-      - name: Type check
-        run: npm --prefix frontend run typecheck
 
       - name: Browser tests
         run: |

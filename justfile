@@ -35,15 +35,14 @@ test-venv:
     [ -x {{test_python}} ] || python3 -m venv {{test_venv}}
     {{test_python}} -m pip install -q -r requirements-dev.txt
 
-# Run Python and frontend unit tests plus the type check.
-test: test-venv
-    [ -d frontend/node_modules ] || npm --prefix frontend ci
+# Type-check and build the UI, then run Python and frontend unit tests.
+test: test-venv ui
     {{test_python}} -m pytest -q
     npm --prefix frontend test -- --run
-    npm --prefix frontend run typecheck
 
-# Run the Playwright browser suite against the real app.
-e2e: test-venv ui
+# Run the Playwright browser suite against the real app (it rebuilds static/ui first).
+e2e: test-venv
+    [ -d frontend/node_modules ] || npm --prefix frontend ci
     cd frontend && STUDIO_TEST_PYTHON={{test_python}} npm run test:e2e
 
 # Open a shell in the running studio container.

@@ -9,3 +9,4 @@ tests
 data
 personal_samples/*
 trim_history/*
+static/ui

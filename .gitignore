@@ -9,3 +9,4 @@ __pycache__/
 *.py[cod]
 .superpowers
 .venv-test/
+static/ui/

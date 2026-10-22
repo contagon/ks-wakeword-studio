@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 class StudioPackagingTests(unittest.TestCase):
     def test_image_context_excludes_test_harnesses_and_local_state(self):
         excluded = (REPO_ROOT / '.dockerignore').read_text().splitlines()
-        for pattern in ('tests', '**/__pycache__', '**/*.py[cod]', '.superpowers', 'frontend/node_modules', 'data'):
+        for pattern in ('tests', '**/__pycache__', '**/*.py[cod]', '.superpowers', 'frontend/node_modules', 'data', 'static/ui'):
             self.assertIn(pattern, excluded)
 
     def test_both_images_copy_complete_importable_studio_package(self):
@@ -37,8 +37,12 @@ class StudioPackagingTests(unittest.TestCase):
                 self.assertTrue({'run.sh', 'trainer_server.py',
                                  'requirements.txt'}.issubset(entrypoints))
                 self.assertIn('EXPOSE 8789', manifest)
-                self.assertNotIn('npm ', manifest)
-                self.assertNotIn('nodejs', manifest.lower())
+                # Node builds the UI in its own stage; the runtime image never installs it.
+                ui_stage, runtime_stage = manifest.split('\nFROM ', 2)[1:]
+                self.assertTrue(ui_stage.startswith('node:') and 'npm run build' in ui_stage)
+                self.assertIn(['/src/static/ui/', '/root/mww-scripts/static/ui/'], copies)
+                self.assertNotIn('npm ', runtime_stage)
+                self.assertNotIn('nodejs', runtime_stage.lower())
                 self.assertFalse(any('tests/' in row for row in copies))
 
                 # Exercise the COPY source/destination in an isolated image-like tree.
