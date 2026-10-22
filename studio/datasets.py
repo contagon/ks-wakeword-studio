@@ -163,8 +163,6 @@ class DatasetService:
             self._entry(key)
         with self.store.transaction() as db:
             require_word(db, word_id)
-            db.execute('DELETE FROM studio_dataset_selections WHERE word_id=?', (word_id,))
-            db.executemany('INSERT INTO studio_dataset_selections VALUES (?,?)', [(word_id, key) for key in dataset_ids])
             db.execute("INSERT INTO studio_dataset_preferences VALUES (?, 'negative', ?) ON CONFLICT(word_id,kind) DO UPDATE SET dataset_ids=excluded.dataset_ids",
                        (word_id, json.dumps(dataset_ids)))
 

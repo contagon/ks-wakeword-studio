@@ -393,10 +393,10 @@ class CollectionTests(unittest.TestCase):
             # tables now created by setUp's Store.open().
             for table in ('studio_dataset_preferences', 'sample_capture_metadata', 'automation_reviews', 'automation_events', 'workspace_automation',
                           'deployment_staging_blocks', 'deployment_staging',
-                          'publication_history', 'publications', 'deployment_intents', 'deployment_events',
+                          'publications', 'deployment_intents', 'deployment_events',
                           'model_versions', 'training_runs', 'training_family_splits', 'training_seed', 'training_settings',
                           'generation_selection', 'generation_batch_audio', 'generation_batches', 'generation_recipes',
-                          'studio_dataset_selections', 'studio_dataset_installations',
+                          'studio_dataset_installations',
                           'studio_schedule_occurrences', 'studio_schedules', 'studio_jobs',
                           'collection_attempts', 'collection_devices', 'collection_runs', 'source_mappings'):
                 db.execute('DROP TABLE ' + table)
@@ -410,5 +410,5 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(WorkspaceService(self.store).get(self.word.id).phrase, 'Hello')
         self.assertEqual(DeviceService(self.store).get('a').id, 'a')
         with self.store.transaction() as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 18)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 19)
             self.assertEqual(db.execute('SELECT id FROM recordings').fetchone()[0], recording.id)

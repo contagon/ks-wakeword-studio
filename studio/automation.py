@@ -3,7 +3,8 @@ from dataclasses import asdict, replace
 import json
 
 from studio.models import (AutomationSettings, AutomationSchedule, AutomationStatus,
-                           ClassificationPolicy, DeploymentPolicy, NotFound, ValidationError)
+                           ClassificationPolicy, DeploymentPolicy, ValidationError)
+from studio.workspaces import require_word
 
 
 def settings_from_dict(data):
@@ -19,13 +20,12 @@ def settings_from_dict(data):
 
 
 class AutomationService:
-    def __init__(self, store, jobs, schedules):
-        self.store, self.jobs, self.schedules = store, jobs, schedules
+    def __init__(self, store, jobs, schedules, deployment):
+        self.store, self.jobs, self.schedules, self.deployment = store, jobs, schedules, deployment
 
     @staticmethod
     def settings_in(db, word_id):
-        if not db.execute('SELECT 1 FROM wakewords WHERE id=?', (word_id,)).fetchone():
-            raise NotFound('Wakeword not found')
+        require_word(db, word_id)
         row = db.execute('SELECT settings FROM workspace_automation WHERE word_id=?', (word_id,)).fetchone()
         if row:
             return settings_from_dict(json.loads(row[0]))

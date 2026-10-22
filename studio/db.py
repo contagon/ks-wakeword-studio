@@ -13,6 +13,30 @@ from studio.models import ValidationError
 from studio.storage import ensure_directory, open_directory
 
 
+# Applied in order; user_version is the count applied. Never edit a released file.
+MIGRATIONS = (
+    "schema.sql",
+    "schema_samples.sql",
+    "schema_devices.sql",
+    "schema_collection.sql",
+    "schema_jobs.sql",
+    "schema_datasets.sql",
+    "schema_generation.sql",
+    "schema_training.sql",
+    "schema_deployment.sql",
+    "schema_deployment_staging.sql",
+    "schema_migration.sql",
+    "schema_migration_claims.sql",
+    "schema_automation.sql",
+    "schema_device_management.sql",
+    "schema_device_names.sql",
+    "schema_capture.sql",
+    "schema_dataset_preferences.sql",
+    "schema_training_run_numbers.sql",
+    "schema_drop_unused.sql",
+)
+
+
 class Store:
     def __init__(self, root: Path, connection: sqlite3.Connection):
         self.root = root
@@ -48,63 +72,11 @@ class Store:
             connection.execute("PRAGMA synchronous = FULL")
             with store.transaction() as db:
                 version = db.execute("PRAGMA user_version").fetchone()[0]
-                if version > 18:
+                if version > len(MIGRATIONS):
                     raise ValidationError("Unsupported studio schema version")
-                if version == 0:
-                    # execute complete statements individually: executescript commits implicitly.
-                    store._apply_schema(db, "schema.sql")
-                    db.execute("PRAGMA user_version = 1")
-                if version < 2:
-                    store._apply_schema(db, "schema_samples.sql")
-                    db.execute("PRAGMA user_version = 2")
-                if version < 3:
-                    store._apply_schema(db, "schema_devices.sql")
-                    db.execute("PRAGMA user_version = 3")
-                if version < 4:
-                    store._apply_schema(db, "schema_collection.sql")
-                    db.execute("PRAGMA user_version = 4")
-                if version < 5:
-                    store._apply_schema(db, "schema_jobs.sql")
-                    db.execute("PRAGMA user_version = 5")
-                if version < 6:
-                    store._apply_schema(db, "schema_datasets.sql")
-                    db.execute("PRAGMA user_version = 6")
-                if version < 7:
-                    store._apply_schema(db, "schema_generation.sql")
-                    db.execute("PRAGMA user_version = 7")
-                if version < 8:
-                    store._apply_schema(db, "schema_training.sql")
-                    db.execute("PRAGMA user_version = 8")
-                if version < 9:
-                    store._apply_schema(db, "schema_deployment.sql")
-                    db.execute("PRAGMA user_version = 9")
-                if version < 10:
-                    store._apply_schema(db, "schema_deployment_staging.sql")
-                    db.execute("PRAGMA user_version = 10")
-                if version < 11:
-                    store._apply_schema(db, "schema_migration.sql")
-                    db.execute("PRAGMA user_version = 11")
-                if version < 12:
-                    store._apply_schema(db, "schema_migration_claims.sql")
-                    db.execute("PRAGMA user_version = 12")
-                if version < 13:
-                    store._apply_schema(db, "schema_automation.sql")
-                    db.execute("PRAGMA user_version = 13")
-                if version < 14:
-                    store._apply_schema(db, "schema_device_management.sql")
-                    db.execute("PRAGMA user_version = 14")
-                if version < 15:
-                    store._apply_schema(db, "schema_device_names.sql")
-                    db.execute("PRAGMA user_version = 15")
-                if version < 16:
-                    store._apply_schema(db, "schema_capture.sql")
-                    db.execute("PRAGMA user_version = 16")
-                if version < 17:
-                    store._apply_schema(db, "schema_dataset_preferences.sql")
-                    db.execute("PRAGMA user_version = 17")
-                if version < 18:
-                    store._apply_schema(db, "schema_training_run_numbers.sql")
-                    db.execute("PRAGMA user_version = 18")
+                for number, filename in enumerate(MIGRATIONS[version:], version + 1):
+                    store._apply_schema(db, filename)
+                    db.execute(f"PRAGMA user_version = {number}")
             return store
         except BaseException:
             store.close()
@@ -112,6 +84,7 @@ class Store:
 
     @staticmethod
     def _apply_schema(db: sqlite3.Connection, filename: str) -> None:
+        # Execute complete statements individually: executescript commits implicitly.
         statement = ""
         for line in Path(__file__).with_name(filename).read_text().splitlines(True):
             statement += line

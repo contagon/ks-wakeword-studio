@@ -10,8 +10,9 @@ from typing import Callable, Protocol
 from threading import Event
 from uuid import uuid4
 
-from studio.models import (Conflict, DatasetInput, ModelVersion, NotFound, Page, RunManifest, TrainingAudio,
+from studio.models import (AugmentationInput, Conflict, DatasetInput, ModelVersion, NotFound, Page, RunManifest, TrainingAudio,
                            TrainingResult, TrainingSettings, ValidationError, check_page, iso_now, utc_now)
+from studio.augmentation import snapshot as augmentation_snapshot
 from studio.storage import ensure_directory, open_directory
 from studio.workspaces import require_word
 
@@ -30,7 +31,6 @@ def load_manifest(value):
     if 'legacy_identity' in data:
         from studio.models import LegacyRun
         return LegacyRun(**{key: data[key] for key in LegacyRun.__dataclass_fields__ if key in data})
-    from studio.augmentation import AugmentationInput
     data['augmentation'] = tuple(AugmentationInput(**item) for item in data.get('augmentation', []))
     data['config'] = load_settings(data['config'])
     data['audio'] = tuple(TrainingAudio(**a) for a in data['audio'])
@@ -44,8 +44,8 @@ class TrainingAdapter(Protocol):
 
 
 class TrainingService:
-    def __init__(self, store, blobs, jobs, datasets, *, clock=utc_now, adapter_factory=None):
-        self.store, self.blobs, self.jobs, self.datasets = store, blobs, jobs, datasets
+    def __init__(self, store, blobs, jobs, datasets, augmentation, *, clock=utc_now, adapter_factory=None):
+        self.store, self.blobs, self.jobs, self.datasets, self.augmentation = store, blobs, jobs, datasets, augmentation
         self.clock, self.adapter_factory = clock, adapter_factory
 
     def settings(self, word_id):
@@ -78,10 +78,8 @@ class TrainingService:
                 return load_manifest(existing[0])
             if db.execute('SELECT 1 FROM wakewords WHERE id=?', (word_id,)).fetchone() is None:
                 raise NotFound('Workspace not found')
-        from studio.augmentation import snapshot
-        from studio.augmentation_datasets import AugmentationDatasetService
-        selected_augmentation = AugmentationDatasetService(self.store, self.jobs).selection(word_id)
-        augmentation = snapshot(self.store, selected_augmentation)
+        selected_augmentation = self.augmentation.selection(word_id)
+        augmentation = augmentation_snapshot(self.store, selected_augmentation)
         # Hold the Store lock across the dataset-service snapshot and transaction;
         # use one SQLite transaction so other processes cannot edit selections.
         with self.store.transaction() as db:
@@ -176,8 +174,7 @@ class TrainingService:
         if (context is None or context.queue is not self.jobs or context.job.id != job.id or job.id not in self.jobs._owners
                 or self.jobs.get(job.id).status != 'running' or job.kind != 'train'):
             raise Conflict('Owned job context required')
-        from studio.augmentation_datasets import AugmentationDatasetService
-        AugmentationDatasetService(self.store, self.jobs).require_ready(job.word_id)
+        self.augmentation.require_ready(job.word_id)
         self.datasets.require_installed(job.word_id)
         manifest = self.snapshot(job.word_id, job.id)
         root = self.store.scoped_directory('jobs', job.id) / 'training'

@@ -152,9 +152,6 @@ class DeploymentService:
                            'WHERE word_id=? AND device_id=?',
                            (blocked, row['staging_reason'] if blocked == 'staging_blocked' else blocked,
                             iso_now(self.clock), word_id, row['device_id']))
-                record = dict(db.execute('SELECT * FROM publications WHERE word_id=? AND device_id=?',
-                                         (word_id, row['device_id'])).fetchone())
-                db.execute('INSERT INTO publication_history(word_id,record) VALUES (?,?)', (word_id, json.dumps(record)))
         # Membership/profile edits can make a previously blocked target eligible
         # without a new trained version. Only explicit registry eligibility
         # changes reopen these states; exhausted remote retries stay bounded.
@@ -284,7 +281,6 @@ class DeploymentService:
             db.execute('UPDATE publications SET ' + ','.join(k + '=?' for k in fields) +
                        ' WHERE word_id=? AND device_id=? AND revision=? AND desired_version=?',
                        (*[data[k] for k in fields], p.word_id, p.device_id, p.revision, p.desired_version))
-            db.execute('INSERT INTO publication_history(word_id,record) VALUES (?,?)', (p.word_id, json.dumps(asdict(updated))))
         return updated
 
     def _device(self, p, *, indirect):

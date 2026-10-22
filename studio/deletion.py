@@ -243,7 +243,7 @@ def delete_workspace(store, word_id, blobs=None):
                         os.unlink(temporary, dir_fd=directory)
                 os.fsync(directory)
             db.execute("INSERT OR IGNORE INTO deployment_staging_blocks SELECT device_id,'workspace_deleted' FROM deployment_staging WHERE word_id=?", (word_id,))
-            for table in ('publications', 'publication_history', 'deployment_intents', 'deployment_staging'):
+            for table in ('publications', 'deployment_intents', 'deployment_staging'):
                 db.execute(f'DELETE FROM {table} WHERE word_id=?', (word_id,))
             for table in ('deployment_events', 'legacy_model_validations', 'migration_model_provenance'):
                 db.execute(f'DELETE FROM {table} WHERE version_id IN ({versions})', (word_id,))
@@ -257,8 +257,7 @@ def delete_workspace(store, word_id, blobs=None):
             db.execute(f'DELETE FROM generation_selection WHERE word_id=? OR batch_id IN ({batches})', (word_id, word_id))
             db.execute(f'DELETE FROM generation_batch_audio WHERE batch_id IN ({batches})', (word_id,))
             db.execute('DELETE FROM generation_batches WHERE word_id=?', (word_id,))
-            for table in ('generation_recipes', 'training_settings', 'studio_dataset_selections',
-                          'source_mappings', 'migration_imports', 'migration_source_claims'):
+            for table in ('generation_recipes', 'training_settings', 'source_mappings'):
                 db.execute(f'DELETE FROM {table} WHERE word_id=?', (word_id,))
             scopes = {r[0] for r in db.execute('SELECT scope FROM studio_schedules') if r[0].endswith(':' + word_id)}
             for scope in scopes:
