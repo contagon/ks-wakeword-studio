@@ -202,14 +202,13 @@ class DatasetTests(unittest.TestCase):
         manifest = self.root / 'inputs.json'
         manifest.write_text(json.dumps({'schema_version': 1, 'datasets': []}))
         config = self.root / 'config.yaml'
-        config.write_text(yaml.safe_dump({'features': [
-            {'truth': True, 'features_dir': '/positive'},
-            {'truth': False, 'features_dir': '/unselected/no_speech'}]}))
-        result = subprocess.run([sys.executable, 'cli/dataset_config.py', str(manifest), str(config)], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, 'cli/dataset_config.py', f'--output={config}', f'--work-dir={self.root}',
+                                 '--training-steps=10', '--eval-step-interval=5', '--personal-dir=/positive',
+                                 f'--dataset-manifest={manifest}'], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(yaml.safe_load(config.read_text())['features'], [{'truth': True, 'features_dir': '/positive'}])
+        self.assertEqual([row['features_dir'] for row in yaml.safe_load(config.read_text())['features']], ['/positive'])
         text = Path('cli/wake_word_sample_trainer').read_text()
-        self.assertIn('dataset-manifest', text)
+        self.assertIn('--dataset-manifest', text)
         self.assertIn('dataset_config.py', text)
 
     def test_real_mww_shell_config_path_accepts_only_selected_installs(self):
