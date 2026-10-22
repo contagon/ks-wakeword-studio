@@ -459,6 +459,11 @@ Also:
   - **B11 reverses an asserted behaviour.** The e2e test used to require that a letter key on a focused button does nothing. Letters now always work (matching Manual), while Space/Enter on a focused control keep their native click.
   - **B22 was only partly done.** The FMA fallback now warns. The mp3-vs-wav count compare only re-extracts after an interrupted conversion, so it was left as is.
   - After this phase: pytest 450 passed, 1 skipped; vitest 205; Playwright 18 passed, 1 skipped. Screenshots confirmed the trim dialog (desktop and mobile), the kiosk editor, the status pills and the mobile header.
+- **Phase 5 done (commits `2c15917`, `95fce5c`, plus the follow-up check):**
+  - Prettier 3.9.10 with `printWidth: 120`. `just format` reformats; CI and `just test` run `format:check`. `95fce5c` is listed in `.git-blame-ignore-revs`.
+  - **Templates now compile with `whitespace: "preserve"`.** Prettier moved a space between inline tags onto a new line, and Vue's default `condense` then dropped it, which broke the Kiosks badge spacing.
+  - A pixel diff of all pages (light, dark and 390px) against the pre-format build shows only known noise.
+  - `noUnusedLocals` was not enabled; it belongs to phase 7.
 
 ## 11. Order of work
 

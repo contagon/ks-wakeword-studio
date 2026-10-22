@@ -467,6 +467,7 @@ not install the CUDA training requirements just to test the app. Python 3.12,
 ```bash
 just test   # creates .venv-test from requirements-dev.txt, type-checks and builds the UI, runs pytest and vitest
 just ui     # rebuilds static/ui
+just format # Prettier for frontend/ (CI fails on unformatted code)
 just e2e    # Playwright browser suite (install Chromium once: npx --prefix frontend playwright install chromium)
 ```
 

@@ -35,8 +35,9 @@ test-venv:
     [ -x {{test_python}} ] || python3 -m venv {{test_venv}}
     {{test_python}} -m pip install -q -r requirements-dev.txt
 
-# Type-check and build the UI, then run Python and frontend unit tests.
+# Check formatting, type-check and build the UI, then run Python and frontend unit tests.
 test: test-venv ui
+    npm --prefix frontend run format:check
     {{test_python}} -m pytest -q
     npm --prefix frontend test -- --run
 
@@ -44,6 +45,10 @@ test: test-venv ui
 e2e: test-venv
     [ -d frontend/node_modules ] || npm --prefix frontend ci
     cd frontend && STUDIO_TEST_PYTHON={{test_python}} npm run test:e2e
+
+# Format the frontend with Prettier.
+format:
+    npm --prefix frontend run format
 
 # Open a shell in the running studio container.
 shell:

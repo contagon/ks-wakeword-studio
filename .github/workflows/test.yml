@@ -39,6 +39,9 @@ jobs:
           python -m pip install -r requirements-dev.txt
           npm --prefix frontend ci
 
+      - name: Check formatting
+        run: npm --prefix frontend run format:check
+
       - name: Type check and build UI
         run: npm --prefix frontend run build
 
