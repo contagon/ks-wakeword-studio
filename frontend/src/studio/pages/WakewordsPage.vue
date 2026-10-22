@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ConfirmDialog from "../components/ConfirmDialog.vue";
+import PageHeader from "../components/PageHeader.vue";
 import { absoluteTime } from "../time";
 import { nextTick, onScopeDispose, reactive, ref, watch } from "vue";
 import { StudioApiError, studioApi } from "../api";
@@ -77,15 +79,12 @@ async function save() {
 
 <template>
   <section>
-    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-      <div>
-        <h1>Wakewords</h1>
-        <p class="studio-muted">
-          One workspace. Multiple wakewords. Separate recordings, schedules, and model versions.
-        </p>
-      </div>
+    <PageHeader
+      title="Wakewords"
+      description="One workspace. Multiple wakewords. Separate recordings, schedules, and model versions."
+    >
       <button data-action="refresh" :disabled="loading" @click="workspace.load()">Refresh workspaces</button>
-    </div>
+    </PageHeader>
     <p v-if="!loading && !error && !wakewords.length" class="studio-card">
       No wakewords yet. Create your first workspace below.
     </p>
@@ -148,7 +147,7 @@ async function save() {
         </div>
       </dl>
     </div>
-    <p v-if="formError" role="alert" class="studio-note">{{ formError }}</p>
+    <p v-if="formError && !confirmingDelete" role="alert" class="studio-note">{{ formError }}</p>
     <p v-if="saved" role="status" class="studio-note">{{ saved }}</p>
     <div class="grid gap-4">
       <form data-form="create" class="studio-card grid gap-3" @submit.prevent="save()">
@@ -160,28 +159,23 @@ async function save() {
         <button class="studio-primary justify-self-start" :disabled="saving" type="submit">Create wakeword</button>
       </form>
     </div>
-    <section
-      v-if="confirmingDelete && selected"
-      role="alertdialog"
-      aria-labelledby="delete-heading"
-      aria-describedby="delete-description"
-      class="studio-card mt-4"
-      @keydown.esc="!saving && (confirmingDelete = false)"
+    <ConfirmDialog
+      :open="confirmingDelete && !!selected"
+      :title="`Delete ${selected?.phrase ?? 'workspace'} permanently?`"
+      confirm-label="Permanently delete workspace"
+      busy-label="Deleting…"
+      :busy="saving"
+      confirm-action="confirm-delete"
+      cancel-action="cancel-delete"
+      @confirm="deleteWorkspace"
+      @cancel="confirmingDelete = false"
     >
-      <h2 id="delete-heading">Delete {{ selected.phrase }} permanently?</h2>
-      <p id="delete-description">
+      <p>
         This permanently deletes this workspace’s recordings, generated datasets, settings, schedules, jobs, and local
         model archives. This cannot be undone. Cancel queued or active jobs first.
       </p>
       <p class="studio-muted">Deployed kiosk files and shared datasets are not deleted.</p>
-      <div class="flex flex-wrap gap-3 mt-3">
-        <button data-action="cancel-delete" type="button" :disabled="saving" @click="confirmingDelete = false">
-          Cancel
-        </button>
-        <button data-action="confirm-delete" type="button" :disabled="saving" @click="deleteWorkspace">
-          {{ saving ? "Deleting…" : "Permanently delete workspace" }}
-        </button>
-      </div>
-    </section>
+      <p v-if="formError" role="alert" class="studio-note">{{ formError }}</p>
+    </ConfirmDialog>
   </section>
 </template>

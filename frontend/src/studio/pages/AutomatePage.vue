@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from "../components/PageHeader.vue";
 import { absoluteTime } from "../time";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { studioApi } from "../api";
@@ -102,10 +103,10 @@ onBeforeUnmount(() => {
 
 <template>
   <section>
-    <div class="mb-4">
-      <h1>Automate</h1>
-      <p class="studio-muted">Collection, classification, training, and deployment for the selected workspace.</p>
-    </div>
+    <PageHeader
+      title="Automate"
+      description="Collection, classification, training, and deployment for the selected workspace."
+    />
     <p v-if="!wordId" class="studio-card">Choose a wakeword to configure automation.</p>
     <p v-if="loading" role="status">Loading automation…</p>
     <p v-if="error" class="studio-note" role="alert">

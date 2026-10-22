@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from "../components/PageHeader.vue";
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { studioApi } from "../api";
 import { shortcutTarget } from "../shortcuts";
@@ -170,15 +171,11 @@ onBeforeUnmount(() => {
 
 <template>
   <section>
-    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
-      <div>
-        <h1>Manual</h1>
-        <p class="studio-muted">Upload audio or record from your browser to the selected wakeword.</p>
-      </div>
+    <PageHeader title="Manual" description="Upload audio or record from your browser to the selected wakeword.">
       <a :href="workspace.routes.href('samples')" @click.prevent="workspace.routes.navigate('samples')"
         >View samples →</a
       >
-    </div>
+    </PageHeader>
     <p v-if="!workspace.selectedId.value" class="studio-note">
       Select or create a wakeword to record or upload samples.
     </p>

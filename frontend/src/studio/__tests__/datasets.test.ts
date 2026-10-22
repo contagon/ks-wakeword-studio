@@ -502,7 +502,7 @@ describe("NegativeDatasetsPage", () => {
     await flushPromises();
     const warning = ui.get("[data-disk-warning]");
     expect(visibleText(warning.text())).toContain("Disk space is low: 12.35 GB free of 536.9 GB");
-    expect(ui.get("h1").element.parentElement?.nextElementSibling).toBe(warning.element);
+    expect(ui.get(".studio-page-header").element.nextElementSibling).toBe(warning.element);
     expect(warning.element.nextElementSibling?.querySelector("h2")?.textContent).toContain("Negative");
     ui.unmount();
   });

@@ -47,15 +47,24 @@
 .studio-layout {
   display: contents;
 }
-.studio-app .studio-device-dialog {
-  width: min(440px, calc(100% - 40px));
+/* The dialog itself is the click target for the backdrop; its content sits in an inner card. */
+.studio-confirm-dialog {
+  width: min(480px, calc(100% - 32px));
   margin: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--studio-text);
 }
-.studio-device-dialog::backdrop {
+.studio-confirm-dialog::backdrop {
   background: rgb(20 35 48 / 0.48);
 }
-.studio-device-dialog > * + * {
-  margin-top: 12px;
+.studio-confirm-dialog > .studio-card {
+  box-shadow: 0 18px 50px rgb(20 35 48 / 0.35);
+}
+.studio-confirm-dialog h2,
+.studio-confirm-dialog p {
+  margin: 0;
 }
 .studio-app .studio-queue-toggle {
   display: inline-flex;
@@ -760,4 +769,22 @@ html[data-studio-theme="dark"] :is(.studio-status-failed, .studio-status-interru
     align-items: stretch;
     flex-direction: column;
   }
+}
+.studio-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.studio-page-title {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.studio-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
 }

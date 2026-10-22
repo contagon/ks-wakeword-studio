@@ -1,12 +1,10 @@
 <script setup lang="ts">
+import PageHeader from "../components/PageHeader.vue";
 import DeviceRegistry from "../components/DeviceRegistry.vue";
 </script>
 <template>
   <section>
-    <div class="mb-4">
-      <h1>Kiosks</h1>
-      <p class="studio-muted">Connect and manage your kiosk fleet.</p>
-    </div>
+    <PageHeader title="Kiosks" description="Connect and manage your kiosk fleet." />
     <DeviceRegistry surface="kiosks" />
   </section>
 </template>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ConfirmDialog from "../components/ConfirmDialog.vue";
+import PageHeader from "../components/PageHeader.vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useDeviceRegistry } from "../devices";
 import { studioApi, StudioApiError } from "../api";
@@ -205,12 +207,10 @@ onBeforeUnmount(() => {
 
 <template>
   <section>
-    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-      <div>
-        <h1>Samples</h1>
-        <p class="studio-muted">Library of collected, recorded and imported audio with non-destructive trims.</p>
-      </div>
-    </div>
+    <PageHeader
+      title="Samples"
+      description="Library of collected, recorded and imported audio with non-destructive trims."
+    />
     <p v-if="status" data-samples-status class="studio-note" role="status" aria-live="polite">{{ status }}</p>
     <p v-if="error" data-samples-error class="studio-note" role="alert" aria-live="assertive">{{ error }}</p>
     <div class="studio-card mb-4">
@@ -330,13 +330,17 @@ onBeforeUnmount(() => {
       @save="trim($event)"
       @close="trimTarget = null"
     />
-    <div v-if="deleteTarget" class="studio-modal-backdrop">
-      <section class="studio-card" role="dialog" aria-modal="true" aria-label="Confirm sample deletion">
-        <h2>Remove sample?</h2>
-        <p>This hides the sample but retains provenance and completed-run inputs.</p>
-        <button type="button" data-action="confirm-delete" class="studio-primary" @click="remove">Remove</button
-        ><button type="button" data-action="cancel-delete" @click="deleteTarget = null">Cancel</button>
-      </section>
-    </div>
+    <ConfirmDialog
+      :open="!!deleteTarget"
+      title="Remove sample?"
+      label="Confirm sample deletion"
+      confirm-label="Remove"
+      confirm-action="confirm-delete"
+      cancel-action="cancel-delete"
+      @confirm="remove"
+      @cancel="deleteTarget = null"
+    >
+      <p>This hides the sample but retains provenance and completed-run inputs.</p>
+    </ConfirmDialog>
   </section>
 </template>

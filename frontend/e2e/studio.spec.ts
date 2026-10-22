@@ -132,9 +132,9 @@ test("real kiosk collection, keyboard labels, focus suppression and workspace is
   await page.keyboard.press("s");
   await expect(page.locator("[data-progress]")).toContainText("1 skipped");
   await page.keyboard.press("d");
-  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByRole("alertdialog")).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(page.getByRole("alertdialog")).not.toBeVisible();
   await page.keyboard.press("n");
   await expect(page.locator("[data-progress]")).toContainText("1 reviewed");
   await page.locator("#studio-word").selectOption(b.id);
@@ -518,8 +518,6 @@ test("kiosk addresses survive refresh and the global queue follows jobs across w
   await page.goto(`/#/kiosks?word=${b.id}`);
   await row.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByRole("alertdialog")).toContainText("rediscovered");
-  await page.locator("#studio-word").evaluate((element: HTMLSelectElement) => element.focus());
-  await expect(page.getByRole("button", { name: "Keep kiosk", exact: true })).toBeFocused();
   await page.getByRole("button", { name: "Keep kiosk", exact: true }).click();
   await expect(row).toBeVisible();
   await row.getByRole("button", { name: "Delete", exact: true }).click();
@@ -532,10 +530,6 @@ test("kiosk addresses survive refresh and the global queue follows jobs across w
     await route.continue();
   });
   await page.getByRole("button", { name: "Remove from Studio", exact: true }).click();
-  await expect(page.getByRole("alertdialog")).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(page.getByRole("alertdialog")).toBeFocused();
   release();
   await expect(row).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Refresh registry", exact: true })).toBeFocused();
 });

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, type ComponentPublicInstance } from "vue";
+import ConfirmDialog from "./ConfirmDialog.vue";
+import { onBeforeUnmount, onMounted, ref, type ComponentPublicInstance } from "vue";
 import { useDeviceRegistry } from "../devices";
 import type { Device } from "../types";
 
@@ -16,9 +17,6 @@ const error = ref("");
 const editing = ref(""),
   editUrl = ref("");
 const deleting = ref<Device | null>(null);
-const confirmation = ref<HTMLDialogElement>();
-const registryElement = ref<HTMLElement>();
-let deleteTrigger: HTMLElement | null = null;
 function edit(device: Device): void {
   editing.value = device.id;
   editUrl.value = device.url;
@@ -37,45 +35,16 @@ async function saveAddress(device: Device): Promise<void> {
     busy.value = "";
   }
 }
-async function confirmDelete(device: Device, event: Event): Promise<void> {
-  deleteTrigger = event.currentTarget as HTMLElement;
+function confirmDelete(device: Device): void {
   deleting.value = device;
-  await nextTick();
-  // Native modal dialogs isolate the entire app, including assistive technology.
-  if (typeof confirmation.value?.showModal === "function") confirmation.value.showModal();
-  else confirmation.value?.setAttribute("open", "");
-  confirmation.value?.querySelector<HTMLButtonElement>("button")?.focus();
 }
-async function closeDelete(): Promise<void> {
+function closeDelete(): void {
   deleting.value = null;
-  await nextTick();
-  if (deleteTrigger?.isConnected) deleteTrigger.focus();
-  else registryElement.value?.querySelector<HTMLButtonElement>('[data-action="refresh-registry"]')?.focus();
-}
-function containFocus(event: KeyboardEvent): void {
-  if (event.key !== "Tab") return;
-  const controls = confirmation.value?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)");
-  if (!controls?.length) {
-    event.preventDefault();
-    confirmation.value?.focus();
-    return;
-  }
-  const first = controls?.[0],
-    last = controls?.[controls.length - 1];
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault();
-    last?.focus();
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first?.focus();
-  }
 }
 async function remove(): Promise<void> {
   if (!deleting.value || busy.value) return;
   busy.value = `delete:${deleting.value.id}`;
   error.value = "";
-  await nextTick();
-  confirmation.value?.focus();
   try {
     await registry.remove(deleting.value.id);
     closeDelete();
@@ -155,8 +124,8 @@ onBeforeUnmount(() => registry.abort());
 </script>
 
 <template>
-  <section ref="registryElement" class="studio-card" data-device-registry>
-    <div data-device-registry-content :inert="deleting ? true : undefined">
+  <section class="studio-card" data-device-registry>
+    <div>
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2>Fleet setup</h2>
@@ -264,12 +233,7 @@ onBeforeUnmount(() => registry.abort());
           </div>
           <div class="flex gap-2">
             <button type="button" data-action="edit-device" :disabled="!!busy" @click="edit(device)">Edit</button
-            ><button
-              type="button"
-              data-action="delete-device"
-              :disabled="!!busy"
-              @click="confirmDelete(device, $event)"
-            >
+            ><button type="button" data-action="delete-device" :disabled="!!busy" @click="confirmDelete(device)">
               Delete
             </button>
           </div>
@@ -294,31 +258,22 @@ onBeforeUnmount(() => registry.abort());
         <p v-if="!registry.devices.value.length" class="studio-muted">No kiosks registered yet.</p>
       </div>
     </div>
-    <dialog
-      v-if="deleting"
-      ref="confirmation"
-      tabindex="-1"
-      role="alertdialog"
-      aria-modal="true"
-      aria-label="Remove kiosk from Studio?"
-      class="studio-card studio-device-dialog"
-      @cancel.prevent="!busy && closeDelete()"
-      @keydown.esc="!busy && closeDelete()"
-      @keydown="containFocus"
-      @click.self="!busy && closeDelete()"
+    <ConfirmDialog
+      :open="!!deleting"
+      :title="`Remove ${deleting ? registry.deviceLabel(deleting.id) : 'kiosk'} from Studio?`"
+      label="Remove kiosk from Studio?"
+      confirm-label="Remove from Studio"
+      cancel-label="Keep kiosk"
+      :busy="!!busy"
+      confirm-action="confirm-device-delete"
+      cancel-action="cancel-device-delete"
+      @confirm="remove"
+      @cancel="closeDelete"
     >
-      <h2>Remove {{ registry.deviceLabel(deleting.id) }} from Studio?</h2>
-      <p v-if="deleting.role === 'leader'">This also removes its discovered followers from the Studio registry.</p>
-      <p v-else-if="deleting.role === 'follower'">This follower can be rediscovered on the next fleet refresh.</p>
+      <p v-if="deleting?.role === 'leader'">This also removes its discovered followers from the Studio registry.</p>
+      <p v-else-if="deleting?.role === 'follower'">This follower can be rediscovered on the next fleet refresh.</p>
       <p>Saved recordings and models are kept. This does not change the kiosk itself.</p>
       <p v-if="error" role="alert" class="studio-note">{{ error }}</p>
-      <div class="flex gap-2">
-        <button data-action="cancel-device-delete" type="button" :disabled="!!busy" @click="closeDelete">
-          Keep kiosk</button
-        ><button data-action="confirm-device-delete" type="button" :disabled="!!busy" @click="remove">
-          Remove from Studio
-        </button>
-      </div>
-    </dialog>
+    </ConfirmDialog>
   </section>
 </template>

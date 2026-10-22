@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ConfirmDialog from "../components/ConfirmDialog.vue";
+import PageHeader from "../components/PageHeader.vue";
 import { absoluteTime } from "../time";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { StudioApiError, studioApi } from "../api";
@@ -427,10 +429,10 @@ onBeforeUnmount(() => {
 
 <template>
   <section>
-    <div class="mb-4">
-      <h1>Artificial</h1>
-      <p class="studio-muted">Generate wakeword audio, then choose which datasets to use for training.</p>
-    </div>
+    <PageHeader
+      title="Artificial"
+      description="Generate wakeword audio, then choose which datasets to use for training."
+    />
     <div class="studio-card">
       <h2>Generate data</h2>
       <p data-generation-phrase class="studio-muted">
@@ -576,7 +578,7 @@ onBeforeUnmount(() => {
           {{ saving ? "Starting…" : generationBusy ? "Generating…" : "Generate dataset" }}
         </button>
       </form>
-      <p v-if="error" class="studio-note mt-3" role="alert">{{ error }}</p>
+      <p v-if="error && !deleting" class="studio-note mt-3" role="alert">{{ error }}</p>
       <button v-if="job" type="button" class="mt-3" @click="queue.show(job.id)">View generation in queue</button>
     </div>
     <div class="studio-card mt-4">
@@ -632,31 +634,29 @@ onBeforeUnmount(() => {
         <p v-if="batch.recipe.moss_source_batch_ids?.length" class="studio-muted text-xs">
           MOSS sources: {{ batch.recipe.moss_source_batch_ids.map(sourceName).join(", ") }}
         </p>
-        <section
-          v-if="deleting?.id === batch.id"
-          role="alertdialog"
-          aria-label="Delete generated dataset?"
-          class="studio-note mt-3"
-          @keydown.esc="!saving && (deleting = null)"
-        >
-          <h3>Delete {{ batch.phrase }} dataset permanently?</h3>
-          <p>
-            This removes the generated dataset and its training selection. Historical training inputs and shared audio
-            are kept.
-          </p>
-          <div class="flex gap-2 mt-3">
-            <button type="button" data-action="cancel-batch-delete" :disabled="saving" @click="deleting = null">
-              Cancel</button
-            ><button type="button" data-action="confirm-batch-delete" :disabled="saving" @click="deleteBatch">
-              {{ saving ? "Deleting…" : "Delete permanently" }}
-            </button>
-          </div>
-        </section>
       </article>
       <p v-if="!loading && !batches.length" class="studio-muted mt-3">
         No generated datasets yet. Choose models above to create one.
       </p>
       <PaginatedTable :total="total" :offset="offset" :limit="50" :loading="loading" @page="offset = $event" />
     </div>
+    <ConfirmDialog
+      :open="!!deleting"
+      :title="`Delete ${deleting?.phrase ?? ''} dataset permanently?`"
+      label="Delete generated dataset?"
+      confirm-label="Delete permanently"
+      busy-label="Deleting…"
+      :busy="saving"
+      confirm-action="confirm-batch-delete"
+      cancel-action="cancel-batch-delete"
+      @confirm="deleteBatch"
+      @cancel="deleting = null"
+    >
+      <p>
+        This removes the generated dataset and its training selection. Historical training inputs and shared audio are
+        kept.
+      </p>
+      <p v-if="error" class="studio-note" role="alert">{{ error }}</p>
+    </ConfirmDialog>
   </section>
 </template>

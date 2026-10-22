@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from "../components/PageHeader.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { studioApi } from "../api";
 import { useWorkspace } from "../workspace";
@@ -253,12 +254,10 @@ onBeforeUnmount(() => {
 
 <template>
   <section>
-    <div class="mb-4">
-      <h1>Train</h1>
-      <p class="studio-muted">
-        Configure inputs and start a manual training run. Progress and logs are available in the global job queue.
-      </p>
-    </div>
+    <PageHeader
+      title="Train"
+      description="Configure inputs and start a manual training run. Progress and logs are available in the global job queue."
+    />
     <div class="studio-card">
       <h2>Effective inputs for the next snapshot</h2>
       <p v-if="loading" class="studio-muted">Loading effective inputs…</p>

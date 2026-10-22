@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from "../components/PageHeader.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { readModelMetrics, studioApi } from "../api";
 import { useDeviceRegistry } from "../devices";
@@ -127,20 +128,16 @@ onBeforeUnmount(() => {
 
 <template>
   <section>
-    <div class="mb-4">
-      <h1>Deploy</h1>
-      <p class="studio-muted">
-        Archives are immutable dated training outputs. Publication makes files available; it never changes engines,
-        enabled slots, thresholds, or wakeword selections.
-      </p>
-    </div>
-    <p v-if="notice" class="studio-note" role="status">{{ notice }}</p>
-    <p v-if="error" class="studio-note" role="alert">{{ error }}</p>
-    <p class="mb-4">
+    <PageHeader
+      title="Deploy"
+      description="Archives are immutable dated training outputs. Publication makes files available; it never changes engines, enabled slots, thresholds, or wakeword selections."
+    >
       <a :href="workspace.routes.href('kiosks')" @click.prevent="workspace.routes.navigate('kiosks')"
         >Manage kiosks →</a
       >
-    </p>
+    </PageHeader>
+    <p v-if="notice" class="studio-note" role="status">{{ notice }}</p>
+    <p v-if="error" class="studio-note" role="alert">{{ error }}</p>
     <section class="studio-card mb-4">
       <h2>Archived model versions</h2>
       <p v-if="loading" class="studio-muted">Loading archives…</p>

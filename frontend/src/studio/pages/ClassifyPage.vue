@@ -10,6 +10,8 @@ const undoStack = (word: string) => {
 </script>
 
 <script setup lang="ts">
+import ConfirmDialog from "../components/ConfirmDialog.vue";
+import PageHeader from "../components/PageHeader.vue";
 import { absoluteTime } from "../time";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { StudioApiError, studioApi } from "../api";
@@ -459,25 +461,19 @@ onBeforeUnmount(() => {
 
 <template>
   <section>
-    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-      <div>
-        <h1>Classify</h1>
-        <p class="studio-muted">Collect recordings, resolve source mappings, and review labels.</p>
-      </div>
-      <div class="flex flex-wrap items-center gap-3">
-        <span data-progress class="studio-muted"
-          >{{ total }} pending · {{ reviewed }} reviewed · {{ skipped.size }} skipped</span
-        ><button
-          data-action="collect-now"
-          class="studio-primary"
-          :aria-busy="collectionBusy"
-          :disabled="!workspace.selectedId.value || collectionBusy"
-          @click="collectNow"
-        >
-          {{ collecting ? "Starting…" : collectionBusy ? "Collecting…" : "Collect" }}
-        </button>
-      </div>
-    </div>
+    <PageHeader title="Classify" description="Collect recordings, resolve source mappings, and review labels.">
+      <span data-progress class="studio-muted"
+        >{{ total }} pending · {{ reviewed }} reviewed · {{ skipped.size }} skipped</span
+      ><button
+        data-action="collect-now"
+        class="studio-primary"
+        :aria-busy="collectionBusy"
+        :disabled="!workspace.selectedId.value || collectionBusy"
+        @click="collectNow"
+      >
+        {{ collecting ? "Starting…" : collectionBusy ? "Collecting…" : "Collect" }}
+      </button>
+    </PageHeader>
     <div class="studio-tabs" role="tablist" aria-label="Classification sections">
       <button
         v-for="entry in ['review', 'collect', 'unmapped'] as const"
@@ -601,25 +597,21 @@ onBeforeUnmount(() => {
         @changed="notice = 'Source mapping saved for future collections.'"
       />
     </div>
-    <div v-if="discardOpen" class="studio-modal-backdrop">
-      <section data-dialog="discard" class="studio-card" role="dialog" aria-modal="true" aria-label="Confirm discard">
-        <h2>Discard this recording?</h2>
-        <p>Discarding preserves its source tombstone so future collection does not reintroduce it.</p>
-        <div class="flex gap-2">
-          <button
-            type="button"
-            data-action="confirm-discard"
-            class="studio-primary"
-            :disabled="saving"
-            @click="
-              discardOpen = false;
-              label('discarded');
-            "
-          >
-            Discard recording</button
-          ><button type="button" @click="discardOpen = false">Cancel</button>
-        </div>
-      </section>
-    </div>
+    <ConfirmDialog
+      :open="discardOpen"
+      data-dialog="discard"
+      title="Discard this recording?"
+      label="Confirm discard"
+      confirm-label="Discard recording"
+      confirm-action="confirm-discard"
+      :busy="saving"
+      @confirm="
+        discardOpen = false;
+        label('discarded');
+      "
+      @cancel="discardOpen = false"
+    >
+      <p>Discarding preserves its source tombstone so future collection does not reintroduce it.</p>
+    </ConfirmDialog>
   </section>
 </template>

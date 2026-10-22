@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from "../components/PageHeader.vue";
 import { absoluteTime } from "../time";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { studioApi } from "../api";
@@ -153,12 +154,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="testing-page">
-    <h1>Testing</h1>
-    <p class="studio-muted testing-intro">
-      Test a trained wakeword using your microphone. Inference runs in this browser; audio is never uploaded or saved.
-    </p>
-    <div class="studio-card testing-card">
+  <section>
+    <PageHeader
+      title="Testing"
+      description="Test a trained wakeword using your microphone. Inference runs in this browser; audio is never uploaded or saved."
+    />
+    <div class="studio-card">
       <h2>Wake Word Tester</h2>
       <p class="studio-muted">
         Speak your wakeword from your usual distance and watch the detection probability in real time.
@@ -256,15 +257,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.testing-page {
-  max-width: 960px;
-}
-.testing-intro {
-  margin: 0 0 24px;
-}
-.testing-card {
-  padding: 24px;
-}
 .testing-controls {
   margin: 24px 0;
 }
@@ -337,9 +329,6 @@ onBeforeUnmount(() => {
   text-align: left;
 }
 @media (max-width: 650px) {
-  .testing-card {
-    padding: 16px;
-  }
   .testing-controls {
     align-items: stretch;
   }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from "../components/PageHeader.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { studioApi } from "../api";
 import { useWorkspace } from "../workspace";
@@ -184,13 +185,10 @@ onBeforeUnmount(() => {
 
 <template>
   <section>
-    <div class="mb-4">
-      <h1>Downloaded</h1>
-      <p class="studio-muted">
-        Download shared training resources. Choose negative, evaluation, and augmentation datasets per wakeword; all are
-        enabled by default.
-      </p>
-    </div>
+    <PageHeader
+      title="Downloaded"
+      description="Download shared training resources. Choose negative, evaluation, and augmentation datasets per wakeword; all are enabled by default."
+    />
     <p
       v-if="
         storage && storage.storage_total_bytes > 0 && storage.storage_free_bytes / storage.storage_total_bytes < 0.1
