@@ -52,30 +52,18 @@ EXPOSE 8789
 # Script root
 WORKDIR /root/mww-scripts
 
-# Bash environment
-COPY --chown=root:root --chmod=0755 .bashrc /root/
+# Bash environment for interactive shells
+COPY --chmod=0644 .bashrc /root/
 
-# Root-level entrypoints
-COPY --chown=root:root --chmod=0755 \
-    run.sh \
-    trainer_server.py \
-    requirements.txt \
-    /root/mww-scripts/
-
-COPY --chown=root:root --chmod=0644 tts_config.py /root/mww-scripts/tts_config.py
-
-# Studio package and migration resources
-COPY --chown=root:root studio/ /root/mww-scripts/studio/
-
-# CLI folder
-COPY --chown=root:root cli/ /root/mww-scripts/cli/
-
-# Make all CLI scripts executable (avoids "Permission denied")
-RUN chmod -R a+x /root/mww-scripts/cli
+# Server, Studio package (with its schema and catalog files), and CLI tools
+COPY --chmod=0755 run.sh /root/mww-scripts/
+COPY --chmod=0644 trainer_server.py requirements.txt tts_config.py /root/mww-scripts/
+COPY studio/ /root/mww-scripts/studio/
+COPY --chmod=0755 cli/ /root/mww-scripts/cli/
 
 # Static shell plus the UI bundle built in the ui stage
-COPY --chown=root:root static/ /root/mww-scripts/static/
-COPY --from=ui --chown=root:root /src/static/ui/ /root/mww-scripts/static/ui/
+COPY static/ /root/mww-scripts/static/
+COPY --from=ui /src/static/ui/ /root/mww-scripts/static/ui/
 
 # trainer server
 CMD ["/bin/bash", "-lc", "/root/mww-scripts/run.sh"]

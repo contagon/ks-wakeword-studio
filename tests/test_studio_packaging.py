@@ -28,12 +28,11 @@ class StudioPackagingTests(unittest.TestCase):
                 copies.append([word for word in words[1:] if not word.startswith("--")])
         self.assertIn(["studio/", "/root/mww-scripts/studio/"], copies,
                       f"{filename} must copy the complete studio directory, including schema.sql")
-        self.assertIn(['tts_config.py', '/root/mww-scripts/tts_config.py'], copies)
+
         self.assertIn(['cli/', '/root/mww-scripts/cli/'], copies)
         self.assertIn(['static/', '/root/mww-scripts/static/'], copies)
-        entrypoints = next(row[:-1] for row in copies if 'trainer_server.py' in row)
-        self.assertTrue({'run.sh', 'trainer_server.py',
-                         'requirements.txt'}.issubset(entrypoints))
+        root_files = {name for row in copies if row[-1] == '/root/mww-scripts/' for name in row[:-1]}
+        self.assertTrue({'run.sh', 'trainer_server.py', 'requirements.txt', 'tts_config.py'}.issubset(root_files))
         self.assertIn('EXPOSE 8789', manifest)
         # Node builds the UI in its own stage; the runtime image never installs it.
         ui_stage, runtime_stage = manifest.split('\nFROM ', 2)[1:]

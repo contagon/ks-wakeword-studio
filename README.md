@@ -48,7 +48,7 @@ docker pull ghcr.io/tatertotterson/microwakeword:latest
 Tagged releases also publish matching immutable image tags:
 
 ```bash
-docker pull ghcr.io/tatertotterson/microwakeword:v17
+docker pull ghcr.io/tatertotterson/microwakeword:v36
 ```
 
 The release tag must match `VERSION`. Update `WHATS_NEW.md` before tagging; the Docker workflow prepends it to GitHub's automatically generated release notes.
@@ -58,7 +58,7 @@ Python 3.13 TensorFlow build for `sm_120`:
 
 ```bash
 docker pull ghcr.io/tatertotterson/microwakeword:blackwell
-docker pull ghcr.io/tatertotterson/microwakeword:v17-blackwell
+docker pull ghcr.io/tatertotterson/microwakeword:v36-blackwell
 ```
 
 Use the Blackwell image only for RTX 50-series cards. It includes the
@@ -114,9 +114,9 @@ docker run -d \
   ghcr.io/tatertotterson/microwakeword:latest
 ```
 
-Use a version tag such as `ghcr.io/tatertotterson/microwakeword:v17` when you want to pin a known release instead of tracking `latest`.
+Use a version tag such as `ghcr.io/tatertotterson/microwakeword:v36` when you want to pin a known release instead of tracking `latest`.
 For RTX 50-series cards, use `ghcr.io/tatertotterson/microwakeword:blackwell`
-or a pinned tag such as `ghcr.io/tatertotterson/microwakeword:v17-blackwell`
+or a pinned tag such as `ghcr.io/tatertotterson/microwakeword:v36-blackwell`
 in the same `docker run` command.
 
 The flags:
