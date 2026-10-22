@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import PageHeader from "../components/PageHeader.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { studioApi } from "../api";
+import { fetchAll, studioApi } from "../api";
+import { latestRequest } from "../requests";
 import { useWorkspace } from "../workspace";
 import type { Dataset, Job, Page, TrainingCounts, TrainingSettings } from "../types";
 import { isActiveJob, useJobQueue, statusClass } from "../jobs";
@@ -41,9 +42,7 @@ async function loadPrerequisites(): Promise<void> {
     if (!controller.signal.aborted) prerequisitesLoading.value = false;
   }
 }
-const datasetsHref = computed(
-  () => `#/online-datasets${activeId.value ? "?word=" + encodeURIComponent(activeId.value) : ""}`,
-);
+const datasetsHref = computed(() => workspace.routes.href("online-datasets"));
 const blockedReason = computed(() => {
   if (prerequisitesLoading.value || loading.value) return "";
   if (prerequisiteError.value) return prerequisiteError.value;
@@ -65,16 +64,11 @@ const saving = ref(false);
 const starting = ref(false);
 const error = ref("");
 const started = ref<Job | null>(null);
-let loadRequest: AbortController | undefined;
-let saveRequest: AbortController | undefined;
-let startRequest: AbortController | undefined;
-let loadGeneration = 0;
-let saveGeneration = 0;
-let startGeneration = 0;
+const loadRequest = latestRequest();
+const saveRequest = latestRequest();
+const startRequest = latestRequest();
 const activeId = computed(() => workspace.selectedId.value);
-const trainingBusy = computed(
-  () => starting.value || queue.activeJobs.value.some((job) => job.kind === "train" && job.word_id === activeId.value),
-);
+const trainingBusy = computed(() => starting.value || queue.busy("train", activeId.value));
 const negativeDatasetCount = computed(
   () => selectedDatasets.value.filter((dataset) => dataset.selected && dataset.split !== "evaluation").length,
 );
@@ -84,40 +78,18 @@ const evaluationDatasetCount = computed(
 const missingDatasets = computed(() =>
   selectedDatasets.value.filter((dataset) => dataset.selected && dataset.status !== "installed"),
 );
-function loadCurrent(id: string, token: number, controller: AbortController): boolean {
-  return activeId.value === id && loadGeneration === token && !controller.signal.aborted;
-}
-function saveCurrent(id: string, token: number, controller: AbortController): boolean {
-  return activeId.value === id && saveGeneration === token && !controller.signal.aborted;
-}
-function startCurrent(id: string, token: number, controller: AbortController): boolean {
-  return activeId.value === id && startGeneration === token && !controller.signal.aborted;
-}
 function abortWorkspaceMutations(): void {
-  saveRequest?.abort();
-  startRequest?.abort();
-  saveRequest = undefined;
-  startRequest = undefined;
-  saveGeneration += 1;
-  startGeneration += 1;
+  saveRequest.abort();
+  startRequest.abort();
   saving.value = false;
   starting.value = false;
   started.value = null;
 }
-async function allSelectedDatasets(id: string, controller: AbortController): Promise<Dataset[]> {
-  const items: Dataset[] = [];
-  let offset = 0;
-  while (!controller.signal.aborted) {
-    const page: Page<Dataset> = await studioApi.datasets(
-      id,
-      { status: "selected", offset, limit: 100 },
-      controller.signal,
-    );
-    items.push(...page.items);
-    offset += page.items.length;
-    if (offset >= page.total || page.items.length === 0) break;
-  }
-  return items;
+function allSelectedDatasets(id: string, controller: AbortController): Promise<Dataset[]> {
+  return fetchAll(
+    (window) => studioApi.datasets(id, { status: "selected", ...window }, controller.signal),
+    controller.signal,
+  );
 }
 function reconcileRuns(items: Job[]): Job[] {
   return items.map((run) => {
@@ -128,11 +100,9 @@ function reconcileRuns(items: Job[]): Job[] {
   });
 }
 async function load(): Promise<void> {
-  loadRequest?.abort();
-  const controller = new AbortController();
-  loadRequest = controller;
-  const token = ++loadGeneration;
+  const controller = loadRequest.next();
   const id = activeId.value;
+  const current = () => activeId.value === id && loadRequest.isCurrent(controller);
   counts.value = null;
   runs.value = [];
   selectedDatasets.value = [];
@@ -147,16 +117,15 @@ async function load(): Promise<void> {
       studioApi.trainingRuns(id, { limit: 50 }, controller.signal),
       allSelectedDatasets(id, controller),
     ]);
-    if (!loadCurrent(id, token, controller)) return;
+    if (!current()) return;
     counts.value = nextCounts;
     settings.value = nextSettings;
     runs.value = reconcileRuns(nextRuns.items);
     selectedDatasets.value = nextDatasets;
   } catch (cause) {
-    if (loadCurrent(id, token, controller))
-      error.value = cause instanceof Error ? cause.message : "Unable to load training configuration.";
+    if (current()) error.value = cause instanceof Error ? cause.message : "Unable to load training configuration.";
   } finally {
-    if (loadCurrent(id, token, controller)) loading.value = false;
+    if (current()) loading.value = false;
   }
 }
 function valid(): boolean {
@@ -173,44 +142,38 @@ function valid(): boolean {
 async function save(): Promise<void> {
   const id = activeId.value;
   if (!id || !valid()) return;
-  saveRequest?.abort();
-  const controller = new AbortController();
-  saveRequest = controller;
-  const token = ++saveGeneration;
+  const controller = saveRequest.next();
+  const current = () => activeId.value === id && saveRequest.isCurrent(controller);
   const settingsToSave = { training_steps: settings.value.training_steps };
   saving.value = true;
   error.value = "";
   try {
     const saved = await studioApi.saveTrainingSettings(id, settingsToSave, controller.signal);
-    if (saveCurrent(id, token, controller)) settings.value = saved;
+    if (current()) settings.value = saved;
   } catch (cause) {
-    if (saveCurrent(id, token, controller))
-      error.value = cause instanceof Error ? cause.message : "Training settings were not saved.";
+    if (current()) error.value = cause instanceof Error ? cause.message : "Training settings were not saved.";
   } finally {
-    if (saveCurrent(id, token, controller)) saving.value = false;
+    if (current()) saving.value = false;
   }
 }
 async function start(): Promise<void> {
   const id = activeId.value;
   if (!id || trainingBusy.value || !augmentation.value?.ready || prerequisitesLoading.value) return;
-  startRequest?.abort();
-  const controller = new AbortController();
-  startRequest = controller;
-  const token = ++startGeneration;
+  const controller = startRequest.next();
+  const current = () => activeId.value === id && startRequest.isCurrent(controller);
   starting.value = true;
   error.value = "";
   try {
     const nextJob = await studioApi.train(id, controller.signal);
-    if (startCurrent(id, token, controller)) {
+    if (current()) {
       started.value = nextJob;
       runs.value = [nextJob, ...runs.value.filter((run) => run.id !== nextJob.id)];
       queue.track(nextJob);
     }
   } catch (cause) {
-    if (startCurrent(id, token, controller))
-      error.value = cause instanceof Error ? cause.message : "Training job was not started.";
+    if (current()) error.value = cause instanceof Error ? cause.message : "Training job was not started.";
   } finally {
-    if (startCurrent(id, token, controller)) starting.value = false;
+    if (current()) starting.value = false;
   }
 }
 function skipped(run: Job): boolean {
@@ -223,15 +186,9 @@ watch(
   },
   { deep: true },
 );
-watch(
-  () =>
-    Object.values(queue.jobs.value)
-      .filter((job) => job.kind === "download" && job.payload.augmentation_id)
-      .map((job) => ({ id: job.id, active: isActiveJob(job) })),
-  (next, previous) => {
-    if (next.some((job) => !job.active && previous.some((old) => old.id === job.id && old.active)))
-      void loadPrerequisites();
-  },
+queue.onFinished(
+  (job) => job.kind === "download" && !!job.payload.augmentation_id,
+  () => void loadPrerequisites(),
 );
 onBeforeUnmount(() => {
   prerequisiteRequest?.abort();
@@ -245,11 +202,6 @@ watch(
   },
   { immediate: true },
 );
-onBeforeUnmount(() => {
-  loadRequest?.abort();
-  saveRequest?.abort();
-  startRequest?.abort();
-});
 </script>
 
 <template>

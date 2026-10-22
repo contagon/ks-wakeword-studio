@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch, type Component } from "vue";
 import { pages, useStudioRoutes, type PageId } from "../routes";
 import { createWorkspace, workspaceKey } from "../workspace";
 import WakewordsPage from "../pages/WakewordsPage.vue";
@@ -13,6 +13,20 @@ import NegativeDatasetsPage from "../pages/NegativeDatasetsPage.vue";
 import ArtificialPage from "../pages/ArtificialPage.vue";
 import TrainPage from "../pages/TrainPage.vue";
 import TestingPage from "../pages/TestingPage.vue";
+
+const PAGES: Record<PageId, Component> = {
+  wakewords: WakewordsPage,
+  kiosks: KiosksPage,
+  "online-datasets": NegativeDatasetsPage,
+  artificial: ArtificialPage,
+  manual: RecordPage,
+  classify: ClassifyPage,
+  samples: SamplesPage,
+  train: TrainPage,
+  deploy: DeployPage,
+  automate: AutomatePage,
+  testing: TestingPage,
+};
 import ThemeToggle from "./ThemeToggle.vue";
 import { createJobQueue, jobQueueKey } from "../jobs";
 import JobQueueDrawer from "./JobQueueDrawer.vue";
@@ -141,17 +155,7 @@ onBeforeUnmount(() => {
           <p v-if="notice" role="status" class="studio-note">{{ notice }}</p>
           <div v-if="error" class="studio-note" role="alert">{{ error }}</div>
           <p v-if="loading" role="status">Loading workspaces…</p>
-          <WakewordsPage v-if="current.id === 'wakewords'" />
-          <ClassifyPage v-else-if="current.id === 'classify'" />
-          <SamplesPage v-else-if="current.id === 'samples'" />
-          <RecordPage v-else-if="current.id === 'manual'" />
-          <KiosksPage v-else-if="current.id === 'kiosks'" />
-          <AutomatePage v-else-if="current.id === 'automate'" />
-          <DeployPage v-else-if="current.id === 'deploy'" />
-          <NegativeDatasetsPage v-else-if="current.id === 'online-datasets'" />
-          <ArtificialPage v-else-if="current.id === 'artificial'" />
-          <TrainPage v-else-if="current.id === 'train'" />
-          <TestingPage v-else-if="current.id === 'testing'" />
+          <component :is="PAGES[current.id]" />
         </main>
       </div>
     </div>

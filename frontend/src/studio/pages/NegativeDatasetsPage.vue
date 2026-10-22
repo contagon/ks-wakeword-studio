@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import PageHeader from "../components/PageHeader.vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { studioApi } from "../api";
+import { fetchAll, studioApi } from "../api";
+import { latestRequest } from "../requests";
 import { useWorkspace } from "../workspace";
 import type { AugmentationCatalog, Dataset, Page } from "../types";
 import { datasetBytes, datasetSamples } from "../format";
 import PaginatedTable from "../components/PaginatedTable.vue";
-import { isActiveJob, useJobQueue, statusClass } from "../jobs";
+import { isActiveStatus, useJobQueue, statusClass } from "../jobs";
 import AugmentationDatasets from "../components/AugmentationDatasets.vue";
 
 const workspace = useWorkspace();
@@ -21,29 +22,14 @@ const saving = ref(false);
 const downloading = ref(new Set<string>());
 const error = ref("");
 const downloadRequests = new Map<string, AbortController>();
-let loadRequest: AbortController | undefined;
-let saveRequest: AbortController | undefined;
-let loadGeneration = 0;
-let saveGeneration = 0;
-let downloadGeneration = 0;
+const loadRequest = latestRequest();
+const saveRequest = latestRequest();
 const activeId = computed(() => workspace.selectedId.value);
 const selectedIds = computed(() => [...selected.value].sort());
-function loadCurrent(id: string, token: number, controller: AbortController): boolean {
-  return activeId.value === id && loadGeneration === token && !controller.signal.aborted;
-}
-function saveCurrent(id: string, token: number, controller: AbortController): boolean {
-  return activeId.value === id && saveGeneration === token && !controller.signal.aborted;
-}
-function downloadCurrent(id: string, token: number, controller: AbortController): boolean {
-  return activeId.value === id && downloadGeneration === token && !controller.signal.aborted;
-}
 function abortWorkspaceMutations(): void {
-  saveRequest?.abort();
+  saveRequest.abort();
   downloadRequests.forEach((controller) => controller.abort());
   downloadRequests.clear();
-  saveRequest = undefined;
-  saveGeneration += 1;
-  downloadGeneration += 1;
   saving.value = false;
   downloading.value = new Set();
 }
@@ -58,29 +44,18 @@ function datasetState(dataset: Dataset): string {
   return job?.status === "complete" ? "installed" : (job?.status ?? dataset.status);
 }
 function downloadBusy(dataset: Dataset): boolean {
-  return downloading.value.has(dataset.id) || ["queued", "running", "cancelling"].includes(datasetState(dataset));
+  return downloading.value.has(dataset.id) || isActiveStatus(datasetState(dataset));
 }
-async function selectedDatasets(id: string, controller: AbortController): Promise<Dataset[]> {
-  const items: Dataset[] = [];
-  let selectedOffset = 0;
-  while (!controller.signal.aborted) {
-    const page: Page<Dataset> = await studioApi.datasets(
-      id,
-      { status: "selected", offset: selectedOffset, limit: 100 },
-      controller.signal,
-    );
-    items.push(...page.items);
-    selectedOffset += page.items.length;
-    if (selectedOffset >= page.total || page.items.length === 0) break;
-  }
-  return items;
+function selectedDatasets(id: string, controller: AbortController): Promise<Dataset[]> {
+  return fetchAll(
+    (window) => studioApi.datasets(id, { status: "selected", ...window }, controller.signal),
+    controller.signal,
+  );
 }
 async function load(preserveSelection = false): Promise<void> {
-  loadRequest?.abort();
-  const controller = new AbortController();
-  loadRequest = controller;
-  const token = ++loadGeneration;
+  const controller = loadRequest.next();
   const id = activeId.value;
+  const current = () => activeId.value === id && loadRequest.isCurrent(controller);
   rows.value = [];
   total.value = 0;
   if (!preserveSelection) selected.value = new Set();
@@ -93,15 +68,14 @@ async function load(preserveSelection = false): Promise<void> {
       studioApi.datasets(id, filters, controller.signal),
       selectedDatasets(id, controller),
     ]);
-    if (!loadCurrent(id, token, controller)) return;
+    if (!current()) return;
     rows.value = page.items;
     total.value = page.total;
     if (!preserveSelection) selected.value = new Set(selectedRows.map((item) => item.id));
   } catch (cause) {
-    if (loadCurrent(id, token, controller))
-      error.value = cause instanceof Error ? cause.message : "Unable to load datasets.";
+    if (current()) error.value = cause instanceof Error ? cause.message : "Unable to load datasets.";
   } finally {
-    if (loadCurrent(id, token, controller)) loading.value = false;
+    if (current()) loading.value = false;
   }
 }
 function toggle(id: string, checked: boolean): void {
@@ -112,21 +86,18 @@ function toggle(id: string, checked: boolean): void {
 async function save(): Promise<void> {
   const id = activeId.value;
   if (!id) return;
-  saveRequest?.abort();
-  const controller = new AbortController();
-  saveRequest = controller;
-  const token = ++saveGeneration;
+  const controller = saveRequest.next();
+  const current = () => activeId.value === id && saveRequest.isCurrent(controller);
   const ids = selectedIds.value;
   saving.value = true;
   error.value = "";
   try {
     await studioApi.selectDatasets(id, ids, controller.signal);
-    if (saveCurrent(id, token, controller)) await load();
+    if (current()) await load();
   } catch (cause) {
-    if (saveCurrent(id, token, controller))
-      error.value = cause instanceof Error ? cause.message : "Dataset selection was not saved.";
+    if (current()) error.value = cause instanceof Error ? cause.message : "Dataset selection was not saved.";
   } finally {
-    if (saveCurrent(id, token, controller)) saving.value = false;
+    if (current()) saving.value = false;
   }
 }
 async function download(dataset: Dataset): Promise<void> {
@@ -134,22 +105,22 @@ async function download(dataset: Dataset): Promise<void> {
   if (!id || downloadBusy(dataset)) return;
   const controller = new AbortController();
   downloadRequests.set(dataset.id, controller);
-  const token = downloadGeneration;
+  // Switching workspace aborts every download request, so an aborted signal means "stale".
+  const current = () => activeId.value === id && !controller.signal.aborted;
   downloading.value = new Set([...downloading.value, dataset.id]);
   error.value = "";
   try {
     const job = await studioApi.downloadDataset(dataset.id, controller.signal);
-    if (downloadCurrent(id, token, controller)) {
+    if (current()) {
       queue.track(job);
       rows.value = rows.value.map((row) =>
         row.id === dataset.id ? { ...row, status: job.status, job_id: job.id } : row,
       );
     }
   } catch (cause) {
-    if (downloadCurrent(id, token, controller))
-      error.value = cause instanceof Error ? cause.message : "Dataset download was not started.";
+    if (current()) error.value = cause instanceof Error ? cause.message : "Dataset download was not started.";
   } finally {
-    if (downloadCurrent(id, token, controller)) {
+    if (current()) {
       downloadRequests.delete(dataset.id);
       const next = new Set(downloading.value);
       next.delete(dataset.id);
@@ -157,14 +128,9 @@ async function download(dataset: Dataset): Promise<void> {
     }
   }
 }
-watch(
-  () =>
-    Object.values(queue.jobs.value)
-      .filter((job) => job.kind === "download")
-      .map((job) => ({ id: job.id, active: isActiveJob(job) })),
-  (next, previous) => {
-    if (next.some((job) => !job.active && previous.some((old) => old.id === job.id && old.active))) void load(true);
-  },
+queue.onFinished(
+  (job) => job.kind === "download",
+  () => void load(true),
 );
 watch(
   activeId,
@@ -177,10 +143,7 @@ watch(
 watch(offset, () => {
   void load();
 });
-onBeforeUnmount(() => {
-  loadRequest?.abort();
-  abortWorkspaceMutations();
-});
+onBeforeUnmount(abortWorkspaceMutations);
 </script>
 
 <template>

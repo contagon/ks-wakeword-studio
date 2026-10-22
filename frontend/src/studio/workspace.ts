@@ -1,5 +1,5 @@
 import { inject, onScopeDispose, ref, shallowRef, watch, type InjectionKey } from "vue";
-import { studioApi, StudioApiError } from "./api";
+import { fetchAll, studioApi, StudioApiError } from "./api";
 import type { StudioRoutes } from "./routes";
 import type { Wakeword, WorkspaceSummary } from "./types";
 
@@ -77,15 +77,8 @@ export function createWorkspace(routes: StudioRoutes) {
     loading.value = true;
     error.value = "";
     try {
-      const words: Wakeword[] = [];
-      let offset = 0;
-      while (true) {
-        const page = await studioApi.wakewords({ offset, limit: 100 }, controller.signal);
-        if (disposed || controller.signal.aborted) return;
-        words.push(...page.items);
-        offset += page.items.length;
-        if (offset >= page.total || page.items.length === 0) break;
-      }
+      const words = await fetchAll((window) => studioApi.wakewords(window, controller.signal), controller.signal);
+      if (disposed || controller.signal.aborted) return;
       wakewords.value = words;
       const previous = selectedId.value;
       select(previous || words[0]?.id || "");

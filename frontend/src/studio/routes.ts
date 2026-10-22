@@ -42,10 +42,10 @@ export function useStudioRoutes() {
     classifyTab.value = tab === "collect" || tab === "unmapped" ? tab : "review";
   }
   read();
-  function href(id: PageId) {
+  function href(id: PageId, tab: ClassifyTab = classifyTab.value) {
     const params = new URLSearchParams();
     if (selectedId.value) params.set("word", selectedId.value);
-    if (id === "classify" && classifyTab.value !== "review") params.set("tab", classifyTab.value);
+    if (id === "classify" && tab !== "review") params.set("tab", tab);
     return `#/${id}${params.size ? "?" + params : ""}`;
   }
   function persist() {

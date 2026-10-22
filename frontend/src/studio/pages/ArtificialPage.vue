@@ -4,17 +4,16 @@ import PageHeader from "../components/PageHeader.vue";
 import { absoluteTime } from "../time";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { StudioApiError, studioApi } from "../api";
+import { latestRequest } from "../requests";
 import { useWorkspace } from "../workspace";
 import type { Batch, GenerationCapability, GenerationRecipe, GenerationSource, Job } from "../types";
 import PaginatedTable from "../components/PaginatedTable.vue";
-import { useJobQueue, statusClass } from "../jobs";
+import { isActiveStatus, useJobQueue, statusClass } from "../jobs";
 import { plural } from "../format";
 
 const workspace = useWorkspace();
 const queue = useJobQueue();
-const generationBusy = computed(() =>
-  queue.activeJobs.value.some((job) => job.kind === "generation" && job.word_id === activeId.value),
-);
+const generationBusy = computed(() => queue.busy("generation", activeId.value));
 function isPreviewBusy(engine: string): boolean {
   return (
     Boolean(previewBusy.value[engine]) ||
@@ -105,10 +104,8 @@ const engineNames: Record<string, string> = {
   moss: "MOSS-TTS",
   piper: "Piper",
 };
-let loadRequest: AbortController | undefined;
-let mutationRequest: AbortController | undefined;
-let loadGeneration = 0;
-let mutationGeneration = 0;
+const loadRequest = latestRequest();
+const mutationRequest = latestRequest();
 let selectionLoaded = false;
 const activeId = computed(() => workspace.selectedId.value);
 const word = computed(() => workspace.selected.value);
@@ -122,12 +119,6 @@ const modelAvailability = computed(
 const accentEnabled = computed(
   () => Boolean(capability.value?.accent_applies) && recipe.value.engines?.some((engine) => engine !== "piper"),
 );
-function loadCurrent(id: string, token: number, controller: AbortController): boolean {
-  return activeId.value === id && loadGeneration === token && !controller.signal.aborted;
-}
-function mutationCurrent(id: string, token: number, controller: AbortController): boolean {
-  return activeId.value === id && mutationGeneration === token && !controller.signal.aborted;
-}
 const defaultEngines = ["omnivoice", "qwen3"];
 function normalizeRecipe(): void {
   const cap = capability.value;
@@ -141,9 +132,7 @@ function abortWorkspaceMutations(): void {
   submissionJobs.value = {};
   sources.value = [];
   sourceTotal.value = 0;
-  mutationRequest?.abort();
-  mutationRequest = undefined;
-  mutationGeneration += 1;
+  mutationRequest.abort();
   saving.value = false;
   job.value = null;
   deleting.value = null;
@@ -154,11 +143,9 @@ function abortWorkspaceMutations(): void {
   previewErrors.value = {};
 }
 async function load(): Promise<void> {
-  loadRequest?.abort();
-  const controller = new AbortController();
-  loadRequest = controller;
-  const token = ++loadGeneration;
+  const controller = loadRequest.next();
   const id = activeId.value;
+  const current = () => activeId.value === id && loadRequest.isCurrent(controller);
   batches.value = [];
   total.value = 0;
   error.value = "";
@@ -175,7 +162,7 @@ async function load(): Promise<void> {
       studioApi.wakeword(id, controller.signal),
       studioApi.generationDefaults(controller.signal),
     ]);
-    if (!loadCurrent(id, token, controller)) return;
+    if (!current()) return;
     capabilities.value = catalog;
     if (!selectionLoaded) {
       recipe.value = saved ?? {
@@ -195,10 +182,9 @@ async function load(): Promise<void> {
     batches.value = page.items;
     total.value = page.total;
   } catch (cause) {
-    if (loadCurrent(id, token, controller))
-      error.value = cause instanceof Error ? cause.message : "Unable to load generation settings.";
+    if (current()) error.value = cause instanceof Error ? cause.message : "Unable to load generation settings.";
   } finally {
-    if (loadCurrent(id, token, controller)) loading.value = false;
+    if (current()) loading.value = false;
   }
 }
 function updateLanguage(value: string): void {
@@ -242,10 +228,8 @@ async function save(): Promise<void> {
     error.value = "Select completed MOSS sources or generate after current direct providers.";
     return;
   }
-  mutationRequest?.abort();
-  const controller = new AbortController();
-  mutationRequest = controller;
-  const token = ++mutationGeneration;
+  const controller = mutationRequest.next();
+  const current = () => activeId.value === id && mutationRequest.isCurrent(controller);
   const recipeToSave = {
     ...recipe.value,
     engines: [...recipe.value.engines!],
@@ -256,7 +240,7 @@ async function save(): Promise<void> {
   error.value = "";
   try {
     const submission = await studioApi.submitGeneration(id, recipeToSave, controller.signal);
-    if (mutationCurrent(id, token, controller)) {
+    if (current()) {
       recipe.value = recipeToSave;
       for (const child of submission.jobs) {
         submissionJobs.value[child.id] = child;
@@ -265,10 +249,9 @@ async function save(): Promise<void> {
       job.value = submission.jobs[0] ?? null;
     }
   } catch (cause) {
-    if (mutationCurrent(id, token, controller))
-      error.value = cause instanceof Error ? cause.message : "Generation job was not started.";
+    if (current()) error.value = cause instanceof Error ? cause.message : "Generation job was not started.";
   } finally {
-    if (mutationCurrent(id, token, controller)) saving.value = false;
+    if (current()) saving.value = false;
   }
 }
 async function preview(engine: string): Promise<void> {
@@ -346,15 +329,13 @@ async function deleteBatch(): Promise<void> {
   const id = activeId.value,
     batch = deleting.value;
   if (!id || !batch || saving.value) return;
-  mutationRequest?.abort();
-  const controller = new AbortController();
-  mutationRequest = controller;
-  const token = ++mutationGeneration;
+  const controller = mutationRequest.next();
+  const current = () => activeId.value === id && mutationRequest.isCurrent(controller);
   saving.value = true;
   error.value = "";
   try {
     await studioApi.deleteBatch(id, batch.id, controller.signal);
-    if (!mutationCurrent(id, token, controller)) return;
+    if (!current()) return;
     const next = new Set(selected.value);
     next.delete(batch.id);
     selected.value = next;
@@ -366,7 +347,7 @@ async function deleteBatch(): Promise<void> {
     if (batches.value.length === 1 && offset.value > 0) offset.value = Math.max(0, offset.value - 50);
     else await load();
   } catch (cause) {
-    if (mutationCurrent(id, token, controller))
+    if (current())
       error.value =
         cause instanceof StudioApiError && cause.status === 409
           ? "Cancel queued or active workspace jobs before deleting this dataset."
@@ -374,26 +355,23 @@ async function deleteBatch(): Promise<void> {
             ? cause.message
             : "Dataset was not deleted.";
   } finally {
-    if (mutationCurrent(id, token, controller)) saving.value = false;
+    if (current()) saving.value = false;
   }
 }
 async function saveBatches(): Promise<void> {
   const id = activeId.value;
   if (!id || !selectionLoaded || loading.value) return;
-  mutationRequest?.abort();
-  const controller = new AbortController();
-  mutationRequest = controller;
-  const token = ++mutationGeneration;
+  const controller = mutationRequest.next();
+  const current = () => activeId.value === id && mutationRequest.isCurrent(controller);
   const batchIds = [...selected.value];
   saving.value = true;
   try {
     await studioApi.selectBatches(id, batchIds, controller.signal);
-    if (mutationCurrent(id, token, controller)) await load();
+    if (current()) await load();
   } catch (cause) {
-    if (mutationCurrent(id, token, controller))
-      error.value = cause instanceof Error ? cause.message : "Batch selection was not saved.";
+    if (current()) error.value = cause instanceof Error ? cause.message : "Batch selection was not saved.";
   } finally {
-    if (mutationCurrent(id, token, controller)) saving.value = false;
+    if (current()) saving.value = false;
   }
 }
 watch(
@@ -421,10 +399,7 @@ watch(sourceOffset, () => {
 watch(offset, () => {
   void load();
 });
-onBeforeUnmount(() => {
-  loadRequest?.abort();
-  abortWorkspaceMutations();
-});
+onBeforeUnmount(abortWorkspaceMutations);
 </script>
 
 <template>
@@ -628,7 +603,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               :data-delete-batch="batch.id"
-              :disabled="saving || ['queued', 'running', 'cancelling'].includes(batch.status)"
+              :disabled="saving || isActiveStatus(batch.status)"
               @click="deleting = batch"
             >
               Delete dataset

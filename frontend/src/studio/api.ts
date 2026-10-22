@@ -93,6 +93,19 @@ async function request<T>(path: string, method = "GET", body?: unknown, signal?:
 function finiteOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
+/** Every item of a paginated endpoint, 100 per request; stops early (with what it has) once aborted. */
+export async function fetchAll<T>(
+  page: (window: { offset: number; limit: number }) => Promise<Page<T>>,
+  signal?: AbortSignal,
+): Promise<T[]> {
+  const items: T[] = [];
+  while (!signal?.aborted) {
+    const next = await page({ offset: items.length, limit: 100 });
+    items.push(...next.items);
+    if (items.length >= next.total || !next.items.length) break;
+  }
+  return items;
+}
 /** Narrow opaque archived calibration metrics; never trust shape or render unknown keys. */
 export function readModelMetrics(metrics: unknown): ModelMetrics {
   const values = new Map<string, unknown>(

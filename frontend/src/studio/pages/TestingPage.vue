@@ -2,7 +2,7 @@
 import PageHeader from "../components/PageHeader.vue";
 import { absoluteTime } from "../time";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { studioApi } from "../api";
+import { fetchAll, studioApi } from "../api";
 import { useWorkspace } from "../workspace";
 import type { ModelVersion } from "../types";
 import ProbabilityGraph from "../components/ProbabilityGraph.vue";
@@ -97,15 +97,8 @@ async function loadVersions() {
   const controller = new AbortController();
   listRequest = controller;
   try {
-    const archive: ModelVersion[] = [];
-    let offset = 0;
-    while (true) {
-      const page = await studioApi.models(word, { offset, limit: 100 }, controller.signal);
-      if (disposed || controller.signal.aborted) return;
-      archive.push(...page.items);
-      offset += page.items.length;
-      if (offset >= page.total || !page.items.length) break;
-    }
+    const archive = await fetchAll((window) => studioApi.models(word, window, controller.signal), controller.signal);
+    if (disposed || controller.signal.aborted) return;
     versions.value = archive;
     versionId.value = archive[0]?.id ?? "";
   } catch (cause) {

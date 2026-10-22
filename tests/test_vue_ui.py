@@ -24,7 +24,7 @@ class VueTrainerUiTests(unittest.TestCase):
         shell = (REPO_ROOT / 'frontend/src/studio/components/StudioShell.vue').read_text()
         api = (REPO_ROOT / 'frontend/src/studio/api.ts').read_text()
         for page in ('Wakewords', 'Kiosks', 'NegativeDatasets', 'Artificial', 'Classify', 'Samples', 'Train', 'Deploy', 'Automate'):
-            self.assertIn(f'<{page}Page', shell)
+            self.assertIn(f'{page}Page,', shell)  # registered in the PAGES map
         for contract in ('/queue', '/label', '/generation/submissions', '/training/jobs', '/datasets', '/deployment/publish'):
             self.assertIn(contract, api)
         classify = (REPO_ROOT / 'frontend/src/studio/pages/ClassifyPage.vue').read_text()

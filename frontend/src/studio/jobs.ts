@@ -1,8 +1,9 @@
-import { computed, inject, onBeforeUnmount, onMounted, ref, type InjectionKey } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch, type InjectionKey } from "vue";
 import { studioApi } from "./api";
 import type { Job, Page } from "./types";
 
-export const isActiveJob = (job: Job): boolean => ["queued", "running", "cancelling"].includes(job.status);
+export const isActiveStatus = (status: string): boolean => ["queued", "running", "cancelling"].includes(status);
+export const isActiveJob = (job: Job): boolean => isActiveStatus(job.status);
 export type JobQueue = ReturnType<typeof createJobQueue>;
 export const jobQueueKey: InjectionKey<JobQueue> = Symbol("studio-job-queue");
 
@@ -196,7 +197,25 @@ export function createJobQueue() {
       if (!controller.signal.aborted) await refresh();
     }
   }
+  /** Whether a job of this kind is queued or running for the workspace. */
+  function busy(kind: Job["kind"], wordId: string): boolean {
+    return activeJobs.value.some((job) => job.kind === kind && job.word_id === wordId);
+  }
+  /** Run `done` when any job matching `match` stops being active. Call from component setup. */
+  function onFinished(match: (job: Job) => boolean, done: () => void): void {
+    watch(
+      () =>
+        Object.values(jobs.value)
+          .filter(match)
+          .map((job) => ({ id: job.id, active: isActiveJob(job) })),
+      (next, previous) => {
+        if (next.some((job) => !job.active && previous.some((old) => old.id === job.id && old.active))) done();
+      },
+    );
+  }
   return {
+    busy,
+    onFinished,
     jobs,
     activeJobs,
     history,

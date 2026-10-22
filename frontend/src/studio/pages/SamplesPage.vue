@@ -183,12 +183,16 @@ function filterChanged(): void {
 function rowKind(item: Sample): string {
   return item.recording?.near_miss ? "close miss" : "activation";
 }
+const LABELS = { positive: "Positive", negative: "Negative", discarded: "Discarded" } as const;
+const SOURCES: Record<string, string> = {
+  diagnostic: "Kiosk",
+  microphone: "Recorded",
+  import: "Import",
+  legacy: "Legacy",
+};
 function sourceLabel(item: Sample): string {
-  if (item.source === "diagnostic") return item.recording ? registry.deviceLabel(item.recording.device_id) : "Kiosk";
-  return (
-    ({ microphone: "Recorded", import: "Import", legacy: "Legacy" } as Record<string, string>)[item.source] ??
-    item.source
-  );
+  if (item.source === "diagnostic" && item.recording) return registry.deviceLabel(item.recording.device_id);
+  return SOURCES[item.source] ?? item.source;
 }
 watch(
   workspace.selectedId,
@@ -219,16 +223,14 @@ onBeforeUnmount(() => {
           >Label<select name="label" v-model="filters.label" @change="filterChanged">
             <option value="">All labels</option>
             <option value="pending">Pending</option>
-            <option value="positive">Positive</option>
-            <option value="negative">Negative</option>
-            <option value="discarded">Discarded</option>
+            <option v-for="(name, value) in LABELS" :key="value" :value="value">{{ name }}</option>
           </select></label
         ><label
           >Source<select name="source" v-model="filters.source" @change="filterChanged">
             <option value="">All sources</option>
-            <option value="diagnostic">Kiosk</option>
-            <option value="microphone">Recorded</option>
-            <option value="import">Import</option>
+            <option v-for="value in ['diagnostic', 'microphone', 'import']" :key="value" :value="value">
+              {{ SOURCES[value] }}
+            </option>
           </select></label
         ><label
           >Kind<select name="kind" v-model="filters.kind" @change="filterChanged">
@@ -292,9 +294,7 @@ onBeforeUnmount(() => {
                   ><span class="sr-only">Relabel</span
                   ><select data-action="relabel" :value="item.label" @change="relabel(item, $event)">
                     <option v-if="item.label === 'pending'" value="pending" disabled>Set label…</option>
-                    <option value="positive">Positive</option>
-                    <option value="negative">Negative</option>
-                    <option value="discarded">Discarded</option>
+                    <option v-for="(name, value) in LABELS" :key="value" :value="value">{{ name }}</option>
                   </select></label
                 >
                 <button type="button" data-action="trim" @click="trimTarget = item">Trim</button>

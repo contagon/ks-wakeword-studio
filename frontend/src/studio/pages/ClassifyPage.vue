@@ -34,11 +34,7 @@ const { classifyTab: tab } = workspace.routes;
 const collectionJob = ref<Job | null>(null),
   collecting = ref(false),
   collectionError = ref("");
-const collectionBusy = computed(
-  () =>
-    collecting.value ||
-    jobs.activeJobs.value.some((job) => job.kind === "scrape" && job.word_id === workspace.selectedId.value),
-);
+const collectionBusy = computed(() => collecting.value || jobs.busy("scrape", workspace.selectedId.value));
 const collectionOutcome = computed(() => {
   const job = collectionJob.value;
   return job?.kind === "scrape" && job.status === "complete" && "status" in job.result ? job.result : null;
@@ -51,9 +47,7 @@ const collectionWarning = computed(() =>
       (collectionOutcome.value.evicted ?? 0) > 0),
   ),
 );
-const collectionHistoryHref = computed(
-  () => "#/classify?" + new URLSearchParams({ word: workspace.selectedId.value, tab: "collect" }),
-);
+const collectionHistoryHref = computed(() => workspace.routes.href("classify", "collect"));
 let collectionRequest: AbortController | undefined;
 async function collectNow() {
   if (!workspace.selectedId.value || collectionBusy.value) return;

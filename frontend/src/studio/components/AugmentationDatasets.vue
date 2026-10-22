@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { studioApi } from "../api";
-import { isActiveJob, useJobQueue, statusClass } from "../jobs";
+import { isActiveStatus, useJobQueue, statusClass } from "../jobs";
 import { publicError } from "../errors";
 import type { AugmentationCatalog, AugmentationDataset, DownloadJob } from "../types";
 import { useWorkspace } from "../workspace";
@@ -100,7 +100,7 @@ function jobId(row: AugmentationDataset): string | null {
   return latest(row)?.id ?? row.job_id;
 }
 function busy(row: AugmentationDataset): boolean {
-  return starting.value.has(row.id) || ["queued", "running", "cancelling"].includes(state(row));
+  return starting.value.has(row.id) || isActiveStatus(state(row));
 }
 async function download(row: AugmentationDataset): Promise<void> {
   if (busy(row)) return;
@@ -129,14 +129,9 @@ async function download(row: AugmentationDataset): Promise<void> {
     starting.value = next;
   }
 }
-watch(
-  () =>
-    Object.values(queue.jobs.value)
-      .filter((job) => job.kind === "download" && job.payload.augmentation_id)
-      .map((job) => ({ id: job.id, active: isActiveJob(job) })),
-  (next, previous) => {
-    if (next.some((job) => !job.active && previous.some((old) => old.id === job.id && old.active))) void load();
-  },
+queue.onFinished(
+  (job) => job.kind === "download" && !!job.payload.augmentation_id,
+  () => void load(),
 );
 watch(
   activeId,
