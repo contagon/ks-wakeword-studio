@@ -28,7 +28,7 @@ pauses. Play the selection (**Space**), adjust its bounds, then **Save sample**
 If speech detection is unavailable or finds no speech, the full clip stays selected;
 negative background-noise recordings can still be saved. Originals are retained,
 and saved recordings appear alongside scraped data in **Samples**, with a
-**Microphone** source filter and capture metadata.
+**Recorded** source filter and capture metadata.
 
 The upload form is at the top of **Manual**, with its own positive/negative label. Uploads
 are not automatically trimmed and retain their **Import** provenance.

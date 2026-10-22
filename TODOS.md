@@ -25,13 +25,13 @@
 - [x] move upload above the recording section
 
 # samples
-- [ ] Change "Provenance" to "Source"
-- [ ] remove phrase search, it doesn't make sense
-- [ ] move label filter down next to other filters and move them out from the dropdown
-- [ ] change "Diagnostic" source to the name of the kiosk
-- [ ] change microphone to recorded
-- [ ] make play just play it inline rather than opening a visualizer
-- [ ] remove little menu about add microphone recordings
+- [x] Change "Provenance" to "Source"
+- [x] remove phrase search, it doesn't make sense
+- [x] move label filter down next to other filters and move them out from the dropdown
+- [x] change "Diagnostic" source to the name of the kiosk
+- [x] change microphone to recorded
+- [x] make play just play it inline rather than opening a visualizer
+- [x] remove little menu about add microphone recordings
 
 # train
 - [ ] remove training prereqs section

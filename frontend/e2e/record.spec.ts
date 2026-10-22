@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test.use({ permissions: ['microphone'], launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] } });
 
-test('records through real browser media, trims, saves and finds microphone provenance', async ({ page, request }) => {
+test('records through real browser media, trims, saves and finds the recorded source', async ({ page, request }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const response = await request.post('/api/studio/wakewords', { data: { phrase: 'Browser recording', language: 'en', model_id: 'browser_record' } });
   expect(response.ok()).toBeTruthy(); const word = await response.json();
@@ -29,7 +29,7 @@ test('records through real browser media, trims, saves and finds microphone prov
   expect(saved.total).toBe(1); expect(saved.items[0].label).toBe('negative');
   expect(saved.items[0].capture).toMatchObject({ trim_method: 'manual', start_s: 1.2, end_s: 2.4 });
   await page.getByRole('link', { name: 'View samples' }).click();
-  await expect(page.locator('[data-row-id]')).toContainText('microphone');
+  await expect(page.locator('[data-row-id]')).toContainText('Recorded');
   await expect(page.locator('[data-form=import]')).toHaveCount(0);
   expect(errors).toEqual([]);
 });

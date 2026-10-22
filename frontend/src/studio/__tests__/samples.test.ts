@@ -26,31 +26,35 @@ const lists = () => server.requests.filter(r => r.method === "GET" && /\/wakewor
 const row = (ui: VueWrapper, id: string) => ui.get(`[data-row-id="${id}"]`);
 
 describe("provenance-aware sample library", () => {
-  it("keeps less-used filters in a closed More filters disclosure", async () => {
+  it("shows all filters inline without a phrase search or disclosure", async () => {
     const ui = await open();
-    const details = ui.get('details[data-more-filters]');
-    expect(details.attributes('open')).toBeUndefined();
-    expect(details.get('summary').text()).toBe('More filters');
-    for (const name of ['source', 'kind', 'after', 'before']) expect(details.find(`[name=${name}]`).exists()).toBe(true);
-    expect(ui.get('input[name=search]').element.closest('details')).toBeNull();
+    expect(ui.find('details').exists()).toBe(false);
+    expect(ui.find('input[name=search]').exists()).toBe(false);
+    const filters = ui.get('[data-sample-filters]');
+    for (const name of ['label', 'source', 'kind', 'after', 'before']) expect(filters.find(`[name=${name}]`).exists()).toBe(true);
+    expect(filters.findAll('select[name=source] option').map(o => o.text())).toEqual(['All sources', 'Kiosk', 'Recorded', 'Import']);
+    expect(ui.get('#studio-content').find('a[href="#/manual?word=a"]').exists()).toBe(false);
   });
-  it("replaces the legacy samples mapping with a paginated, provenance-rich table", async () => {
+  it("replaces the legacy samples mapping with a paginated, source-labelled table", async () => {
     const ui = await open();
     expect(ui.get("h1").text()).toBe("Samples");
     expect(ui.find("[data-legacy-trainer]").exists()).toBe(false);
+    expect(ui.findAll("thead th").map(th => th.text())).toContain("Source");
     expect(lists().at(-1)?.url.searchParams.get("offset")).toBe("0");
     expect(ui.findAll("[data-row-id]")).toHaveLength(25);
     const first = row(ui, "s0").text();
-    for (const text of ["positive", "diagnostic", "Kitchen satellite", "phrase 0", "mww", "rev 0"]) expect(first).toContain(text);
+    for (const text of ["positive", "Kitchen satellite", "phrase 0", "mww", "rev 0"]) expect(first).toContain(text);
+    expect(first).not.toContain("diagnostic");
+    expect(row(ui, "s1").text()).toContain("Hall satellite");
     expect(row(ui, "s1").text()).toContain("close miss");
     expect(ui.text()).toContain("1–25 of 31");
     await ui.get("[data-action=next-page]").trigger("click"); await settle();
     expect(lists().at(-1)?.url.searchParams.get("offset")).toBe("25");
-    expect(row(ui, "imp").text()).toContain("import");
+    expect(row(ui, "imp").text()).toContain("Import");
     expect(ui.get("[data-action=next-page]").attributes("disabled")).toBeDefined();
   });
 
-  it("filters by label, source, kind, date and phrase and resets to the first page", async () => {
+  it("filters by label, source, kind and date and resets to the first page", async () => {
     const ui = await open();
     await ui.get("[data-action=next-page]").trigger("click"); await settle();
     await ui.get("select[name=label]").setValue("negative");
@@ -58,10 +62,10 @@ describe("provenance-aware sample library", () => {
     await ui.get("select[name=kind]").setValue("true");
     await ui.get("input[name=after]").setValue("2026-02-01");
     await ui.get("input[name=before]").setValue("2026-04-01");
-    await ui.get("input[name=search]").setValue("phrase");
     await settle();
     const q = lists().at(-1)!.url.searchParams;
-    expect(Object.fromEntries(q)).toMatchObject({ label: "negative", source: "diagnostic", near_miss: "true", search: "phrase", offset: "0" });
+    expect(Object.fromEntries(q)).toMatchObject({ label: "negative", source: "diagnostic", near_miss: "true", offset: "0" });
+    expect(q.has("search")).toBe(false);
     expect(q.get("after")).toMatch(/^2026-02-01T00:00:00/);
     expect(q.get("before")).toMatch(/^2026-04-01T23:59:59/);
     expect(ui.findAll("[data-row-id]").map(r => r.attributes("data-row-id"))).toEqual(["s1"]);
@@ -86,12 +90,6 @@ describe("provenance-aware sample library", () => {
     expect(ui.get("[data-samples-error]").text()).toContain("changed elsewhere");
     expect(lists().length).toBe(before + 1);
     expect(row(ui, "s4").text()).toContain("rev 9");
-  });
-
-  it("links to Record instead of duplicating the upload form", async () => {
-    const ui = await open();
-    expect(ui.find('[data-form=import]').exists()).toBe(false);
-    expect(ui.get('a[href="#/manual?word=a"]').text()).toBeTruthy();
   });
 
   it("trims non-destructively through the server with the current revision", async () => {
@@ -123,15 +121,21 @@ describe("provenance-aware sample library", () => {
     expect(ui.find('[data-row-id="s7"]').exists()).toBe(false);
   });
 
-  it("plays one row at a time through the authorized studio audio URL and revokes on close", async () => {
+  it("plays inline, one row at a time, through the authorized studio audio URL", async () => {
     const ui = await open();
     await row(ui, "s3").get("[data-action=play]").trigger("click"); await settle();
+    expect(document.querySelector("[role=dialog]")).toBeNull();
     expect(server.requests.some(r => r.path === "/api/studio/wakewords/a/samples/s3/audio?original=false")).toBe(true);
     expect(media.plays).toHaveLength(1);
+    expect(row(ui, "s3").get("[data-action=play]").text()).toBe("Stop");
     const first = media.plays[0];
     await row(ui, "s4").get("[data-action=play]").trigger("click"); await settle();
     expect(media.revoked).toContain(first);
     expect(media.plays).toHaveLength(2);
+    expect(row(ui, "s3").get("[data-action=play]").text()).toBe("Play");
+    await row(ui, "s4").get("[data-action=play]").trigger("click"); await settle();
+    expect(media.plays).toHaveLength(2);
+    expect(row(ui, "s4").get("[data-action=play]").text()).toBe("Play");
   });
 
   it("scopes library requests to the active word and ignores a stale list for the old word", async () => {
