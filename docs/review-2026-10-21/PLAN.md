@@ -479,6 +479,26 @@ Also:
     - **The waveform peak calculations** stay separate: they bucket differently, so sharing code would change the waveforms.
     - **The remaining pages keep their single generation counters**, which have slightly different semantics.
     - **The worker filename keeps its hash** for cache-busting, now that `static/ui` is no longer committed.
+- **Phase 8 done (commits `6a7f60d`, `50810fc`, `f41d7d9`, `2b946c8`, `114aa71`):** §6.1 and the backend items in §7.
+  - **Storage:** new helpers `storage.flock`, `ensure_directory`, `read_regular`, `fsync_directories` and `publication_lock`. Deletion code is merged into `studio/deletion.py`.
+  - **Shared helpers:** `check_page`, `iso_now`, `require_word` (runs inside the caller's transaction), `insert_audio`, the recipe helpers and one augmentation `CATALOG`, plus `StrictBody`, `Store.data_dir` and `studio.REPO`. `generation_submissions.py` folds into `GenerationService.submit`.
+  - **Migrations:** `db.MIGRATIONS` is an ordered tuple. Migration v19 drops `studio_dataset_selections`, `publication_history`, `migration_imports` and `migration_source_claims`; all four were written but never read.
+  - **Runtime:** one property factory. Deployment and augmentation services are passed as constructor arguments.
+  - **Hacks fixed:**
+    - Maintenance runs every 5 s; the 0.25 s claim poll is unchanged.
+    - SQLite uses a 5 s busy timeout. The old "fails within 2 s" test now checks that a transaction waits for another writer.
+    - Broad excepts now log tracebacks.
+    - Download jobs are filtered with `json_extract`.
+    - Lazy imports are hoisted; only the ML ones stay lazy.
+    - Cross-class private members are now public.
+    - `legacy_training.py` is renamed `mww_training.py`.
+  - **N+1 queries removed:** samples, generation batches, collection runs, training runs and versions.
+  - **Test-only code removed:** `collect_device`, `successful_version`, the `TrainingAdapter` Protocol and the `'runs'` category.
+  - **Skipped on purpose:**
+    - **The exceptions stay in `models.py`.** Moving them would touch ~30 imports for no behaviour gain.
+    - **Some service methods are still only called from tests:** `GenerationService.enqueue/save_recipe/get_batch`, `TrainingService.get_manifest`, `ScheduleService.save`, `WorkspaceService.update/source_mappings`, and runtime and worker health. Tests use them as fixtures.
+    - **Ingest's workspace pre-checks stay.** They avoid running ffmpeg for a missing workspace.
+  - After this phase: pytest 451 passed, 1 skipped; vitest 202; Playwright 18 passed, 1 skipped.
 
 ## 11. Order of work
 
