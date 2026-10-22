@@ -111,7 +111,7 @@ onBeforeUnmount(() => {
           <div class="studio-muted text-xs">{{ current.group }} / {{ current.name }}</div>
           <div class="flex flex-wrap items-center gap-3">
             <label class="flex items-center gap-3 text-xs" for="studio-word"
-              >WAKEWORD
+              ><span class="studio-header-label">WAKEWORD</span>
               <select
                 id="studio-word"
                 :value="selectedId"

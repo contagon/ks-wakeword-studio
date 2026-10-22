@@ -187,7 +187,7 @@ onBeforeUnmount(() => {
         Uploads keep their own label and import provenance. Adjust trims later in Samples.
       </p>
       <form data-form="import" class="flex flex-wrap gap-3 items-end" @submit.prevent="importAudio">
-        <label class="flex-1"
+        <label class="grow basis-60"
           >Audio<input
             ref="uploadInput"
             name="import-file"

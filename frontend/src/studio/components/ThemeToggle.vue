@@ -6,6 +6,7 @@ onBeforeUnmount(dispose);
 </script>
 <template>
   <button type="button" aria-label="Dark mode" :aria-pressed="dark" @click="toggle">
-    {{ dark ? "☀ Light mode" : "☾ Dark mode" }}
+    <span aria-hidden="true">{{ dark ? "☀" : "☾" }}</span>
+    <span class="studio-header-label">{{ dark ? "Light mode" : "Dark mode" }}</span>
   </button>
 </template>

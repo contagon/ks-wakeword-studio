@@ -14,7 +14,7 @@ const points = computed(() =>
 
 <template>
   <svg
-    viewBox="0 0 780 260"
+    viewBox="-20 0 800 260"
     role="img"
     aria-label="Live detection probability over the last eight seconds, with a dashed threshold and red trace above threshold"
     class="probability-graph"
@@ -49,8 +49,8 @@ const points = computed(() =>
     <text x="48" y="226">−8s</text>
     <text x="398" y="226" text-anchor="middle">−4s</text>
     <text x="748" y="226" text-anchor="end">now</text>
-    <text x="48" y="250">Y: probability</text>
-    <text x="748" y="250" text-anchor="end">X: time → newest</text>
+    <text x="48" y="250" class="axis-title">Y: probability</text>
+    <text x="748" y="250" text-anchor="end" class="axis-title">X: time → newest</text>
   </svg>
 </template>
 
@@ -71,5 +71,14 @@ text {
   font:
     12px system-ui,
     sans-serif;
+}
+/* SVG text scales with the viewBox; at phone width 12 units would render ~5px. */
+@media (max-width: 650px) {
+  text {
+    font-size: 26px;
+  }
+  .axis-title {
+    display: none;
+  }
 }
 </style>
