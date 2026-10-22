@@ -40,7 +40,7 @@ from tts_config import (  # noqa: E402
     ENGINE_PIPER,
     ENGINE_QWEN3,
     MIXED_ENGLISH_ACCENTS,
-    QWEN_LANGUAGE_NAMES,
+    QWEN_LANGUAGES,
     distribute_samples,
     engines_for_language,
     language_for_engine,
@@ -483,7 +483,7 @@ class Generator:
         rng = random.Random(24051984 + start + sum(ord(ch) for ch in engine + prefix))
         descriptions = (
             qwen_descriptions(
-                QWEN_LANGUAGE_NAMES[self.args.language],
+                QWEN_LANGUAGES[self.args.language],
                 start + count,
                 self.english_accent,
             )[start:]
@@ -521,7 +521,7 @@ class Generator:
             elif engine == ENGINE_QWEN3:
                 entry.update(
                     {
-                        "language_name": QWEN_LANGUAGE_NAMES[self.args.language],
+                        "language_name": QWEN_LANGUAGES[self.args.language],
                         "instruct": descriptions[index],
                     }
                 )

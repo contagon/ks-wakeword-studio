@@ -145,9 +145,6 @@ COMMON_OMNIVOICE_LANGUAGES = {
     "zu": "Zulu",
 }
 
-QWEN_LANGUAGE_NAMES = {code: name for code, name in QWEN_LANGUAGES.items()}
-
-
 def parse_omnivoice_catalog(markdown: str) -> dict[str, dict[str, object]]:
     """Parse the upstream Markdown language table without third-party packages."""
 

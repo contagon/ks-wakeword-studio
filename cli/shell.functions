@@ -9,50 +9,24 @@ if [ ! -v DATA_DIR ] ; then
 fi
 
 DEFAULT_SAMPLES=50000
-DEFAULT_BATCH_SIZE=100
 DEFAULT_TRAINING_STEPS=40000
 DEFAULT_LANGUAGE=en
-DEFAULT_ENGLISH_ACCENT=mixed
-DEFAULT_TTS_MODE=hybrid
-DEFAULT_TTS_VOICE_COUNT=128
 
 [ -f "${DATA_DIR}/.defaults.env" ] && source "${DATA_DIR}/.defaults.env" || :
 
 : "${SAMPLES:=${DEFAULT_SAMPLES}}"
-: "${BATCH_SIZE:=${DEFAULT_BATCH_SIZE}}"
 : "${TRAINING_STEPS:=${DEFAULT_TRAINING_STEPS}}"
 : "${LANGUAGE:=${DEFAULT_LANGUAGE}}"
-: "${ENGLISH_ACCENT:=${DEFAULT_ENGLISH_ACCENT}}"
-: "${TTS_MODE:=${DEFAULT_TTS_MODE}}"
-: "${TTS_VOICE_COUNT:=${DEFAULT_TTS_VOICE_COUNT}}"
-: "${CLEANUP_WORK_DIR:=false}"
-: "${CLEANUP_ARCHIVES:=false}"
-: "${CLEANUP_INTERMEDIATE_FILES:=false}"
-: "${QUIET:=false}"
 : "${VERBOSE:=false}"
 
 HELP=false
 
 if [ -v KNOWN_ARGS ] ; then
-    KNOWN_ARGS+=( help verbose quiet h v q )
+    KNOWN_ARGS+=( help verbose h v )
 fi
-declare -gi OPTION_COUNT=0
 declare -ga POSITIONAL_ARGS=()
-declare -ga EXTRA_ARGS=()
 declare -ga UNKNOWN_ARGS=()
-declare -i __stop_parsing=0
 for a in "$@"; do
-    if [ "$a" == "--" ] ; then
-        __stop_parsing=1
-        shift
-        continue
-    fi
-    if [ $__stop_parsing == 1 ] ; then
-        EXTRA_ARGS+=( "$a" )
-        shift
-        continue
-    fi
-
     if [ -v KNOWN_ARGS ] && [[ "${a}" =~ ^--?([^=]+)=?.* ]] ; then
         _arg=${BASH_REMATCH[1]}
         known=false
@@ -61,14 +35,10 @@ for a in "$@"; do
         done
         $known || UNKNOWN_ARGS+=( "${a}" )
     fi
-    OPTION_COUNT+=1
     case "$a" in
         -h | --help)
             HELP=true
             break
-            ;;
-        -q | --quiet)
-            QUIET=true
             ;;
         -v | --verbose)
             VERBOSE=true

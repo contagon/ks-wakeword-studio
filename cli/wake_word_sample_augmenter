@@ -43,59 +43,22 @@ if stable_splits is not None and any(value not in ('training', 'validation', 'te
     raise ValueError('Invalid stable split manifest')
 work_dir = os.path.join(args.data_dir, "work")
 
-# Wake word defaults
-if not args.input_dir:
-    args.input_dir = os.path.join(work_dir, "wake_word_samples")
-else:
-    args.input_dir = os.path.realpath(args.input_dir)
-
-if not args.output_dir:
-    args.output_dir = args.input_dir + "_augmented"
-else:
-    args.output_dir = os.path.realpath(args.output_dir)
-
-# Personal defaults (NEW)
-if not args.personal_dir:
-    args.personal_dir = os.path.join(args.data_dir, "personal_samples")
-else:
-    args.personal_dir = os.path.realpath(args.personal_dir)
-
-if not args.personal_output_dir:
-    args.personal_output_dir = os.path.join(work_dir, "personal_augmented_features")
-else:
-    args.personal_output_dir = os.path.realpath(args.personal_output_dir)
-
-# Reviewed negative defaults
-if not args.negative_dir:
-    args.negative_dir = os.path.join(args.data_dir, "negative_samples")
-else:
-    args.negative_dir = os.path.realpath(args.negative_dir)
-
-if not args.negative_output_dir:
-    args.negative_output_dir = os.path.join(work_dir, "reviewed_negative_features")
-else:
-    args.negative_output_dir = os.path.realpath(args.negative_output_dir)
-
-# Dataset defaults
-if not args.mit_rirs_16k_dir:
-    args.mit_rirs_16k_dir = os.path.join(args.data_dir, "training_datasets", "mit_rirs_16k")
-else:
-    args.mit_rirs_16k_dir = os.path.realpath(args.mit_rirs_16k_dir)
-
-if not args.fma_16k_dir:
-    args.fma_16k_dir = os.path.join(args.data_dir, "training_datasets", "fma_16k")
-else:
-    args.fma_16k_dir = os.path.realpath(args.fma_16k_dir)
-
-if not args.audioset_16k_dir:
-    args.audioset_16k_dir = os.path.join(args.data_dir, "training_datasets", "audioset_16k")
-else:
-    args.audioset_16k_dir = os.path.realpath(args.audioset_16k_dir)
-
-if not args.chime_16k_dir:
-    args.chime_16k_dir = os.path.join(args.data_dir, "training_datasets", "chime_16k")
-else:
-    args.chime_16k_dir = os.path.realpath(args.chime_16k_dir)
+# Explicit paths are resolved; omitted ones default under the data/work dirs.
+datasets_dir = os.path.join(args.data_dir, "training_datasets")
+for name, default in (
+    ("input_dir", os.path.join(work_dir, "wake_word_samples")),
+    ("personal_dir", os.path.join(args.data_dir, "personal_samples")),
+    ("personal_output_dir", os.path.join(work_dir, "personal_augmented_features")),
+    ("negative_dir", os.path.join(args.data_dir, "negative_samples")),
+    ("negative_output_dir", os.path.join(work_dir, "reviewed_negative_features")),
+    ("mit_rirs_16k_dir", os.path.join(datasets_dir, "mit_rirs_16k")),
+    ("fma_16k_dir", os.path.join(datasets_dir, "fma_16k")),
+    ("audioset_16k_dir", os.path.join(datasets_dir, "audioset_16k")),
+    ("chime_16k_dir", os.path.join(datasets_dir, "chime_16k")),
+):
+    value = getattr(args, name)
+    setattr(args, name, os.path.realpath(value) if value else default)
+args.output_dir = os.path.realpath(args.output_dir) if args.output_dir else args.input_dir + "_augmented"
 
 def validate_directories(paths):
     for path in paths:
