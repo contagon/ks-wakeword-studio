@@ -3,6 +3,7 @@ import errno
 from studio.models import Conflict
 
 MESSAGES = {
+    'generation_incomplete': 'Generation stopped before the requested count was reached. The job log shows retained and missing counts and the stopping reason. Keep retained files; a local administrator can recover failed OmniVoice-only jobs without rerunning in place.',
     'augmentation_missing': 'Selected augmentation datasets are missing. Open Downloaded and download the selected augmentation datasets before training.',
     'augmentation_invalid': 'Augmentation audio is empty, incomplete, or unsafe. Retry the download in Downloaded; inspect private diagnostics if it persists.',
     'augmentation_repair_required': 'An existing augmentation corpus folder is incomplete or unsafe. Move that corpus folder out of training_datasets, then retry in Downloaded. No existing files were removed.',
@@ -37,9 +38,13 @@ def failure_code(exc):
 
 def child_error(output):
     text = output.lower()
+    if 'tts_incomplete' in text and 'reason=engine_error' not in text:
+        return OperationError('generation_incomplete')
     for pattern, code in (('out of memory', 'gpu_memory'), ('no space left on device', 'disk_full'),
                           ('modulenotfounderror', 'dependency_missing'), ('could not resolve host', 'network_failed'),
                           ('connectionerror', 'network_failed'), ('connection timed out', 'network_failed')):
         if pattern in text:
             return OperationError(code)
+    if 'tts_incomplete' in text:
+        return OperationError('generation_incomplete')
     return OperationError('child_command_failed')

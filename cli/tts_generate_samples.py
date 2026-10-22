@@ -31,6 +31,10 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from studio.generation_recovery import load_snapshot, recovery_config, verified_audio  # noqa: E402
+from studio.storage import canonical_wav, open_directory  # noqa: E402
+from cli.tts_refill import RefillBudget  # noqa: E402
+
 from tts_config import (  # noqa: E402
     DEFAULT_ENGLISH_ACCENT,
     DEFAULT_TTS_MODE,
@@ -49,10 +53,9 @@ from tts_config import (  # noqa: E402
 )
 
 
-GENERATOR_VERSION = "modern-tts-v20-four-provider-direct-corpus-safe-limits-english-accent-emphasis-ordered-token-sampling-skip-unity-tempo-moss-references"
+GENERATOR_VERSION = "modern-tts-v21-four-provider-direct-corpus-safe-limits-bounded-observed-yield-refills"
 OMNIVOICE_MODEL = "k2-fsa/OmniVoice"
 VOICE_PROFILE_STRIDE = 293
-FINAL_RECOVERY_ROUNDS = 12
 OMNIVOICE_POSITION_TEMPERATURE = 5.0
 OMNIVOICE_CLASS_TEMPERATURE = 0.0
 DIRECT_CANDIDATE_FACTORS = {
@@ -91,7 +94,7 @@ def log(message: str) -> None:
     print(message, flush=True)
 
 
-def studio_progress(stage: str, *, engine=None, completed=None, total=None) -> None:
+def studio_progress(stage: str, *, engine=None, completed=None, total=None, reason=None) -> None:
     """Optional structured progress; legacy invocations need no Studio imports."""
     descriptor = os.environ.get('STUDIO_PROGRESS_FD')
     if descriptor is None:
@@ -101,6 +104,8 @@ def studio_progress(stage: str, *, engine=None, completed=None, total=None) -> N
         event['engine'] = engine
     if completed is not None:
         event.update(completed=completed, total=total)
+    if reason is not None:
+        event['reason'] = reason
     try:
         os.write(int(descriptor), (json.dumps(event) + '\n').encode())
     except (OSError, ValueError):
@@ -343,6 +348,13 @@ class Generator:
         self.reference_source_ids = {Path(row['path']): row['audio_id'] for row in (self.external_references or [])}
         self.source_by_path: dict[Path, str] = {}
         self.final_sources: dict[str, str] = {}
+        self.budget = RefillBudget(args.samples, max_candidates=getattr(args, 'max_candidates', None),
+                                   max_seconds=getattr(args, 'max_generation_seconds', 21600))
+        self._refill_round = False
+        # One admitted candidate count per round, so a deadline cannot change it mid-round.
+        self._admitted = None
+        self.carrier_by_path: dict[Path, Path] = {}
+        self.moss_carriers: dict[Path, Path] = {}
 
     def _load_external_references(self, manifest):
         if manifest is None:
@@ -376,7 +388,12 @@ class Generator:
 
     def _generation_references(self, engine, accepted):
         if engine == ENGINE_MOSS and self.external_references is not None:
-            return [Path(row['path']) for row in self.external_references]
+            used = set(self.final_sources.values())
+            return [Path(row['path']) for row in self.external_references if row['audio_id'] not in used]
+        if engine == ENGINE_MOSS:
+            # Never reuse an accepted take's carrier, nor clone an accepted MOSS take.
+            used = set(self.moss_carriers) | set(self.moss_carriers.values())
+            return [path for path in accepted if path.resolve() not in used]
         return list(accepted)
 
     def piper_models(self) -> list[Path]:
@@ -536,6 +553,8 @@ class Generator:
                 )
                 if self.external_references is not None:
                     self.source_by_path[(destination / f'{item_id}.wav').resolve()] = self.reference_source_ids[reference_paths[index].resolve()]
+                else:
+                    self.carrier_by_path[(destination / f'{item_id}.wav').resolve()] = reference_paths[index].resolve()
             entries.append(entry)
             self.speed_by_path[(destination / f"{item_id}.wav").resolve()] = 1.0
         return entries
@@ -567,10 +586,12 @@ class Generator:
             stop.set()
             observer.join()
 
-    @staticmethod
-    def _candidate_count(engine, count, reference_paths):
-        requested = max(count, math.ceil(count * DIRECT_CANDIDATE_FACTORS[engine]))
-        return min(requested, len(reference_paths)) if engine == ENGINE_MOSS else requested
+    def _candidate_count(self, engine, count, reference_paths):
+        if self._admitted is not None:
+            return self._admitted
+        return self.budget.request(engine, count, DIRECT_CANDIDATE_FACTORS[engine],
+            refill=self._refill_round or getattr(self.args, 'recovery_manifest', None) is not None,
+            reference_count=len(reference_paths) if engine == ENGINE_MOSS else None)
 
     def _generate_direct_engine(
         self,
@@ -781,13 +802,18 @@ class Generator:
                 log(f"⚠️ ffmpeg rejected {path.name} (exit {return_code}); skipping it")
 
             if converted:
-                digest = hashlib.sha256(temp_path.read_bytes()).hexdigest() if temp_path.is_file() else ""
+                data = temp_path.read_bytes() if temp_path.is_file() else b''
+                if data and getattr(self.args, 'recovery_manifest', None) is not None:
+                    data = canonical_wav(data)
+                digest = hashlib.sha256(data).hexdigest() if data else ""
                 if valid_sample(temp_path) and digest and digest not in self.accepted_hashes:
                     temp_path.replace(final_path)
                     self.accepted_hashes.add(digest)
                     accepted.append(final_path)
                     if path.resolve() in self.source_by_path:
                         self.final_sources[final_path.name] = self.source_by_path[path.resolve()]
+                    if path.resolve() in self.carrier_by_path:
+                        self.moss_carriers[final_path.resolve()] = self.carrier_by_path[path.resolve()]
                 else:
                     temp_path.unlink(missing_ok=True)
 
@@ -803,9 +829,34 @@ class Generator:
                 studio_progress('normalizing', completed=len(accepted), total=limit)
         return accepted
 
+    def _run_round(self, engine, count, accepted, prefix=''):
+        references = self._generation_references(engine, accepted)
+        requested = self._candidate_count(engine, count, references)
+        generated, normalized, failed = 0, [], False
+        self._admitted = requested
+        try:
+            if requested:
+                entries, paths = self.generate_direct_engine(engine, count, references, prefix=prefix)
+                generated = len(paths)
+                qualified = self.qualify_direct_candidates(engine, entries, paths, prefix=prefix)
+                normalized = self.normalize(qualified, len(accepted), count)
+                accepted.extend(normalized)
+                self.actual_counts[engine] = self.actual_counts.get(engine, 0) + len(normalized)
+        except Exception as error:
+            failed = True
+            log(f'⚠️ {engine} generation round failed: {error}')
+        finally:
+            self._admitted = None
+            self.actual_counts.setdefault(engine, 0)
+            self.budget.observe(engine, attempted=requested, generated=generated,
+                                accepted=len(normalized), error=failed)
+        log(f'→ {engine}: {len(normalized)} final unique accept(s) from {generated} generated; '
+            f'candidate budget {self.budget.attempted}/{self.budget.limit}')
+
     def generate(self) -> None:
         studio_progress('preparing')
-        if self.cache_hit():
+        recovery_manifest = getattr(self.args, 'recovery_manifest', None)
+        if recovery_manifest is None and self.cache_hit():
             log("✅ Reusing the matching direct-generated TTS corpus.")
             return
 
@@ -814,6 +865,16 @@ class Generator:
             raise RuntimeError(
                 f"No TTS engine is available for language={self.args.language} mode={self.args.tts_mode}."
             )
+        recovery, retained = None, []
+        if recovery_manifest is not None:
+            manifest = Path(recovery_manifest)
+            if (engines != [ENGINE_OMNIVOICE] or manifest.resolve().is_relative_to(self.build_dir)
+                    or manifest.resolve().is_relative_to(self.output_dir)):
+                raise ValueError('Recovery requires an independent OmniVoice snapshot')
+            config = recovery_config(self.args.phrase, {
+                'language': self.args.language, 'english_accent': self.english_accent,
+                'tts_mode': self.args.tts_mode, 'samples': self.args.samples, 'engines': engines})
+            recovery, retained = load_snapshot(manifest, config)
         shutil.rmtree(self.build_dir, ignore_errors=True)
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.final_dir.mkdir(parents=True, exist_ok=True)
@@ -829,105 +890,59 @@ class Generator:
         )
 
         accepted: list[Path] = []
-        successful_engines: list[str] = []
+        retained_count = 0
+        if recovery is not None:
+            entries = [{'id': path.stem, 'minimum_duration': self.minimum_duration,
+                        'maximum_duration': self.maximum_duration} for path in retained]
+            qualified = self.qualify_direct_candidates(ENGINE_OMNIVOICE, entries, retained, prefix='retained_')
+            rows = {row['name']: row for row in recovery['files']}
+            with open_directory(Path(recovery_manifest).parent / 'final') as directory:
+                for path in qualified:
+                    data, digest = verified_audio(directory, rows[path.name])
+                    if not valid_sample(path) or digest in self.accepted_hashes:
+                        continue
+                    destination = self.final_dir / f'{len(accepted)}.wav'
+                    destination.write_bytes(data)
+                    self.accepted_hashes.add(digest)
+                    accepted.append(destination)
+            retained_count = len(accepted)
+            self.direct_attempt[ENGINE_OMNIVOICE] = recovery['next_attempt']
+            self.actual_counts[ENGINE_OMNIVOICE] = len(accepted)
+            log(f'→ Recovery retained {len(accepted)}/{len(retained)} revalidated clip(s); '
+                f'{self.args.samples - len(accepted)} remain')
         ordered_engines = [
             engine
             for engine in (ENGINE_QWEN3, ENGINE_PIPER, ENGINE_OMNIVOICE, ENGINE_MOSS)
             if engine in plan
         ]
         for engine in ordered_engines:
-            count = plan[engine]
-            try:
-                entries, raw_paths = self.generate_direct_engine(engine, count, self._generation_references(engine, accepted))
-                qualified_paths = self.qualify_direct_candidates(engine, entries, raw_paths)
-                requested_accepts = min(count, self.args.samples - len(accepted))
-                normalized = self.normalize(qualified_paths, len(accepted), requested_accepts)
-                accepted.extend(normalized)
-                self.actual_counts[engine] = len(normalized)
-                if normalized:
-                    successful_engines.append(engine)
-                log(f"✅ {engine}: accepted {len(normalized)} normalized sample(s)")
-            except Exception as error:
-                self.actual_counts[engine] = 0
-                log(f"⚠️ {engine} generation failed; another engine will fill its share: {error}")
+            count = min(plan[engine], self.args.samples - len(accepted))
+            if count <= 0 or self.budget.stop_reason():
+                continue
+            self._run_round(engine, count, accepted)
 
-        missing = self.args.samples - len(accepted)
-        fallback_candidates = [
-            engine
-            for engine in (ENGINE_QWEN3, ENGINE_PIPER, ENGINE_OMNIVOICE, ENGINE_MOSS)
-            if engine in successful_engines
-            or (engine == ENGINE_PIPER and engine in engines and self.piper_available())
-        ]
-        for attempt in range(6):
-            if missing <= 0 or not fallback_candidates:
+        self._refill_round = True
+        attempt = 0
+        while len(accepted) < self.args.samples and not self.budget.stop_reason():
+            eligible = [engine for engine in ordered_engines if self.budget.eligible(engine)]
+            # Initial rounds follow the plan's shares; top-ups rotate through direct
+            # providers first (Qwen3 leads), so the final mix can lean toward it.
+            direct = [engine for engine in eligible if engine != ENGINE_MOSS]
+            candidates = direct or eligible
+            if not candidates:
                 break
-            engine = fallback_candidates[attempt % len(fallback_candidates)]
-            log(f"→ Filling {missing} rejected/missing sample(s) with {engine}")
-            try:
-                entries, raw_paths = self.generate_direct_engine(
-                    engine,
-                    missing,
-                    self._generation_references(engine, accepted),
-                    prefix=f"fallback{attempt}_",
-                )
-                qualified_paths = self.qualify_direct_candidates(
-                    engine,
-                    entries,
-                    raw_paths,
-                    prefix=f"fallback{attempt}_",
-                )
-                normalized = self.normalize(qualified_paths, len(accepted), missing)
-                accepted.extend(normalized)
-                self.actual_counts[engine] = self.actual_counts.get(engine, 0) + len(normalized)
-            except Exception as error:
-                log(f"⚠️ {engine} fallback failed: {error}")
-            missing = self.args.samples - len(accepted)
-
-        # The normal refill rotation preserves provider diversity, but it can
-        # end on a low-yield MOSS batch with only a handful of clips missing.
-        # Keep the safety gates intact and finish with fresh candidates from
-        # the direct providers that already proved usable during this run.
-        recovery_candidates = [
-            engine for engine in fallback_candidates if engine != ENGINE_MOSS
-        ] or [engine for engine in fallback_candidates if engine == ENGINE_MOSS]
-        for attempt in range(FINAL_RECOVERY_ROUNDS):
-            if missing <= 0 or not recovery_candidates:
-                break
-            engine = recovery_candidates[attempt % len(recovery_candidates)]
-            prefix = f"recovery{attempt}_"
-            log(
-                f"→ Final recovery {attempt + 1}/{FINAL_RECOVERY_ROUNDS}: "
-                f"filling {missing} sample(s) with {engine}"
-            )
-            try:
-                entries, raw_paths = self.generate_direct_engine(
-                    engine,
-                    missing,
-                    self._generation_references(engine, accepted),
-                    prefix=prefix,
-                )
-                qualified_paths = self.qualify_direct_candidates(
-                    engine,
-                    entries,
-                    raw_paths,
-                    prefix=prefix,
-                )
-                normalized = self.normalize(
-                    qualified_paths,
-                    len(accepted),
-                    missing,
-                )
-                accepted.extend(normalized)
-                self.actual_counts[engine] = (
-                    self.actual_counts.get(engine, 0) + len(normalized)
-                )
-            except Exception as error:
-                log(f"⚠️ {engine} final recovery failed: {error}")
-            missing = self.args.samples - len(accepted)
+            engine = candidates[attempt % len(candidates)]
+            self._run_round(engine, self.args.samples - len(accepted), accepted, prefix=f'refill{attempt}_')
+            attempt += 1
 
         if len(accepted) < self.args.samples:
+            reason = self.budget.stop_reason() or (
+                'engine_error' if all(stats.error for stats in self.budget.yields.values()) else 'no_progress')
+            studio_progress('incomplete', completed=len(accepted), total=self.args.samples, reason=reason)
             raise RuntimeError(
-                f"Only {len(accepted)} of {self.args.samples} samples passed normalization and QA."
+                f'TTS_INCOMPLETE retained={len(accepted)} missing={self.args.samples - len(accepted)} '
+                f'reason={reason}. Retained clips are preserved in the build directory. '
+                'Use the local recovery command for a failed OmniVoice-only job; do not rerun in place.'
             )
 
         # Remove any accepted overage and ensure contiguous numeric file names.
@@ -944,6 +959,9 @@ class Generator:
             "signature": self.signature(),
             "planned_counts": plan,
             "actual_counts": self.actual_counts,
+            "candidate_budget": {'attempted': self.budget.attempted, 'limit': self.budget.limit,
+                                  'yield': {engine: {'generated': stats.generated, 'accepted': stats.accepted}
+                                            for engine, stats in self.budget.yields.items()}},
             "source_audio_ids": self.final_sources,
             "voice_bank": "",
             "generation_strategy": {
@@ -966,6 +984,10 @@ class Generator:
                 "omnivoice_fixed_short_duration": True,
             },
         }
+        if recovery is not None:
+            manifest['recovery'] = {'source_job_id': recovery['source_job_id'],
+                                    'snapshot_id': Path(recovery_manifest).parent.name,
+                                    'retained': retained_count}
         (self.final_dir / ".generation_manifest.json").write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
@@ -987,8 +1009,12 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--tts-mode", default=DEFAULT_TTS_MODE)
     result.add_argument("--engines", default=None, help="Explicit comma-separated TTS engines; no unselected engines are used")
     result.add_argument("--reference-manifest", type=Path, help="Approved canonical references for MOSS-only generation")
+    result.add_argument("--recovery-manifest", type=Path, help="Checksummed snapshot of retained OmniVoice clips to revalidate and top up")
     result.add_argument("--samples", type=int, default=50000)
     result.add_argument("--batch-size", type=int, default=8)
+    result.add_argument('--max-candidates', type=int, help='Total candidate admission budget (default: max(1024, samples × 12))')
+    result.add_argument('--max-generation-seconds', type=float, default=21600,
+                        help='Soft deadline for starting new rounds; in-flight rounds finish normally (default: 6 hours)')
     result.add_argument(
         "--voice-count",
         type=int,

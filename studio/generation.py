@@ -12,6 +12,7 @@ import tts_config as tts
 from studio import REPO
 from studio.deletion import delete_batch
 from studio.generation_references import list_sources, materialize_references, output_parents, reference_pool
+from studio.generation_recovery import load_snapshot, recovery_config
 from studio.models import (Batch, BatchAudio, Conflict, GenerationRecipe, GenerationSubmission, NotFound, Page,
                            ValidationError, check_page, iso_now)
 from studio.samples import insert_audio
@@ -342,13 +343,24 @@ class GenerationService:
         ensure_directory(output.parent)
         if output.exists() or output.is_symlink():
             raise Conflict('Generation output already exists')
+        recovery = job.payload.get('recovery_snapshot')
+        if recovery is not None and (not isinstance(recovery, str) or not re.fullmatch('[0-9a-f]{32}', recovery)
+                                     or job.kind != 'generation' or recipe.engines != ['omnivoice']):
+            raise ValidationError('Invalid recovery snapshot')
+        if recovery is not None:
+            manifest = self.store.root / 'recovery' / recovery / 'manifest.json'
+            metadata, _ = load_snapshot(manifest, recovery_config(phrase, asdict(recipe)))
+            if (metadata.get('word_id') != job.word_id or metadata.get('recipe') != asdict(recipe)
+                    or metadata['source_job_id'] != job.payload.get('recovery_source_job_id')):
+                raise ValidationError('Recovery snapshot does not belong to this job')
         command = [sys.executable, str(REPO / 'cli/tts_generate_samples.py'),
                    f'--data-dir={self.store.data_dir}', f'--output-dir={output}',
                    f'--language={recipe.language}', f'--english-accent={recipe.english_accent}',
                    f'--tts-mode={recipe.tts_mode}', f'--samples={recipe.samples}', f'--batch-size={recipe.batch_size}',
                     *([f'--engines={",".join(recipe.engines)}'] if recipe.engines is not None else []),
-                    *([f'--reference-manifest={reference_manifest}'] if reference_manifest is not None else []),
-                   '--', phrase]
+                     *([f'--reference-manifest={reference_manifest}'] if reference_manifest is not None else []),
+                     *([f'--recovery-manifest={self.store.root / "recovery" / recovery / "manifest.json"}'] if recovery else []),
+                    '--', phrase]
         context.log(f'Generating synthetic batch: {recipe.samples} samples, batch size {recipe.batch_size}')
         context.run(command, cwd=str(root))
         if context.cancelled():

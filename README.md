@@ -426,6 +426,42 @@ Each model's **Preview** generates one
 sample of the workspace phrase using the current language/accent, with playback
 controls; previews never enter the training datasets or change saved settings.
 Both generation and previews use the GPU queue and report real job progress.
+
+To recover a failed **OmniVoice-only** job with retained clips, a local administrator
+can run the following inside the updated Studio container:
+
+```bash
+docker exec ks-wakeword-studio /data/.recorder-venv/bin/python \
+  /root/mww-scripts/cli/studio_recover_generation.py --data-dir=/data \
+  --word-id=WORKSPACE_ID --source-job-id=FAILED_JOB_ID
+```
+
+This makes an independent checksummed snapshot under `/data/studio/recovery/`,
+then queues a new job with the original recipe. Retained audio is rechecked under
+unchanged QA before fresh clips fill the shortage. Only a complete validated batch
+is published; neither the failed job's files nor training selection is changed.
+Keep the snapshot and original files until recovery is verified. Do not run the
+ordinary generator against the failed job's directory: it clears its build files.
+
+Fresh refills are sized from each provider's measured **normalized, unique** yield
+with a 20% margin, rather than a fixed multiplier. Each round is capped at
+20,000 candidates and, by default, the whole job at `max(1024, 12 × samples)`; a provider stops
+after three consecutive rounds without progress. Top-ups prefer direct providers
+(Qwen3 first), so a multi-provider mix can lean toward them. The generator CLI supports
+`--max-candidates` and `--max-generation-seconds` (default six hours). The time
+limit stops admission of new rounds; an in-flight round finishes normally, and
+Studio's normal cancellation still stops owned children. Incomplete jobs report
+retained/missing counts and the stopping reason without publishing a partial batch.
+
+For reproducible duration diagnostics, a local administrator can run
+`cli/benchmark_omnivoice.py` with `--data-dir`, `--word-id`, and a **new**
+`--output-dir`. It compares seeded duration conditions at batch sizes 1 and 8,
+records the installed model/package revisions, applies existing QA and normalization,
+and writes `generation.json`, `results.json`, WAVs, and per-clip QA reports.
+`--wait-for-gpu-seconds=21600` queues behind active GPU work without interrupting it.
+These are normally owned `benchmark` jobs, not generated datasets; the web worker
+does not run them without the local benchmark process. No training selection changes.
+
 MOSS has its own sample count and requires direct-provider reference audio. Select
 multiple completed source datasets, or enable **Generate after current selection**
 to queue MOSS after this submission's direct providers with one click. This mode

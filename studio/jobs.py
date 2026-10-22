@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 MAINTENANCE_INTERVAL = 5.0
 
 RESOURCES = {'train': 'gpu', 'generation': 'gpu', 'preview': 'gpu', 'classify': 'gpu',
-             'deploy': 'collection', 'scrape': 'collection', 'download': 'download'}
+             'benchmark': 'gpu', 'deploy': 'collection', 'scrape': 'collection', 'download': 'download'}
 ACTIVE = ('running', 'cancelling')
 LOG_LIMIT = 65536
 # Bounded numeric training metrics a child may report: (label, maximum, shown as percentage).
@@ -223,14 +223,17 @@ class JobQueue:
             return None
         return fd
 
-    def claim(self, resource, now, *, kinds=None):
+    def claim(self, resource, now, *, kinds=None, job_id=None):
         if resource not in ('gpu', 'collection', 'download'):
             raise ValidationError('Invalid resource')
+        if job_id is not None and (not isinstance(job_id, str) or not re.fullmatch('[0-9a-f]{32}', job_id)):
+            raise ValidationError('Invalid job identifier')
         now = aware_utc(now)
         with self._lock, self.store.transaction() as db:
             if db.execute("SELECT 1 FROM studio_jobs WHERE resource=? AND status IN ('running','cancelling')", (resource,)).fetchone():
                 return None
-            rows = db.execute("SELECT * FROM studio_jobs WHERE resource=? AND status='queued' ORDER BY rowid", (resource,))
+            rows = db.execute("SELECT * FROM studio_jobs WHERE resource=? AND status='queued' "
+                              "AND (? IS NULL OR id=?) ORDER BY rowid", (resource, job_id, job_id))
             row = next((row for row in rows if kinds is None or row['kind'] in kinds), None)
             if row is None:
                 return None
@@ -370,14 +373,29 @@ class ProcessRunner:
         # free-form messages, paths, exception text or model responses.
         try:
             event = json.loads(raw)
-            if not isinstance(event, dict) or set(event) - {'stage', 'engine', 'completed', 'total', *TRAINING_METRICS}:
+            if not isinstance(event, dict) or set(event) - {'stage', 'engine', 'completed', 'total', 'reason', *TRAINING_METRICS}:
                 return
             stage = event.get('stage')
             if stage not in ('preparing', 'loading', 'generating', 'qualifying', 'qualified',
-                             'normalizing', 'validating', 'saved', 'staging', 'augmenting', 'training', 'evaluating'):
+                              'normalizing', 'validating', 'saved', 'staging', 'augmenting', 'training', 'evaluating', 'incomplete'):
                 return
             engine = event.get('engine')
             if engine is not None and engine not in ('omnivoice', 'qwen3', 'moss', 'piper'):
+                return
+            if stage == 'incomplete':
+                reasons = {'candidate_budget': 'candidate budget exhausted', 'time_budget': 'time budget exhausted',
+                           'no_progress': 'repeated rounds made no progress', 'engine_error': 'repeated engine failures'}
+                reason = event.get('reason')
+                done, total = event.get('completed'), event.get('total')
+                if (not isinstance(reason, str) or reason not in reasons or type(done) is not int
+                        or type(total) is not int or not 0 <= done < total <= 100000000
+                        or engine is not None or set(event) != {'stage', 'completed', 'total', 'reason'}):
+                    return
+                context.log(f'Generation incomplete: retained {done}/{total}; missing {total - done}; '
+                            f'{reasons[reason]}. Retained clips are preserved; local-admin recovery is available '
+                            'for failed OmniVoice-only jobs. Do not rerun in place.')
+                return True
+            if 'reason' in event:
                 return
             count = ''
             if 'completed' in event or 'total' in event:
@@ -546,11 +564,12 @@ class WorkerPool:
             raise Conflict('Register completion hooks before starting workers')
         self.completion_hooks[kind] = callback
 
-    def run_once(self, resource):
+    def run_once(self, resource, *, job_id=None):
         if self.stop_event.is_set():
             return False
         self.queue.recover()
-        job = self.queue.claim(resource, self.clock(), kinds=self.handlers)
+        job = self.queue.claim(resource, self.clock(), kinds=self.handlers,
+                               **({'job_id': job_id} if job_id is not None else {}))
         if job is None:
             return False
         context = JobContext(self.queue, job, self.stop_event, self.runner)

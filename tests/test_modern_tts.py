@@ -54,7 +54,7 @@ def write_tone(
 
 
 class ModernTtsTests(unittest.TestCase):
-    def _external_moss_corpus(self, reference_count):
+    def _external_moss_corpus(self, reference_count, *, reject_first=True):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             references = []
@@ -83,7 +83,8 @@ class ModernTtsTests(unittest.TestCase):
                         write_tone(destination / f"{row['id']}.wav", frequency=220 + 30 * len(model_entries))
                 else:
                     destination = Path(command[command.index('--output-jsonl') + 1])
-                    destination.write_text(''.join(json.dumps({'id': row['id'], 'accepted': not row['id'].endswith('0000000')}) + '\n' for row in rows))
+                    rejected = '0000000' if reject_first else '0000001'
+                    destination.write_text(''.join(json.dumps({'id': row['id'], 'accepted': not row['id'].endswith(rejected)}) + '\n' for row in rows))
             with patch.object(instance, 'ensure_environment', return_value=root / 'moss-python'), \
                  patch.object(instance, '_reference_qa_python', return_value=root / 'qa-python'), \
                  patch.object(generator_module, 'run', side_effect=external):
@@ -105,6 +106,11 @@ class ModernTtsTests(unittest.TestCase):
         entries, manifest = self._external_moss_corpus(2)
         self.assertGreater(len(entries), 2)
         self.assertEqual(manifest['source_audio_ids'], {'0.wav': 'b' * 32, '1.wav': 'a' * 32})
+
+    @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg not installed')
+    def test_moss_refills_do_not_reuse_already_accepted_carriers(self):
+        _, manifest = self._external_moss_corpus(2, reject_first=False)
+        self.assertEqual(manifest['source_audio_ids'], {'0.wav': 'a' * 32, '1.wav': 'b' * 32})
 
     def test_explicit_moss_reference_manifest_rejects_wrong_engine_or_missing_pool(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -467,7 +473,7 @@ class ModernTtsTests(unittest.TestCase):
                     accepted_count = limit
                 elif source == "moss_main":
                     accepted_count = max(0, limit - 1)
-                elif "recovery" in source:
+                elif source.startswith('qwen3_refill'):
                     accepted_count = limit
                 else:
                     accepted_count = 0
@@ -498,14 +504,8 @@ class ModernTtsTests(unittest.TestCase):
             instance = RecoveryGenerator(args)
             instance.generate()
 
-            fallback_calls = [
-                call for call in instance.generation_calls if call[1].startswith("fallback")
-            ]
-            recovery_calls = [
-                call for call in instance.generation_calls if call[1].startswith("recovery")
-            ]
-            self.assertEqual(len(fallback_calls), 6)
-            self.assertEqual(recovery_calls, [(generator_module.ENGINE_QWEN3, "recovery0_", 1)])
+            refill_calls = [call for call in instance.generation_calls if call[1].startswith('refill')]
+            self.assertEqual(refill_calls, [(generator_module.ENGINE_QWEN3, 'refill0_', 1)])
             self.assertEqual(len(list(output_dir.glob("*.wav"))), 8)
             self.assertTrue((output_dir / ".generation_manifest.json").is_file())
 
