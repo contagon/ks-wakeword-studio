@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from studio.legacy_training import training_environment
+from studio.mww_training import training_environment
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

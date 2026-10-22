@@ -64,8 +64,8 @@ class AugmentationDatasetService:
         return CATALOG[key]
 
     def _attempts(self, db, key):
-        return [row for row in db.execute("SELECT id,payload,status,result,created_at FROM studio_jobs WHERE kind='download' ORDER BY rowid")
-                if json.loads(row['payload']).get('augmentation_id') == key]
+        return db.execute("SELECT id,payload,status,result,created_at FROM studio_jobs WHERE kind='download' "
+                          "AND json_extract(payload,'$.augmentation_id')=? ORDER BY rowid", (key,)).fetchall()
 
     def selection(self, word_id):
         with self.store.transaction() as db:
@@ -138,10 +138,10 @@ class AugmentationDatasetService:
             attempts = self._attempts(db, key)
             for row in attempts:
                 if row['status'] in ('queued', 'running', 'cancelling'):
-                    return self.jobs._record(self.jobs._row(db, row['id']))
+                    return self.jobs.record(self.jobs.fetch(db, row['id']))
             if installed:
                 raise Conflict('Augmentation corpus already installed')
-            return self.jobs._enqueue(db, 'download', None, {'augmentation_id': key},
+            return self.jobs.enqueue_in(db, 'download', None, {'augmentation_id': key},
                                       f'augmentation:{key}:{len(attempts)}', None, self.jobs.clock())
 
     def execute(self, job, context):

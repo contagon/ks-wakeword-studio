@@ -316,7 +316,7 @@ time.sleep(.5)
              patch('studio.jobs.os.write'):
             with self.assertRaises(Conflict):
                 ProcessRunner().run(context, ['failed-command'])
-        self.jobs._finish(job.id, {'error': 'handler_failed'}, 'failed')
+        self.jobs.finish(job.id, {'error': 'handler_failed'}, 'failed')
 
     def test_scheduler_dedupe_namespace_cannot_be_forged_by_manual_enqueue(self):
         with self.assertRaises(ValidationError):
@@ -450,6 +450,21 @@ time.sleep(.5)
         self.assertEqual((gpu.failure_count, gpu.consecutive_failures), (2147483647, 2147483647))
         self.assertEqual(len(pool.health().loops), 3)
         self.assertNotIn('secret', repr(pool.health()))
+
+    def test_maintenance_runs_on_its_own_slower_cadence(self):
+        from unittest.mock import Mock
+        maintenance = Mock()
+        schedules = Mock()
+        pool = WorkerPool(self.jobs, clock=lambda: self.now, schedules=schedules, maintenance=maintenance)
+        clock = iter([0.0, 0.0, 1.0, 4.9, 5.0, 5.0])
+        def wait(delay):
+            if schedules.tick.call_count == 4:
+                pool.stop_event.set()
+        with patch('studio.jobs.time.monotonic', side_effect=lambda: next(clock)), \
+             patch.object(pool.stop_event, 'wait', side_effect=wait):
+            pool._schedule_loop()
+        self.assertEqual(schedules.tick.call_count, 4)
+        self.assertEqual(maintenance.call_count, 2)
 
     def test_scheduler_recovery_admits_due_work_and_keeps_failure_history(self):
         import sqlite3

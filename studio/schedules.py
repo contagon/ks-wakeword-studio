@@ -20,7 +20,7 @@ class ScheduleService:
         self.store, self.jobs, self.clock = store, jobs, clock
 
     @staticmethod
-    def _record(row):
+    def record(row):
         return Schedule(row['scope'], row['cron'], row['timezone'], bool(row['enabled']), row['next_run_at'])
 
     def save(self, scope: str, cron: str, timezone: str = 'UTC', enabled: bool = True) -> Schedule:
@@ -57,7 +57,7 @@ class ScheduleService:
             raise NotFound('Wakeword not found')
         old = db.execute('SELECT * FROM studio_schedules WHERE scope=?', (scope,)).fetchone()
         if old and (old['cron'], old['timezone'], bool(old['enabled'])) == (cron, timezone, enabled):
-            return self._record(old)
+            return self.record(old)
         db.execute('INSERT INTO studio_schedules VALUES (?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET '
                    'cron=excluded.cron, timezone=excluded.timezone, enabled=excluded.enabled, next_run_at=excluded.next_run_at',
                    (scope, cron, timezone, int(enabled), due))
@@ -76,7 +76,7 @@ class ScheduleService:
 
     def list(self) -> list[Schedule]:
         with self.store.transaction() as db:
-            return [self._record(row) for row in db.execute('SELECT * FROM studio_schedules ORDER BY scope')]
+            return [self.record(row) for row in db.execute('SELECT * FROM studio_schedules ORDER BY scope')]
 
     def tick(self, now: datetime) -> list:
         now = aware_utc(now)
@@ -85,14 +85,14 @@ class ScheduleService:
             rows = db.execute('SELECT * FROM studio_schedules WHERE enabled=1 AND next_run_at<=? ORDER BY scope',
                               (now.isoformat(),)).fetchall()
             for row in rows:
-                schedule = self._record(row)
+                schedule = self.record(row)
                 existing = db.execute("SELECT id FROM studio_jobs WHERE schedule_scope=? AND status='queued'",
                                       (schedule.scope,)).fetchone()
                 occurrence = db.execute('SELECT 1 FROM studio_schedule_occurrences WHERE scope=? AND scheduled_at=?',
                                         (schedule.scope, schedule.next_run_at)).fetchone()
                 if not existing and not occurrence:
                     kind, word = schedule.scope.split(':', 1) if ':' in schedule.scope else ('scrape', None)
-                    job = self.jobs._enqueue(db, kind, word, {},
+                    job = self.jobs.enqueue_in(db, kind, word, {},
                                              'schedule:' + schedule.scope + ':' + schedule.next_run_at,
                                              schedule.scope, now)
                     db.execute('INSERT INTO studio_schedule_occurrences VALUES (?,?,?)',

@@ -2,6 +2,7 @@ import hashlib
 import io
 import sqlite3
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -82,17 +83,16 @@ class StorageTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 store.scoped_directory(category, name)
 
-    def test_database_lock_retries_are_bounded(self):
+    def test_transaction_waits_for_another_process_writer(self):
         store = Store.open(self.root)
         self.addCleanup(store.close)
-        blocker = sqlite3.connect(self.root / "studio/studio.sqlite3", timeout=0)
+        blocker = sqlite3.connect(self.root / "studio/studio.sqlite3", timeout=0, check_same_thread=False)
         self.addCleanup(blocker.close)
         blocker.execute("BEGIN IMMEDIATE")
+        release = threading.Timer(0.3, blocker.rollback)
+        release.start()
+        self.addCleanup(release.cancel)
         started = time.monotonic()
-        with self.assertRaises(sqlite3.OperationalError):
-            with store.transaction():
-                self.fail("locked transaction must not begin")
-        self.assertLess(time.monotonic() - started, 2)
-        blocker.rollback()
         with store.transaction() as db:
+            self.assertGreater(time.monotonic() - started, 0.2)
             self.assertEqual(db.execute("SELECT 1").fetchone()[0], 1)

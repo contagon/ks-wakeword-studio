@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from studio.augmentation import CATALOG
-from studio.legacy_training import training_environment
+from studio.mww_training import training_environment
 
 
 def main():

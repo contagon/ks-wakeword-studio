@@ -41,13 +41,13 @@ class AutomationService:
     def get(self, word_id):
         with self.store.transaction() as db:
             settings = self.settings_in(db, word_id)
-            schedules = [self.schedules._record(r) for r in db.execute(
+            schedules = [self.schedules.record(r) for r in db.execute(
                 'SELECT * FROM studio_schedules WHERE scope IN (?,?,?,?)',
                 tuple(kind + ':' + word_id for kind in ('scrape', 'classify', 'train', 'deploy')))]
             last = {}
             for kind in ('scrape', 'classify', 'train', 'deploy'):
                 row = db.execute('SELECT * FROM studio_jobs WHERE word_id=? AND kind=? ORDER BY rowid DESC LIMIT 1', (word_id, kind)).fetchone()
-                last[kind] = self.jobs._record(row) if row else None
+                last[kind] = self.jobs.record(row) if row else None
         return AutomationStatus(settings, schedules, last)
 
     def save(self, word_id, settings):
@@ -90,7 +90,7 @@ class AutomationService:
                         and result.get('new_mapped', 0) > 0 and not result.get('skipped')):
                     pending = db.execute("SELECT 1 FROM samples WHERE word_id=? AND label='pending' AND deleted=0 LIMIT 1", (row['word_id'],)).fetchone()
                     if pending:
-                        self.jobs._enqueue(db, 'classify', row['word_id'], {}, 'collection:' + row['id'], None, self.jobs.clock())
+                        self.jobs.enqueue_in(db, 'classify', row['word_id'], {}, 'collection:' + row['id'], None, self.jobs.clock())
                 db.execute('INSERT INTO automation_events(event_key,word_id) VALUES (?,?)', ('collection:' + row['id'], row['word_id']))
 
     def handle_deploy(self, job, context):

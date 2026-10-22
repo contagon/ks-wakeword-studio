@@ -19,6 +19,7 @@ from studio.storage import AUDIO_MIMES
 from studio.capture import analyze_capture
 from studio.models import CapturePreview
 from studio.errors import OperationError
+from tts_config import DEFAULT_GENERATION_BATCH_SIZE, DEFAULT_GENERATION_SAMPLES
 
 
 def require_audio_mime(upload: UploadFile) -> None:
@@ -172,7 +173,6 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
 
     @router.get('/generation/defaults')
     def generation_defaults():
-        from tts_config import DEFAULT_GENERATION_SAMPLES, DEFAULT_GENERATION_BATCH_SIZE
         return {'samples': DEFAULT_GENERATION_SAMPLES, 'batch_size': DEFAULT_GENERATION_BATCH_SIZE}
 
     @router.get('/wakewords/{word_id}/automation', response_model=AutomationStatus)

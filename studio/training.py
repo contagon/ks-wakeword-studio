@@ -10,9 +10,11 @@ from typing import Callable, Protocol
 from threading import Event
 from uuid import uuid4
 
-from studio.models import (AugmentationInput, Conflict, DatasetInput, ModelVersion, NotFound, Page, RunManifest, TrainingAudio,
-                           TrainingResult, TrainingSettings, ValidationError, check_page, iso_now, utc_now)
 from studio.augmentation import snapshot as augmentation_snapshot
+from studio.models import (AugmentationInput, Conflict, DatasetInput, LegacyRun, ModelVersion, NotFound, Page,
+                           RunManifest, TrainingAudio, TrainingResult, TrainingSettings, ValidationError, check_page,
+                           iso_now, utc_now)
+from studio.mww_training import MwwTrainingAdapter, checked_file, sha256
 from studio.storage import ensure_directory, open_directory
 from studio.workspaces import require_word
 
@@ -29,7 +31,6 @@ def load_settings(value):
 def load_manifest(value):
     data = json.loads(value)
     if 'legacy_identity' in data:
-        from studio.models import LegacyRun
         return LegacyRun(**{key: data[key] for key in LegacyRun.__dataclass_fields__ if key in data})
     data['augmentation'] = tuple(AugmentationInput(**item) for item in data.get('augmentation', []))
     data['config'] = load_settings(data['config'])
@@ -171,7 +172,7 @@ class TrainingService:
             return ModelVersion(**json.loads(row[0])) if row else None
 
     def execute(self, job, context=None):
-        if (context is None or context.queue is not self.jobs or context.job.id != job.id or job.id not in self.jobs._owners
+        if (context is None or context.queue is not self.jobs or context.job.id != job.id or not self.jobs.owns(job.id)
                 or self.jobs.get(job.id).status != 'running' or job.kind != 'train'):
             raise Conflict('Owned job context required')
         self.augmentation.require_ready(job.word_id)
@@ -191,8 +192,7 @@ class TrainingService:
             return None
         if context.cancelled():
             raise Conflict('Training cancelled')
-        from studio.legacy_training import LegacyTrainingAdapter
-        adapter = self.adapter_factory(context) if self.adapter_factory else LegacyTrainingAdapter(context, self.store.data_dir)
+        adapter = self.adapter_factory(context) if self.adapter_factory else MwwTrainingAdapter(context, self.store.data_dir)
         result = adapter.run(manifest, root, context.log, context.stop_event)
         if context.cancelled():
             raise Conflict('Training cancelled')
@@ -201,7 +201,6 @@ class TrainingService:
         return self._archive(manifest, root, result, context)
 
     def _archive(self, manifest, root, result, context):
-        from studio.legacy_training import checked_file, sha256
         version_id = uuid4().hex
         parent = self.store.root / 'models' / manifest.word_id
         ensure_directory(parent)

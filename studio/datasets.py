@@ -14,9 +14,11 @@ import stat
 import struct
 import tempfile
 import zipfile
+from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path, PurePosixPath
 
+from studio.errors import OperationError
 from studio.jobs import JobQueue
 from studio.models import Conflict, Dataset, DatasetInput, Job, NotFound, Page, ValidationError
 from studio.storage import ensure_directory, fsync_directories, open_directory
@@ -136,8 +138,9 @@ class DatasetService:
             selected = self._selected(db, word_id)
             installs = {r['dataset_id']: json.loads(r['manifest_json']) for r in db.execute('SELECT * FROM studio_dataset_installations')}
             latest = {}
-            for job in db.execute("SELECT id,payload,status FROM studio_jobs WHERE kind='download' ORDER BY created_at,rowid"):
-                latest[json.loads(job['payload']).get('dataset_id')] = job
+            for job in db.execute("SELECT id,status,json_extract(payload,'$.dataset_id') dataset_id FROM studio_jobs "
+                                  "WHERE kind='download' ORDER BY created_at,rowid"):
+                latest[job['dataset_id']] = job
         result = []
         for key, entry in sorted(self.catalog.items()):
             install, job = installs.get(key), latest.get(key)
@@ -170,8 +173,8 @@ class DatasetService:
         self._entry(dataset_id)
         # JobQueue's unique dedupe key arbitrates concurrent requests for an attempt.
         with self.store.transaction() as db:
-            rows = db.execute("SELECT id,payload,status FROM studio_jobs WHERE kind='download'").fetchall()
-        matching = [row for row in rows if json.loads(row['payload']).get('dataset_id') == dataset_id]
+            matching = db.execute("SELECT id,status FROM studio_jobs WHERE kind='download' "
+                                  "AND json_extract(payload,'$.dataset_id')=?", (dataset_id,)).fetchall()
         for row in matching:
             if row['status'] in ('queued', 'running', 'cancelling'):
                 return self.jobs.get(row['id'])
@@ -286,11 +289,9 @@ class DatasetService:
             installed = {row[0] for row in db.execute('SELECT dataset_id FROM studio_dataset_installations')}
             missing = self._selected(db, word_id) - installed
         if missing:
-            from studio.errors import OperationError
             raise OperationError('negative_datasets_missing')
 
     def snapshot(self, word_id: str, *, _db=None) -> list[DatasetInput]:
-        from contextlib import nullcontext
         with (self.store.transaction() if _db is None else nullcontext(_db)) as db:
             require_word(db, word_id)
             selected = self._selected(db, word_id)

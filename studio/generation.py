@@ -10,9 +10,10 @@ from uuid import uuid4
 
 import tts_config as tts
 from studio import REPO
+from studio.deletion import delete_batch
+from studio.generation_references import list_sources, materialize_references, output_parents, reference_pool
 from studio.models import (Batch, BatchAudio, Conflict, GenerationRecipe, GenerationSubmission, NotFound, Page,
                            ValidationError, check_page, iso_now)
-from studio.generation_references import list_sources, materialize_references, output_parents, reference_pool
 from studio.samples import insert_audio
 from studio.storage import canonical_wav, ensure_directory, open_directory, read_regular
 from studio.workspaces import require_word
@@ -48,7 +49,7 @@ class GenerationService:
                  'model_availability': self._model_availability(code),
                  'engines': {mode: tts.engines_for_language(code, mode, piper_available=self._piper_available(code))
                              for mode in tts.TTS_MODES}}
-                for code, name in sorted(self._languages().items())]
+                for code, name in sorted(self.languages().items())]
 
     def _model_availability(self, language):
         available = self._piper_available(language)
@@ -67,7 +68,7 @@ class GenerationService:
                            else 'No compatible Piper voice is installed or listed in the offline voice catalog for this language.')})
         return models
 
-    def _languages(self):
+    def languages(self):
         languages = dict(tts.COMMON_OMNIVOICE_LANGUAGES)
         cache = self.store.data_dir / '.cache/omnivoice_languages.json'
         try:
@@ -85,7 +86,7 @@ class GenerationService:
     def _validate(self, recipe):
         if not isinstance(recipe, GenerationRecipe):
             raise ValidationError('Invalid recipe')
-        if (recipe.language not in self._languages() or recipe.tts_mode not in tts.TTS_MODES
+        if (recipe.language not in self.languages() or recipe.tts_mode not in tts.TTS_MODES
                 or recipe.english_accent not in tts.ENGLISH_ACCENTS
                 or (recipe.language != 'en' and recipe.english_accent != 'mixed')
                 or type(recipe.samples) is not int or recipe.samples < 1
@@ -113,11 +114,11 @@ class GenerationService:
                 if recipe.moss_after_current:
                     raise ValidationError('Select completed sources to preview MOSS')
                 reference_pool(self, db, word_id, word['phrase'], recipe, 1)
-            return self.jobs._enqueue(db, 'preview', word_id,
+            return self.jobs.enqueue_in(db, 'preview', word_id,
                                       {'phrase': word['phrase'], 'recipe': asdict(recipe)}, None, None, self.clock())
 
     def handle_preview(self, job, context):
-        if (context.queue is not self.jobs or context.job.id != job.id or job.id not in self.jobs._owners
+        if (context.queue is not self.jobs or context.job.id != job.id or not self.jobs.owns(job.id)
                 or job.kind != 'preview' or self.jobs.get(job.id).status != 'running'):
             raise Conflict('Owned preview context required')
         recipe = GenerationRecipe(**job.payload['recipe'])
@@ -176,7 +177,7 @@ class GenerationService:
             return self._enqueue_batch(db, word, recipe)
 
     def _enqueue_batch(self, db, word, recipe, **payload):
-        job = self.jobs._enqueue(db, 'generation', word['id'],
+        job = self.jobs.enqueue_in(db, 'generation', word['id'],
                                  {'phrase': word['phrase'], 'recipe': asdict(recipe), **payload}, None, None, self.clock())
         db.execute('INSERT INTO generation_batches VALUES (?,?,?,?,NULL)',
                    (job.id, word['id'], word['phrase'], json.dumps(asdict(recipe), sort_keys=True)))
@@ -239,7 +240,6 @@ class GenerationService:
             return self._batch(db, word_id, batch_id)
 
     def delete_batch(self, word_id: str, batch_id: str) -> None:
-        from studio.deletion import delete_batch
         delete_batch(self.store, self.blobs, word_id, batch_id)
 
     def list(self, word_id, offset=0, limit=50):
@@ -274,7 +274,7 @@ class GenerationService:
     def execute(self, job, context=None):
         # A plain caller must not spawn work outside the queue's ownership lifetime.
         if (context is None or context.queue is not self.jobs or context.job.id != job.id
-                or job.id not in self.jobs._owners):
+                or not self.jobs.owns(job.id)):
             raise Conflict('Owned job context required')
         with self.store.transaction() as db:
             row = db.execute('SELECT * FROM generation_batches WHERE id=? AND word_id=?', (job.id, job.word_id)).fetchone()

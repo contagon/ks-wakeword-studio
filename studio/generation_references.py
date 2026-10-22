@@ -64,7 +64,7 @@ def list_sources(service, word_id, language, offset=0, limit=50):
     with service.store.transaction() as db:
         word = require_word(db, word_id)
         language = language if language is not None else word['language']
-        if language not in service._languages():
+        if language not in service.languages():
             raise ValidationError('Invalid source query')
         rows = db.execute('SELECT b.*,j.status,j.created_at, '
                           '(SELECT count(*) FROM generation_batch_audio a WHERE a.batch_id=b.id) AS sample_count '

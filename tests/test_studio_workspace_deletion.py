@@ -207,7 +207,7 @@ class WorkspaceDeletionTests(unittest.TestCase):
 
     def test_deletion_waits_for_publication_intent_gate(self):
         import threading
-        from studio.deployment import publication_lock
+        from studio.storage import publication_lock
         started, done = threading.Event(), threading.Event()
         errors = []
         def delete():

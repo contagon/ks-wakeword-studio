@@ -15,6 +15,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 from studio import REPO
+from studio.augmentation import pinned_paths
+from studio.datasets import mww_dataset_features
 from studio.models import DatasetInput, TrainingResult, ValidationError
 
 
@@ -41,7 +43,6 @@ def checked_file(path, root):
 
 
 def validate_inputs(manifest, *, require_splits=True):
-    from studio.datasets import mww_dataset_features
     audio = manifest['audio']
     positives = [a for a in audio if a['label'] == 'positive']
     if not positives:
@@ -76,7 +77,7 @@ def training_environment(data_dir, environ=None):
     return env, removed
 
 
-class LegacyTrainingAdapter:
+class MwwTrainingAdapter:
     def __init__(self, context, tool_data_dir):
         self.context, self.tool_data_dir = context, Path(tool_data_dir)
 
@@ -217,7 +218,6 @@ def main(argv=None):
     root.mkdir(parents=True, exist_ok=True)
     try:
         validate_inputs(manifest)
-        from studio.augmentation import pinned_paths
         augmentation = pinned_paths(manifest)
     except ValidationError as exc:
         code = next((key for key, message in PREFLIGHT_MESSAGES.items() if str(exc) == message), 'input_invalid')

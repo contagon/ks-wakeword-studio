@@ -7,6 +7,7 @@ child group are gone; elapsed time alone is never evidence of process death.
 
 import fcntl
 import json
+import logging
 import math
 import os
 import re
@@ -25,6 +26,10 @@ from studio.models import (Conflict, Job, LoopHealth, NotFound, Page, Validation
 from studio.storage import open_directory
 from studio.errors import MESSAGES, child_error, failure_code
 from studio.diagnostics import ChildDiagnostics, retain
+
+logger = logging.getLogger(__name__)
+# Automation reconcile and deployment retries; their backoffs are 30 s or longer.
+MAINTENANCE_INTERVAL = 5.0
 
 RESOURCES = {'train': 'gpu', 'generation': 'gpu', 'preview': 'gpu', 'classify': 'gpu',
              'deploy': 'collection', 'scrape': 'collection', 'download': 'download'}
@@ -150,18 +155,18 @@ class JobQueue:
         self._lock = threading.RLock()
 
     @staticmethod
-    def _record(row):
+    def record(row):
         return Job(row['id'], row['kind'], row['word_id'], row['resource'], json.loads(row['payload']),
                    row['status'], row['created_at'], row['started_at'], row['finished_at'], json.loads(row['result']),
                    row['run_number'])
 
-    def _row(self, db, job_id):
+    def fetch(self, db, job_id):
         row = db.execute('SELECT * FROM studio_jobs WHERE id=?', (job_id,)).fetchone()
         if row is None:
             raise NotFound('Job not found')
         return row
 
-    def _enqueue(self, db, kind, word_id, payload, dedupe_key, scope, now):
+    def enqueue_in(self, db, kind, word_id, payload, dedupe_key, scope, now):
         if kind not in RESOURCES or (kind in ('train', 'generation', 'preview', 'classify', 'deploy') and word_id is None):
             raise ValidationError('Invalid job kind or workspace')
         encoded = safe_json(payload)
@@ -174,7 +179,7 @@ class JobQueue:
             if old:
                 if (old['kind'], old['word_id'], old['payload']) != (kind, word_id, encoded):
                     raise Conflict('Dedupe key belongs to different work')
-                return self._record(old)
+                return self.record(old)
         job_id = uuid.uuid4().hex
         run_number = None
         if kind == 'train':
@@ -183,17 +188,17 @@ class JobQueue:
         db.execute('INSERT INTO studio_jobs(id,kind,word_id,resource,payload,dedupe_key,schedule_scope,status,created_at,run_number) '
                    "VALUES (?,?,?,?,?,?,?,'queued',?,?)",
                    (job_id, kind, word_id, RESOURCES[kind], encoded, dedupe_key, scope, aware_utc(now).isoformat(), run_number))
-        return self._record(self._row(db, job_id))
+        return self.record(self.fetch(db, job_id))
 
     def enqueue(self, kind: str, word_id: str | None, payload: dict, dedupe_key: str | None = None) -> Job:
         if isinstance(dedupe_key, str) and dedupe_key.startswith('schedule:'):
             raise ValidationError('Reserved dedupe namespace')
         with self.store.transaction() as db:
-            return self._enqueue(db, kind, word_id, payload, dedupe_key, None, self.clock())
+            return self.enqueue_in(db, kind, word_id, payload, dedupe_key, None, self.clock())
 
     def get(self, job_id):
         with self.store.transaction() as db:
-            return self._record(self._row(db, job_id))
+            return self.record(self.fetch(db, job_id))
 
     def list(self, offset=0, limit=50, *, state=None):
         check_page(offset, limit)
@@ -205,7 +210,7 @@ class JobQueue:
         with self.store.transaction() as db:
             total = db.execute('SELECT count(*) FROM studio_jobs' + where).fetchone()[0]
             rows = db.execute('SELECT * FROM studio_jobs' + where + ' ORDER BY ' + order + ' LIMIT ? OFFSET ?', (limit, offset)).fetchall()
-            return Page([self._record(row) for row in rows], total, offset, limit)
+            return Page([self.record(row) for row in rows], total, offset, limit)
 
     def _owner_lock(self, job_id):
         path = self.store.scoped_directory('jobs', job_id)
@@ -235,7 +240,7 @@ class JobQueue:
             try:
                 db.execute("UPDATE studio_jobs SET status='running',started_at=? WHERE id=?", (now.isoformat(), row['id']))
                 self._owners[row['id']] = fd
-                return self._record(self._row(db, row['id']))
+                return self.record(self.fetch(db, row['id']))
             except BaseException:
                 os.close(fd)
                 raise
@@ -245,7 +250,7 @@ class JobQueue:
                 or identity['pid'] <= 1 or not re.fullmatch('[0-9a-f]{32}', identity['token'])):
             raise ValidationError('Invalid child identity')
         with self._lock, self.store.transaction() as db:
-            row = self._row(db, job_id)
+            row = self.fetch(db, job_id)
             if job_id not in self._owners or row['status'] not in ACTIVE or row['child']:
                 raise Conflict('Job does not admit a child')
             db.execute('UPDATE studio_jobs SET child=? WHERE id=?', (json.dumps(identity), job_id))
@@ -258,14 +263,19 @@ class JobQueue:
         if fd is not None:
             os.close(fd)
 
-    def finish(self, job_id: str, result: dict) -> Job:
-        return self._finish(job_id, result, 'complete')
+    def release(self, job_id):
+        """Drop this process's owner flock only; the SQL claim stays for recovery."""
+        with self._lock:
+            self._release(job_id)
 
-    def _finish(self, job_id, result, status):
+    def owns(self, job_id):
+        return job_id in self._owners
+
+    def finish(self, job_id: str, result: dict, status: str = 'complete') -> Job:
         encoded = safe_json(result)
         with self._lock:
             with self.store.transaction() as db:
-                row = self._row(db, job_id)
+                row = self.fetch(db, job_id)
                 if row['status'] not in ACTIVE or job_id not in self._owners or not self._child_gone(row):
                     raise Conflict('Job still owns work or belongs to another worker')
                 status = 'cancelled' if row['status'] == 'cancelling' else status
@@ -276,13 +286,13 @@ class JobQueue:
                     # crashed/failed completion callback is recovered on startup.
                     db.execute('INSERT OR IGNORE INTO deployment_events(version_id) '
                                'SELECT id FROM model_versions WHERE run_id=?', (job_id,))
-                job = self._record(self._row(db, job_id))
+                job = self.record(self.fetch(db, job_id))
             self._release(job_id)
             return job
 
     def cancel(self, job_id: str) -> Job:
         with self.store.transaction() as db:
-            row = self._row(db, job_id)
+            row = self.fetch(db, job_id)
             if row['status'] == 'queued':
                 db.execute("UPDATE studio_jobs SET status='cancelled',finished_at=? WHERE id=?",
                            (iso_now(self.clock), job_id))
@@ -304,7 +314,7 @@ class JobQueue:
                     continue
                 try:
                     with self.store.transaction() as db:
-                        row = self._row(db, job_id)
+                        row = self.fetch(db, job_id)
                         if row['status'] in ACTIVE and self._child_gone(row):
                             status = 'cancelled' if row['status'] == 'cancelling' else 'interrupted'
                             db.execute('UPDATE studio_jobs SET status=?,finished_at=? WHERE id=?',
@@ -328,14 +338,14 @@ class JobQueue:
             raise ValidationError('Invalid log')
         text = text[-4096:]
         with self.store.transaction() as db:
-            self._row(db, job_id)
+            self.fetch(db, job_id)
             db.execute('UPDATE studio_jobs SET log=substr(log || ?, -?) WHERE id=?', (text + '\n', LOG_LIMIT, job_id))
 
     def log_tail(self, job_id, limit=8192):
         if type(limit) is not int or not 1 <= limit <= LOG_LIMIT:
             raise ValidationError('Invalid log bound')
         with self.store.transaction() as db:
-            return self._row(db, job_id)['log'][-limit:]
+            return self.fetch(db, job_id)['log'][-limit:]
 
 
 class JobContext:
@@ -555,6 +565,7 @@ class WorkerPool:
                 try:
                     self.completion_hooks[job.kind](completed)
                 except Exception:
+                    logger.exception('%s completion hook failed for job %s', job.kind, job.id)
                     context.log('completion_hook_failed')
         except Exception as exc:
             code = failure_code(exc)
@@ -565,14 +576,13 @@ class WorkerPool:
             context.log(f'{job.kind} handler_failed')
             context.log(MESSAGES[code])
             try:
-                completed = self.queue._finish(job.id, {'error': 'handler_failed', 'error_code': code,
-                                                        'message': MESSAGES[code]}, 'failed')
+                completed = self.queue.finish(job.id, {'error': 'handler_failed', 'error_code': code,
+                                                       'message': MESSAGES[code]}, 'failed')
                 context.log(f'{job.kind} {completed.status}')
             except Conflict:
                 # The handler exited but a surviving/unknown child still owns
                 # the resource. Release only the flock, never the SQL claim.
-                with self.queue._lock:
-                    self.queue._release(job.id)
+                self.queue.release(job.id)
         return True
 
     def _loop(self, resource):
@@ -580,6 +590,7 @@ class WorkerPool:
             try:
                 worked = self.run_once(resource)
             except Exception:
+                logger.exception('%s worker loop failed', resource)
                 self._record_loop_result(resource, failed=True)
             else:
                 self._record_loop_result(resource, failed=False)
@@ -588,12 +599,15 @@ class WorkerPool:
             self.stop_event.wait(0.25)
 
     def _schedule_loop(self):
+        next_maintenance = 0.0
         while not self.stop_event.is_set():
             try:
                 self.schedules.tick(self.clock())
-                if self.maintenance is not None:
+                if self.maintenance is not None and time.monotonic() >= next_maintenance:
+                    next_maintenance = time.monotonic() + MAINTENANCE_INTERVAL
                     self.maintenance(self.clock())
             except Exception:
+                logger.exception('scheduler tick failed')
                 self._record_loop_result('scheduler', failed=True)
             else:
                 self._record_loop_result('scheduler', failed=False)

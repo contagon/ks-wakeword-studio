@@ -17,9 +17,9 @@ import shutil
 import stat
 from uuid import uuid4
 
-from studio.deployment import publication_lock
 from studio.models import Conflict, NotFound, ValidationError
-from studio.storage import BlobStore, ensure_directory, normalize_audio, open_directory, read_regular
+from studio.storage import (BlobStore, ensure_directory, normalize_audio, open_directory, publication_lock,
+                            read_regular)
 
 IDENTITY = re.compile(r'[0-9a-f]{32}')
 

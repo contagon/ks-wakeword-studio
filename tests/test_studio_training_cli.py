@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from studio.legacy_training import validate_inputs
+from studio.mww_training import validate_inputs
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -54,7 +54,7 @@ class TrainingCLITests(unittest.TestCase):
                     self.assertEqual(augmenter.augmentation_probabilities['AddBackgroundNoise'], .7 if backgrounds else 0)
 
     def test_staging_separates_real_and_synthetic_positives_without_changing_splits(self):
-        from studio.legacy_training import stage_inputs
+        from studio.mww_training import stage_inputs
         cases = (
             [('positive', None, 'training', 'personal_samples'),
              ('positive', 'batch', 'testing', 'wake_word_samples'),
@@ -81,7 +81,7 @@ class TrainingCLITests(unittest.TestCase):
                                      f'audio-{index}'.encode())
 
     def test_staging_still_rejects_changed_audio(self):
-        from studio.legacy_training import stage_inputs
+        from studio.mww_training import stage_inputs
         from studio.models import ValidationError
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
@@ -94,7 +94,7 @@ class TrainingCLITests(unittest.TestCase):
                         base / ('real' if batch is None else 'synthetic'))
 
     def test_cli_rejects_unpinned_corpora_before_any_environment_setup(self):
-        from studio import legacy_training as training
+        from studio import mww_training as training
         from studio.models import ValidationError
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as directory:

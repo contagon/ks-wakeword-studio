@@ -9,25 +9,21 @@ transaction is held across HTTP or credential lookup.
 import hashlib
 import io
 import json
-from dataclasses import asdict
+import subprocess
+from dataclasses import asdict, replace
 from datetime import timedelta
 from pathlib import Path
-from tempfile import TemporaryFile
+from tempfile import TemporaryDirectory, TemporaryFile
 from zipfile import ZipFile, ZIP_DEFLATED
 
 from studio import REPO
-from studio.legacy_training import checked_file, sha256
+from studio.automation import AutomationService
 from studio.models import (Conflict, CredentialsRequired, IdentityMismatch, ModelVersion, NotFound,
                            Publication, RemoteRejected, RemoteUnavailable, ValidationError, aware_utc,
                            iso_now, utc_now)
-from studio.storage import flock
+from studio.mww_training import checked_file, sha256, training_environment
+from studio.storage import publication_lock
 from studio.workspaces import require_word
-
-
-def publication_lock(store, name):
-    # Device IDs need not be path-safe; hash the entire opaque lock key.
-    return flock(store.root / 'publication-locks', hashlib.sha256(name.encode()).hexdigest())
-
 
 class StagingFailure(Exception):
     """Fixed local codes only; never expose raw remote responses."""
@@ -49,7 +45,6 @@ class DeploymentService:
             raise Conflict('Model version is not complete')
         version = ModelVersion(**json.loads(row['version']))
         if row['legacy']:
-            from dataclasses import replace
             version = replace(version, origin='legacy', validation_state='validated' if row['validated'] else 'unvalidated')
         if word_id is not None and version.word_id != word_id:
             raise Conflict('Model version belongs to another workspace')
@@ -70,7 +65,6 @@ class DeploymentService:
                 raise ValidationError('Missing publication artifact')
             content = {n: checked_file(root / n, root).read_bytes() for n in names}
             # Hash the actual buffers that will be sent (not just earlier reads).
-            import hashlib
             if any(hashlib.sha256(b).hexdigest() != version.checksums[n] for n, b in content.items()):
                 raise ValidationError('Archive changed during read')
             manifest = json.loads(content[slug + '.json'])
@@ -85,7 +79,6 @@ class DeploymentService:
 
     @staticmethod
     def _expected(content):
-        import hashlib
         return {'microwakeword/' + n:
                 hashlib.sha256(b).hexdigest() for n, b in content.items()}
 
@@ -208,8 +201,6 @@ class DeploymentService:
                 if eligible and (not automatic or not current or current[0] != version.id):
                     self._intent(db, version)
                 if not automatic:
-                    from dataclasses import asdict
-                    from studio.automation import AutomationService
                     effective_settings = AutomationService.settings_in(db, version.word_id)
                     watermark = db.execute('SELECT COALESCE(MAX(rowid),0) FROM model_versions WHERE word_id=?', (version.word_id,)).fetchone()[0]
                     db.execute('INSERT INTO workspace_automation(word_id,settings,archive_cursor,deployment_cursor) VALUES (?,?,?,?) '
@@ -226,10 +217,6 @@ class DeploymentService:
         Import and reconciliation never run this or initiate remote operations.
         Validate every explicit publication, even a previously validated archive.
         """
-        import subprocess
-        from dataclasses import replace
-        from tempfile import TemporaryDirectory
-        from studio.legacy_training import training_environment
         shared = self.store.data_dir
         python = shared / '.venv/bin/python'
         if not python.is_file():

@@ -8,6 +8,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from studio.db import Store
+from studio.deletion import delete_workspace
 from studio.models import (Conflict, NotFound, Page, SourceMapping, ValidationError, Wakeword,
                            WakewordUpdate, check_page, iso_now, utc_now)
 
@@ -19,6 +20,31 @@ def require_word(db, word_id):
     return row
 
 
+def source_word(db, device_id: str, engine: str, source_phrase: str) -> str | None:
+    explicit = db.execute("SELECT word_id FROM source_mappings WHERE device_id=? AND engine=? AND source_phrase=?",
+                          (device_id, engine, source_phrase)).fetchone()
+    if explicit:
+        return explicit[0]
+    if not isinstance(source_phrase, str) or not source_phrase.strip():
+        return None
+
+    def normalize(phrase):
+        return ' '.join(unicodedata.normalize('NFKC', phrase).casefold().split())
+
+    phrase = normalize(source_phrase)
+    candidates = {row['id'] for row in db.execute('SELECT id,phrase,model_id FROM wakewords')
+                  if normalize(row['phrase']) == phrase or row['model_id'] == source_phrase}
+    return next(iter(candidates)) if len(candidates) == 1 else None
+
+
+def clean_text(value: str, maximum: int) -> str:
+    if not isinstance(value, str) or not 1 <= len(value.strip()) <= maximum:
+        raise ValidationError("Invalid workspace text")
+    if any(ord(char) < 32 for char in value):
+        raise ValidationError("Invalid workspace text")
+    return value.strip()
+
+
 class WorkspaceService:
     def __init__(self, store: Store, clock: Callable[[], datetime] = utc_now, *, blobs=None):
         self.store = store
@@ -28,7 +54,7 @@ class WorkspaceService:
     def set_source_mapping(self, device_id: str, engine: str, source_phrase: str, word_id: str) -> None:
         # Exact per-device/engine names only. Display phrases are not identities.
         for value, bound in ((engine, 100), (source_phrase, 200)):
-            if self._text(value, bound) != value:
+            if clean_text(value, bound) != value:
                 raise ValidationError("Source mappings require exact names")
         with self.store.transaction() as db:
             if db.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone() is None:
@@ -48,36 +74,11 @@ class WorkspaceService:
 
     def resolve_source(self, device_id: str, engine: str, source_phrase: str) -> str | None:
         with self.store.transaction() as db:
-            return self._resolve_source(db, device_id, engine, source_phrase)
-
-    @staticmethod
-    def _resolve_source(db, device_id: str, engine: str, source_phrase: str) -> str | None:
-        explicit = db.execute("SELECT word_id FROM source_mappings WHERE device_id=? AND engine=? AND source_phrase=?",
-                              (device_id, engine, source_phrase)).fetchone()
-        if explicit:
-            return explicit[0]
-        if not isinstance(source_phrase, str) or not source_phrase.strip():
-            return None
-
-        def normalize(phrase):
-            return ' '.join(unicodedata.normalize('NFKC', phrase).casefold().split())
-
-        phrase = normalize(source_phrase)
-        candidates = {row['id'] for row in db.execute('SELECT id,phrase,model_id FROM wakewords')
-                      if normalize(row['phrase']) == phrase or row['model_id'] == source_phrase}
-        return next(iter(candidates)) if len(candidates) == 1 else None
-
-    @staticmethod
-    def _text(value: str, maximum: int) -> str:
-        if not isinstance(value, str) or not 1 <= len(value.strip()) <= maximum:
-            raise ValidationError("Invalid workspace text")
-        if any(ord(char) < 32 for char in value):
-            raise ValidationError("Invalid workspace text")
-        return value.strip()
+            return source_word(db, device_id, engine, source_phrase)
 
     def create(self, phrase: str, language: str, model_id: str | None = None) -> Wakeword:
-        phrase = self._text(phrase, 200)
-        language = self._text(language, 35)
+        phrase = clean_text(phrase, 200)
+        language = clean_text(language, 35)
         if model_id is None:
             ascii_phrase = unicodedata.normalize('NFKD', phrase).encode('ascii', 'ignore').decode().lower()
             slug = re.sub(r'[^a-z0-9]+', '_', ascii_phrase).strip('_')[:31].rstrip('_') or 'wakeword'
@@ -95,7 +96,6 @@ class WorkspaceService:
         return word
 
     def delete(self, word_id: str) -> None:
-        from studio.deletion import delete_workspace
         delete_workspace(self.store, word_id, self.blobs)
 
     def get(self, word_id: str) -> Wakeword:
@@ -111,8 +111,8 @@ class WorkspaceService:
             return Page([Wakeword(**dict(row)) for row in rows], total, offset, limit)
 
     def update(self, word_id: str, changes: WakewordUpdate) -> Wakeword:
-        phrase = self._text(changes.phrase, 200) if changes.phrase is not None else None
-        language = self._text(changes.language, 35) if changes.language is not None else None
+        phrase = clean_text(changes.phrase, 200) if changes.phrase is not None else None
+        language = clean_text(changes.language, 35) if changes.language is not None else None
         with self.store.transaction() as db:
             row = db.execute("SELECT * FROM wakewords WHERE id = ?", (word_id,)).fetchone()
             if row is None:

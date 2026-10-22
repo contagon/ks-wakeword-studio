@@ -17,10 +17,11 @@ from typing import BinaryIO
 from uuid import uuid4
 
 from studio.db import Store
+from studio.deletion import source_deleted
 from studio.models import (CaptureMetadata, Conflict, DiagnosticClip, NotFound, Page, Recording, Sample,
                            SampleQuery, ValidationError, check_page, iso_now, utc_now)
 from studio.storage import BlobStore, normalize_audio
-from studio.workspaces import WorkspaceService, require_word
+from studio.workspaces import WorkspaceService, clean_text, require_word, source_word
 
 
 SAMPLE_SELECT = """SELECT s.*, CASE WHEN cm.sample_id IS NOT NULL THEN 'microphone'
@@ -98,7 +99,7 @@ class SampleService:
             raise ValidationError("Invalid manual label")
 
     @staticmethod
-    def _revision(row: sqlite3.Row, expected: int) -> None:
+    def check_revision(row: sqlite3.Row, expected: int) -> None:
         if type(expected) is not int or expected < 0:
             raise ValidationError("Invalid revision")
         if row["revision"] != expected:
@@ -130,9 +131,8 @@ class SampleService:
 
     def ingest(self, device_id: str, clip: DiagnosticClip, audio: BinaryIO, word_id: str | None,
                *, scoped_word_id: str | None = None, resolve_source: bool = False) -> Recording | None:
-        from studio.deletion import source_deleted
-        device_id = WorkspaceService._text(device_id, 200)
-        clip_id = WorkspaceService._text(clip.id, 200)
+        device_id = clean_text(device_id, 200)
+        clip_id = clean_text(clip.id, 200)
         if source_deleted(self.store, device_id, clip_id):
             raise Conflict('Source recording was permanently deleted')
         if not isinstance(clip.phrase, str) or len(clip.phrase) > 200 or not isinstance(clip.engine, str) or len(clip.engine) > 100:
@@ -155,7 +155,7 @@ class SampleService:
         if scoped_word_id is not None:
             # Skip converting clips that belong to another workspace; rechecked below.
             with self.store.transaction() as db:
-                mapped = WorkspaceService._resolve_source(db, device_id, clip.engine, clip.phrase)
+                mapped = source_word(db, device_id, clip.engine, clip.phrase)
             if mapped is not None and mapped != scoped_word_id:
                 return None
         data, converted = self._normalize(audio)
@@ -163,7 +163,7 @@ class SampleService:
             if source_deleted(self.store, device_id, clip_id, db):
                 raise Conflict('Source recording was permanently deleted')
             if scoped_word_id is not None or resolve_source:
-                word_id = WorkspaceService._resolve_source(db, device_id, clip.engine, clip.phrase)
+                word_id = source_word(db, device_id, clip.engine, clip.phrase)
                 if scoped_word_id is not None and word_id is not None and word_id != scoped_word_id:
                     return None
             # Serialize durable blob publication plus reference admission with GC.
@@ -204,7 +204,7 @@ class SampleService:
             if row["word_id"]:
                 if row["word_id"] != word_id:
                     raise Conflict("Recording already assigned")
-                return _sample(db, self._get(db, db.execute("SELECT id FROM samples WHERE recording_id=?", (recording_id,)).fetchone()[0]))
+                return _sample(db, self.fetch(db, db.execute("SELECT id FROM samples WHERE recording_id=?", (recording_id,)).fetchone()[0]))
             db.execute("UPDATE recordings SET word_id=? WHERE id=?", (word_id, recording_id))
             return self._new_sample(db, word_id, recording_id, row["audio_id"], "pending", "diagnostic")
 
@@ -236,11 +236,11 @@ class SampleService:
             db.execute('INSERT INTO sample_capture_metadata VALUES (?,?,?,?,?)',
                        (sample.id, trim_method, start_s, end_s, duration))
             if start_s > 0 or end_s < duration:
-                return self._trim(db, self._get(db, sample.id), start_s, end_s)
-            return _sample(db, self._get(db, sample.id))
+                return self._trim(db, self.fetch(db, sample.id), start_s, end_s)
+            return _sample(db, self.fetch(db, sample.id))
 
     @staticmethod
-    def _get(db: sqlite3.Connection, sample_id: str, word_id: str | None = None) -> sqlite3.Row:
+    def fetch(db: sqlite3.Connection, sample_id: str, word_id: str | None = None) -> sqlite3.Row:
         row = db.execute(SAMPLE_SELECT + " WHERE s.id=? AND s.deleted=0", (sample_id,)).fetchone()
         if row is None or (word_id is not None and row["word_id"] != word_id):
             raise NotFound("Sample not found")
@@ -248,48 +248,48 @@ class SampleService:
 
     def get(self, sample_id: str, word_id: str | None = None) -> Sample:
         with self.store.transaction() as db:
-            return _sample(db, self._get(db, sample_id, word_id))
+            return _sample(db, self.fetch(db, sample_id, word_id))
 
     @staticmethod
-    def _editable(db: sqlite3.Connection, row: sqlite3.Row) -> None:
+    def check_editable(db: sqlite3.Connection, row: sqlite3.Row) -> None:
         if row["recording_id"] and db.execute("SELECT quarantined FROM recordings WHERE id=?", (row["recording_id"],)).fetchone()[0]:
             raise Conflict("Recording is quarantined")
 
-    def _change(self, db: sqlite3.Connection, row: sqlite3.Row, label: str, audio_id: str, action: str) -> Sample:
-        self._editable(db, row)
+    def apply_change(self, db: sqlite3.Connection, row: sqlite3.Row, label: str, audio_id: str, action: str) -> Sample:
+        self.check_editable(db, row)
         revision, now = row["revision"] + 1, iso_now(self.clock)
         db.execute("INSERT INTO sample_history (sample_id,revision,action,old_label,old_audio_id,new_label,new_audio_id,created_at) VALUES (?,?,?,?,?,?,?,?)",
                    (row["id"], revision, action, row["label"], row["audio_id"], label, audio_id, now))
         db.execute("UPDATE samples SET label=?,audio_id=?,revision=?,updated_at=? WHERE id=?",
                    (label, audio_id, revision, now, row["id"]))
-        return _sample(db, self._get(db, row["id"]))
+        return _sample(db, self.fetch(db, row["id"]))
 
     def set_label(self, sample_id: str, label: str, expected_revision: int) -> Sample:
         self._label(label)
         with self.store.transaction() as db:
-            row = self._get(db, sample_id)
-            self._revision(row, expected_revision)
+            row = self.fetch(db, sample_id)
+            self.check_revision(row, expected_revision)
             if row["label"] == label:
                 raise ValidationError("Label is unchanged")
-            return self._change(db, row, label, row["audio_id"], "label")
+            return self.apply_change(db, row, label, row["audio_id"], "label")
 
     def undo(self, sample_id: str, expected_revision: int) -> Sample:
         with self.store.transaction() as db:
-            row = self._get(db, sample_id)
-            self._revision(row, expected_revision)
-            self._editable(db, row)
+            row = self.fetch(db, sample_id)
+            self.check_revision(row, expected_revision)
+            self.check_editable(db, row)
             history = db.execute("SELECT * FROM sample_history WHERE sample_id=? AND undone=0 ORDER BY revision DESC LIMIT 1", (sample_id,)).fetchone()
             if history is None:
                 raise Conflict("No change to undo")
             db.execute("UPDATE sample_history SET undone=1 WHERE id=?", (history["id"],))
             db.execute("UPDATE samples SET label=?,audio_id=?,revision=revision+1,updated_at=? WHERE id=?",
                        (history["old_label"], history["old_audio_id"], iso_now(self.clock), sample_id))
-            return _sample(db, self._get(db, sample_id))
+            return _sample(db, self.fetch(db, sample_id))
 
     def delete(self, sample_id: str, expected_revision: int) -> None:
         with self.store.transaction() as db:
-            row = self._get(db, sample_id)
-            self._revision(row, expected_revision)
+            row = self.fetch(db, sample_id)
+            self.check_revision(row, expected_revision)
             db.execute("UPDATE samples SET deleted=1,revision=revision+1,updated_at=? WHERE id=?", (iso_now(self.clock), sample_id))
 
     def audio(self, sample_id: str, word_id: str, original: bool = False) -> bytes:
@@ -301,8 +301,8 @@ class SampleService:
             raise ValidationError("Invalid trim interval")
         # Keep the revision claim and immutable file publication in one transaction.
         with self.store.transaction() as db:
-            row = self._get(db, sample_id)
-            self._revision(row, expected_revision)
+            row = self.fetch(db, sample_id)
+            self.check_revision(row, expected_revision)
             return self._trim(db, row, start_s, end_s)
 
     def _trim(self, db: sqlite3.Connection, row: sqlite3.Row, start_s: float, end_s: float) -> Sample:
@@ -318,7 +318,7 @@ class SampleService:
         normalized = self.blobs.put(io.BytesIO(output.getvalue())).sha256
         audio_id = insert_audio(db, row["original_hash"], normalized, iso_now(self.clock), family=row["family_id"],
                                 parent_id=row["audio_id"], start=start_s, end=end_s)
-        return self._change(db, row, row["label"], audio_id, "trim")
+        return self.apply_change(db, row, row["label"], audio_id, "trim")
 
     def _query(self, query: SampleQuery, created_at: str = "r.created_at") -> tuple[list[str], list[object]]:
         check_page(query.offset, query.limit)

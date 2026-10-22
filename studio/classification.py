@@ -71,13 +71,13 @@ class ClassificationService:
                     auto_negatives=policy.auto_negatives, guided=result.get('guided_transcript', ''))
                 with self.store.transaction() as db:
                     try:
-                        current = self.samples._get(db, snapshot['id'], job.word_id)
-                        self.samples._revision(current, snapshot['revision'])
-                        self.samples._editable(db, current)
+                        current = self.samples.fetch(db, snapshot['id'], job.word_id)
+                        self.samples.check_revision(current, snapshot['revision'])
+                        self.samples.check_editable(db, current)
                         if current['label'] != 'pending':
                             raise Conflict('Already reviewed')
                         if outcome != 'pending':
-                            self.samples._change(db, current, outcome, current['audio_id'], 'label')
+                            self.samples.apply_change(db, current, outcome, current['audio_id'], 'label')
                     except (Conflict, NotFound):
                         counts['conflicts'] += 1
                     else:

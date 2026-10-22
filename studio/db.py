@@ -4,7 +4,6 @@ import os
 import re
 import sqlite3
 import threading
-import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -62,7 +61,7 @@ class Store:
             for suffix in ("-wal", "-shm"):
                 if (studio_root / f"studio.sqlite3{suffix}").is_symlink():
                     raise ValidationError("Unsafe database path")
-        connection = sqlite3.connect(studio_root / "studio.sqlite3", timeout=0,
+        connection = sqlite3.connect(studio_root / "studio.sqlite3", timeout=5,
                                      isolation_level=None, check_same_thread=False)
         connection.row_factory = sqlite3.Row
         store = cls(studio_root, connection)
@@ -95,14 +94,8 @@ class Store:
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
         with self._lock:
-            for attempt in range(5):
-                try:
-                    self._connection.execute("BEGIN IMMEDIATE")
-                    break
-                except sqlite3.OperationalError as exc:
-                    if exc.sqlite_errorcode not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or attempt == 4:
-                        raise
-                    time.sleep(0.01 * (2 ** attempt))
+            # Other processes' writers are waited on by the 5 s busy timeout.
+            self._connection.execute("BEGIN IMMEDIATE")
             try:
                 yield self._connection
                 self._connection.commit()

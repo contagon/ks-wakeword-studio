@@ -157,6 +157,12 @@ def flock(directory: Path, name: str, *, blocking: bool = True) -> Iterator[bool
         os.close(fd)
 
 
+def publication_lock(store, name: str):
+    """Serialize deployment work (and destructive deletes) across runtimes."""
+    # Device IDs need not be path-safe; hash the entire opaque lock key.
+    return flock(store.root / "publication-locks", hashlib.sha256(name.encode()).hexdigest())
+
+
 def read_regular(directory: int, name: str, limit: int, error: str) -> bytes:
     """Read up to limit + 1 bytes of a regular, non-symlink file; callers check the size."""
     fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)

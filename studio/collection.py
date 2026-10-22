@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import asdict
@@ -16,15 +17,17 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from studio.db import Store
+from studio.deletion import source_deleted
 from studio.devices import DeviceService
 from studio.models import (CollectionCounters, CollectionRun, CredentialsRequired, DeviceCollectionResult,
-                           IdentityMismatch, Page, RemoteRejected, RemoteUnavailable, ValidationError,
+                           IdentityMismatch, NotFound, Page, RemoteRejected, RemoteUnavailable, ValidationError,
                            check_page, iso_now, utc_now)
 from studio.samples import SampleService
 from studio.storage import flock, open_directory
 from studio.workspaces import WorkspaceService
 
 
+logger = logging.getLogger(__name__)
 COUNTERS = tuple(CollectionCounters.__dataclass_fields__)
 
 
@@ -164,7 +167,6 @@ class CollectionService:
                        (device_id, clip_id, run_id, state, attempts, retry, code, iso_now(self.clock)))
 
     def _seen(self, device_id: str, clip_id: str) -> bool:
-        from studio.deletion import source_deleted
         if source_deleted(self.store, device_id, clip_id):
             return True
         with self.store.transaction() as db:
@@ -271,6 +273,8 @@ class CollectionService:
             result.status = "partial" if result.failed or result.evicted else ("diagnostics_disabled" if not listing.enabled else "complete")
         except Exception as error:
             code = error_code(error)
+            if code == "collection_failed":
+                logger.exception("Collection from device %s failed", device_id)
             result.failed += 1
             result.errors.append(code)
             result.status = code
@@ -281,7 +285,6 @@ class CollectionService:
             self._save(run_id, result)
 
     def get_run(self, run_id: str) -> CollectionRun:
-        from studio.models import NotFound
 
         with self.store.transaction() as db:
             row = db.execute("SELECT * FROM collection_runs WHERE id=?", (run_id,)).fetchone()
