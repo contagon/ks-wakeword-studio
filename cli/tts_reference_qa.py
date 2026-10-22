@@ -1,20 +1,13 @@
 #!/usr/bin/env python3
-"""Batch semantic and speech-presence QA for synthetic voice references."""
+"""Batch speech-presence and acoustic safety QA for synthetic wakeword candidates."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
-import unicodedata
 import wave
-from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any
 
-
-MIN_PHRASE_SIMILARITY = 0.68
-MIN_SPEECH_RATIO = 0.20
 
 ACOUSTIC_LIMITS = {
     "omnivoice": {
@@ -45,78 +38,6 @@ ACOUSTIC_LIMITS = {
         "vad_bypass_flatness": 0.10,
     },
 }
-
-
-def normalize_text(value: Any) -> str:
-    text = unicodedata.normalize("NFKC", str(value or "")).casefold().replace("_", " ")
-    text = re.sub(r"[^\w]+", " ", text, flags=re.UNICODE)
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def phrase_similarity(transcript: Any, expected_phrase: Any) -> float:
-    transcript_words = normalize_text(transcript).split()
-    phrase_words = normalize_text(expected_phrase).split()
-    if not transcript_words or not phrase_words:
-        return 0.0
-    phrase_token = "".join(phrase_words)
-    best_score = 0.0
-    minimum_words = max(1, len(phrase_words) - 1)
-    maximum_words = min(len(transcript_words), len(phrase_words) + 1)
-    for word_count in range(minimum_words, maximum_words + 1):
-        for start in range(0, len(transcript_words) - word_count + 1):
-            candidate = "".join(transcript_words[start : start + word_count])
-            best_score = max(best_score, SequenceMatcher(None, candidate, phrase_token).ratio())
-    return best_score
-
-
-def transcript_matches_phrase(transcript: Any, expected_phrase: Any) -> bool:
-    transcript_words = normalize_text(transcript).split()
-    phrase_words = normalize_text(expected_phrase).split()
-    if not transcript_words or not phrase_words:
-        return False
-    transcript_token = "".join(transcript_words)
-    phrase_token = "".join(phrase_words)
-    complete_phrase = transcript_token.count(phrase_token) == 1
-    has_full_word_shape = len(transcript_words) >= len(phrase_words)
-    has_single_utterance_shape = len(transcript_words) <= len(phrase_words) + 1
-    repeats_expected_word = any(
-        transcript_words.count(word) > phrase_words.count(word)
-        for word in set(phrase_words)
-    )
-    return has_single_utterance_shape and not repeats_expected_word and (
-        complete_phrase
-        or (
-            has_full_word_shape
-            and phrase_similarity(transcript, expected_phrase) >= MIN_PHRASE_SIMILARITY
-        )
-    )
-
-
-def semantic_rejection_reason(
-    transcript: Any,
-    expected_phrase: Any,
-    detected_speech_ratio: float,
-) -> str:
-    """Distinguish obvious decoder collapse from an uncertain ASR mismatch."""
-
-    transcript_words = normalize_text(transcript).split()
-    phrase_words = normalize_text(expected_phrase).split()
-    transcript_token = "".join(transcript_words)
-    phrase_token = "".join(phrase_words)
-    if phrase_token and transcript_token.count(phrase_token) > 1:
-        return "repeated_phrase"
-    if any(
-        transcript_words.count(word) > phrase_words.count(word)
-        for word in set(phrase_words)
-    ):
-        return "repeated_phrase"
-    if not transcript_token:
-        return "no_speech_detected" if detected_speech_ratio < MIN_SPEECH_RATIO else "decoder_collapse"
-    # OmniVoice's failed diffusion samples commonly become one sustained
-    # vowel/hum (Whisper renders these as "ehhhh", "aaaa", or "hmm").
-    if len(transcript_token) >= 3 and set(transcript_token) <= set("aeiouhmy"):
-        return "decoder_collapse"
-    return "phrase_mismatch"
 
 
 def read_resampled_audio(path: Path):
@@ -240,17 +161,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-jsonl", type=Path, required=True)
     parser.add_argument("--output-jsonl", type=Path, required=True)
-    parser.add_argument("--phrase", required=True)
-    parser.add_argument("--language", required=True)
-    parser.add_argument("--download-root", type=Path, required=True)
-    parser.add_argument(
-        "--speech-only",
-        action="store_true",
-        help="Use VAD only; intended for fast corpus-wide decoder-collapse filtering.",
-    )
     parser.add_argument(
         "--profile",
         choices=tuple(ACOUSTIC_LIMITS),
+        required=True,
         help="Apply strict provider-specific corpus safety limits.",
     )
     return parser.parse_args()
@@ -266,30 +180,6 @@ def main() -> int:
     from silero_vad import load_silero_vad
 
     vad_model = load_silero_vad(onnx=True)
-    language = args.language.strip().lower().split("_", 1)[0]
-    try:
-        from faster_whisper.tokenizer import _LANGUAGE_CODES
-
-        semantic_checked = not args.speech_only and language in set(_LANGUAGE_CODES)
-    except Exception:
-        semantic_checked = False
-
-    whisper_model = None
-    if semantic_checked:
-        import ctranslate2
-        from faster_whisper import WhisperModel
-
-        device = "cuda" if int(ctranslate2.get_cuda_device_count()) > 0 else "cpu"
-        compute_type = "float16" if device == "cuda" else "int8"
-        model_name = "small.en" if language == "en" else "small"
-        args.download_root.mkdir(parents=True, exist_ok=True)
-        whisper_model = WhisperModel(
-            model_name,
-            device=device,
-            compute_type=compute_type,
-            download_root=str(args.download_root),
-        )
-
     results = []
     for entry in entries:
         path = Path(entry["path"])
@@ -297,67 +187,22 @@ def main() -> int:
             detected_speech_ratio = speech_ratio(path, vad_model)
             metrics = acoustic_metrics(path)
         except Exception as error:
-            results.append(
-                {
-                    "id": entry["id"],
-                    "accepted": False,
-                    "reason": f"speech_detection_failed: {error}",
-                    "transcript": "",
-                    "similarity": 0.0,
-                    "speech_ratio": 0.0,
-                    "semantic_checked": semantic_checked,
-                }
-            )
+            results.append({"id": entry["id"], "accepted": False, "reason": f"speech_detection_failed: {error}"})
             continue
-
-        acoustic_reason = "accepted"
-        if args.profile:
-            acoustic_reason = acoustic_rejection_reason(
-                metrics,
-                detected_speech_ratio,
-                args.profile,
-                float(entry.get("minimum_duration", 0.25)),
-                float(entry.get("maximum_duration", 5.0)),
-            )
-
-        transcript = ""
-        similarity = 0.0
-        if acoustic_reason != "accepted":
-            accepted = False
-            reason = acoustic_reason
-        elif whisper_model is not None:
-            segments, _info = whisper_model.transcribe(
-                str(path),
-                language=language,
-                beam_size=1,
-                condition_on_previous_text=False,
-            )
-            transcript = re.sub(
-                r"\s+",
-                " ",
-                " ".join(str(segment.text or "").strip() for segment in segments),
-            ).strip()
-            similarity = phrase_similarity(transcript, args.phrase)
-            accepted = transcript_matches_phrase(transcript, args.phrase)
-            reason = (
-                "accepted"
-                if accepted
-                else semantic_rejection_reason(transcript, args.phrase, detected_speech_ratio)
-            )
-        else:
-            accepted = True if args.profile else detected_speech_ratio >= MIN_SPEECH_RATIO
-            reason = "accepted" if accepted else "no_speech_detected"
-
+        reason = acoustic_rejection_reason(
+            metrics,
+            detected_speech_ratio,
+            args.profile,
+            float(entry.get("minimum_duration", 0.25)),
+            float(entry.get("maximum_duration", 5.0)),
+        )
         results.append(
             {
                 "id": entry["id"],
-                "accepted": accepted,
+                "accepted": reason == "accepted",
                 "reason": reason,
-                "transcript": transcript,
-                "similarity": round(similarity, 4),
                 "speech_ratio": round(detected_speech_ratio, 4),
                 "acoustic_metrics": {key: round(value, 6) for key, value in metrics.items()},
-                "semantic_checked": semantic_checked,
             }
         )
 

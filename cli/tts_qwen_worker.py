@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import defaultdict
 from pathlib import Path
 
 import soundfile as sf
@@ -14,7 +13,6 @@ from qwen_tts import Qwen3TTSModel
 
 
 VOICE_DESIGN_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
-VOICE_CLONE_MODEL = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -48,23 +46,6 @@ def load_model(model_id: str) -> Qwen3TTSModel:
     )
 
 
-def build_bank(entries: list[dict], output_dir: Path, batch_size: int) -> None:
-    model = load_model(VOICE_DESIGN_MODEL)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    for batch in chunks(entries, max(1, batch_size)):
-        seed = int(batch[0].get("seed", 0))
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-        wavs, sample_rate = model.generate_voice_design(
-            text=[str(item["text"]) for item in batch],
-            language=[str(item["language_name"]) for item in batch],
-            instruct=[str(item["instruct"]) for item in batch],
-        )
-        for item, wav in zip(batch, wavs):
-            sf.write(output_dir / f"{item['id']}.wav", wav, sample_rate)
-
-
 def generate_direct(entries: list[dict], output_dir: Path, batch_size: int) -> None:
     """Create every final corpus candidate with a fresh voice design."""
 
@@ -95,41 +76,9 @@ def generate_direct(entries: list[dict], output_dir: Path, batch_size: int) -> N
             print(f"Qwen direct generation created {completed}/{len(entries)}", flush=True)
 
 
-def generate(entries: list[dict], output_dir: Path, batch_size: int) -> None:
-    model = load_model(VOICE_CLONE_MODEL)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    grouped: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
-    for item in entries:
-        key = (
-            str(item["ref_audio"]),
-            str(item["ref_text"]),
-            str(item["language_name"]),
-        )
-        grouped[key].append(item)
-
-    for (ref_audio, ref_text, language_name), group in grouped.items():
-        prompt = model.create_voice_clone_prompt(
-            ref_audio=ref_audio,
-            ref_text=ref_text,
-            x_vector_only_mode=False,
-        )
-        for batch in chunks(group, max(1, batch_size)):
-            seed = int(batch[0].get("seed", 0))
-            torch.manual_seed(seed)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(seed)
-            wavs, sample_rate = model.generate_voice_clone(
-                text=[str(item["text"]) for item in batch],
-                language=[language_name] * len(batch),
-                voice_clone_prompt=prompt,
-            )
-            for item, wav in zip(batch, wavs):
-                sf.write(output_dir / f"{item['id']}.wav", wav, sample_rate)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("bank", "direct", "generate"), required=True)
+    parser.add_argument("--mode", choices=("direct",), required=True)
     parser.add_argument("--input-jsonl", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=4)
@@ -138,12 +87,7 @@ def main() -> int:
     entries = read_jsonl(args.input_jsonl)
     if not entries:
         return 0
-    if args.mode == "bank":
-        build_bank(entries, args.output_dir, args.batch_size)
-    elif args.mode == "direct":
-        generate_direct(entries, args.output_dir, args.batch_size)
-    else:
-        generate(entries, args.output_dir, args.batch_size)
+    generate_direct(entries, args.output_dir, args.batch_size)
     return 0
 
 
