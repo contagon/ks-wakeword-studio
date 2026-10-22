@@ -23,7 +23,6 @@ let ui: ReturnType<typeof mount> | undefined;
 afterEach(() => {
   ui?.unmount();
   ui = undefined;
-  vi.unstubAllGlobals();
   vi.useRealTimers();
   document.body.innerHTML = "";
 });

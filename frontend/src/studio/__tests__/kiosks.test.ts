@@ -1,7 +1,6 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import KiosksPage from "../pages/KiosksPage.vue";
-afterEach(() => vi.unstubAllGlobals());
 
 it("offers one flat kiosk registry with password login and no setup tabs", async () => {
   vi.stubGlobal(

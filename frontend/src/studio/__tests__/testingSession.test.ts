@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises } from "@vue/test-utils";
 import { reactive } from "vue";
 import { TestingSession } from "../testing/session";
@@ -30,7 +30,6 @@ beforeEach(() => {
     },
   });
 });
-afterEach(() => vi.unstubAllGlobals());
 
 describe("live tester resource ownership", () => {
   it("releases permission arriving after Stop without starting audio", async () => {

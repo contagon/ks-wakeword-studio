@@ -64,7 +64,6 @@ afterEach(() => {
   ui?.unmount();
   ui = undefined;
   document.body.innerHTML = "";
-  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 async function open() {

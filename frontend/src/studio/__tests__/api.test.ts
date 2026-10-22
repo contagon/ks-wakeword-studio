@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readModelMetrics, studioApi } from "../api";
-afterEach(() => vi.unstubAllGlobals());
 
 it("maps allowlisted operation codes without exposing arbitrary server error prose", async () => {
   vi.stubGlobal(

@@ -1,10 +1,8 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
-import { provide } from "vue";
-import { createWorkspace, workspaceKey } from "../workspace";
-import { useStudioRoutes } from "../routes";
 import AutomatePage from "../pages/AutomatePage.vue";
 import type { Workspace } from "../workspace";
+import { workspaceHost } from "./fakeStudio";
 
 const schedule = () => ({ enabled: false, cron: "*/30 * * * *", timezone: "UTC" });
 const settings = () => ({
@@ -22,7 +20,6 @@ const settings = () => ({
   deployment: schedule(),
   deployment_policy: { after_training: false },
 });
-afterEach(() => vi.unstubAllGlobals());
 
 it("edits separate workspace collection, classification, training and deployment controls", async () => {
   const pages = import.meta.glob("../pages/*.vue");
@@ -44,15 +41,11 @@ it("edits separate workspace collection, classification, training and deployment
     }),
   );
   history.replaceState(null, "", "#/automate?word=a");
-  const ui = mount({
-    setup() {
-      const workspace = createWorkspace(useStudioRoutes());
+  const ui = mount(
+    workspaceHost(Page.default, (workspace) => {
       workspace.selectedId.value = "a";
-      provide(workspaceKey, workspace);
-    },
-    components: { Page: Page.default },
-    template: "<Page />",
-  });
+    }),
+  );
   await flushPromises();
   for (const text of ["Automatic collection", "Automatic classification", "Automatic training", "Automatic deployment"])
     expect(ui.text()).toContain(text);
@@ -94,15 +87,12 @@ it("ignores an old workspace load even when the transport ignores abort", async 
     ),
   );
   history.replaceState(null, "", "#/automate?word=a");
-  const ui = mount({
-    setup() {
-      workspace = createWorkspace(useStudioRoutes());
-      workspace.selectedId.value = "a";
-      provide(workspaceKey, workspace);
-    },
-    components: { AutomatePage },
-    template: "<AutomatePage />",
-  });
+  const ui = mount(
+    workspaceHost(AutomatePage, (w) => {
+      workspace = w;
+      w.selectedId.value = "a";
+    }),
+  );
   workspace.selectedId.value = "b";
   await flushPromises();
   release(response(true));

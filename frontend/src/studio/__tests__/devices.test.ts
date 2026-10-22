@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import DeviceRegistry from "../components/DeviceRegistry.vue";
 import type { Device } from "../types";
@@ -61,7 +61,6 @@ beforeEach(async () => {
   );
   await useDeviceRegistry().load(true);
 });
-afterEach(() => vi.unstubAllGlobals());
 
 describe("shared fleet registry", () => {
   it("keeps kiosk registration inline before and after adding a device", async () => {

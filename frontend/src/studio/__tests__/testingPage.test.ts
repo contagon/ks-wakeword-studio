@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
-import { provide } from "vue";
 import TestingPage from "../pages/TestingPage.vue";
 import ProbabilityGraph from "../components/ProbabilityGraph.vue";
-import { createWorkspace, workspaceKey, type Workspace } from "../workspace";
-import { pages, useStudioRoutes } from "../routes";
+import type { Workspace } from "../workspace";
+import { pages } from "../routes";
+import { json, workspaceHost } from "./fakeStudio";
 
 const live = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn(), events: null as any }));
 vi.mock("../testing/session", () => ({
@@ -19,16 +19,10 @@ vi.mock("../testing/session", () => ({
 let workspace: Workspace;
 let empty = false;
 let manifestStatus = 200;
-const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 function host() {
-  return {
-    components: { TestingPage },
-    setup() {
-      workspace = createWorkspace(useStudioRoutes());
-      provide(workspaceKey, workspace);
-    },
-    template: "<TestingPage />",
-  };
+  return workspaceHost(TestingPage, (w) => {
+    workspace = w;
+  });
 }
 beforeEach(() => {
   history.replaceState(null, "", "#/testing?word=a");
@@ -69,7 +63,6 @@ beforeEach(() => {
     }),
   );
 });
-afterEach(() => vi.unstubAllGlobals());
 
 describe("Testing page", () => {
   it("is last in navigation and selects real archived versions and saved thresholds", async () => {

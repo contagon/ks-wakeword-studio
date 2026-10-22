@@ -1,5 +1,9 @@
 import { vi } from "vitest";
+import { onBeforeUnmount, onMounted, provide, type Component } from "vue";
+import { createJobQueue, jobQueueKey, type JobQueue } from "../jobs";
+import { useStudioRoutes } from "../routes";
 import type { Device, Job, Recording, Sample } from "../types";
+import { createWorkspace, workspaceKey, type Workspace } from "../workspace";
 
 export const words = [
   {
@@ -19,6 +23,23 @@ export const words = [
     updated_at: "2026-01-01T00:00:00Z",
   },
 ];
+/** A host that provides a fresh workspace and a running job queue to one page, as StudioShell does. */
+export function workspaceHost(page: Component, onSetup?: (workspace: Workspace, queue: JobQueue) => void): Component {
+  return {
+    components: { Page: page },
+    setup() {
+      const workspace = createWorkspace(useStudioRoutes());
+      provide(workspaceKey, workspace);
+      const queue = createJobQueue();
+      provide(jobQueueKey, queue);
+      onMounted(queue.start);
+      onBeforeUnmount(queue.stop);
+      onSetup?.(workspace, queue);
+    },
+    template: "<Page />",
+  };
+}
+
 export const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 const page = <T>(items: T[], offset: number, limit: number) => ({

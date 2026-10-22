@@ -42,7 +42,6 @@ function server(active: Job[] = [], history: Job[] = []) {
 }
 afterEach(() => {
   vi.useRealTimers();
-  vi.unstubAllGlobals();
 });
 
 it("keeps every active job across pages and polls while closed, then stops", async () => {

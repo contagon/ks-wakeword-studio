@@ -1,21 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
-import { provide } from "vue";
 import DeployPage from "../pages/DeployPage.vue";
-import { createWorkspace, workspaceKey, type Workspace } from "../workspace";
-import { useStudioRoutes } from "../routes";
+import type { Workspace } from "../workspace";
+import { json, workspaceHost } from "./fakeStudio";
 
-const json = (data: unknown) => new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
 let workspace: Workspace;
 function host() {
-  return {
-    components: { DeployPage },
-    setup() {
-      workspace = createWorkspace(useStudioRoutes());
-      provide(workspaceKey, workspace);
-    },
-    template: "<DeployPage />",
-  };
+  return workspaceHost(DeployPage, (w) => {
+    workspace = w;
+  });
 }
 const version = (id: string, word = "a") => ({
   id,
@@ -131,7 +124,6 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
-  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 

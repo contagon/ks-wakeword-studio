@@ -1,15 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
-import { provide } from "vue";
 import NegativeDatasetsPage from "../pages/NegativeDatasetsPage.vue";
-import { createWorkspace, workspaceKey, type Workspace } from "../workspace";
-import { useStudioRoutes } from "../routes";
-import { createJobQueue, jobQueueKey, type JobQueue } from "../jobs";
+import type { Workspace } from "../workspace";
+import type { JobQueue } from "../jobs";
 import { augmentationCatalog } from "./augmentationFixture";
-import { visibleText } from "./fakeStudio";
+import { json, visibleText, workspaceHost } from "./fakeStudio";
 
-const json = (value: unknown, status = 200) =>
-  new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 const words = [
   { id: "a", phrase: "Hey Cedar", language: "en", model_id: "cedar", created_at: "", updated_at: "" },
   { id: "b", phrase: "Okay Maple", language: "en", model_id: "maple", created_at: "", updated_at: "" },
@@ -46,16 +42,10 @@ function resolveDeferred(resolver: ((response: Response) => void) | undefined, r
   if (resolver) resolver(response);
 }
 function host() {
-  return {
-    components: { NegativeDatasetsPage },
-    setup() {
-      workspace = createWorkspace(useStudioRoutes());
-      provide(workspaceKey, workspace);
-      queue = createJobQueue();
-      provide(jobQueueKey, queue);
-    },
-    template: "<NegativeDatasetsPage />",
-  };
+  return workspaceHost(NegativeDatasetsPage, (w, q) => {
+    workspace = w;
+    queue = q;
+  });
 }
 
 beforeEach(() => {
@@ -173,7 +163,6 @@ beforeEach(() => {
     }),
   );
 });
-afterEach(() => vi.unstubAllGlobals());
 
 describe("NegativeDatasetsPage", () => {
   it("follows a newly discovered active retry instead of an old failed catalog attempt", async () => {

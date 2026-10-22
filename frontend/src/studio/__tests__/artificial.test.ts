@@ -1,13 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
-import { onMounted, provide } from "vue";
+import { onMounted } from "vue";
 import ArtificialPage from "../pages/ArtificialPage.vue";
-import { createWorkspace, workspaceKey, type Workspace } from "../workspace";
-import { useStudioRoutes } from "../routes";
-import { createJobQueue, jobQueueKey, type JobQueue } from "../jobs";
+import type { Workspace } from "../workspace";
+import type { JobQueue } from "../jobs";
+import { json, workspaceHost } from "./fakeStudio";
 
-const json = (value: unknown, status = 200) =>
-  new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 const words = [
   { id: "a", phrase: "Hey Cedar", language: "en", model_id: "cedar", created_at: "", updated_at: "" },
   { id: "b", phrase: "Okay Maple", language: "fr", model_id: "maple", created_at: "", updated_at: "" },
@@ -38,19 +36,13 @@ let manySources = false;
 let delaySources = false;
 let resolveSources: ((response: Response) => void) | undefined;
 function host() {
-  return {
-    components: { ArtificialPage },
-    setup() {
-      workspace = createWorkspace(useStudioRoutes());
-      provide(workspaceKey, workspace);
-      queue = createJobQueue();
-      provide(jobQueueKey, queue);
-      onMounted(() => {
-        void workspace.load();
-      });
-    },
-    template: "<ArtificialPage />",
-  };
+  return workspaceHost(ArtificialPage, (w, q) => {
+    workspace = w;
+    queue = q;
+    onMounted(() => {
+      void w.load();
+    });
+  });
 }
 
 beforeEach(() => {
@@ -275,7 +267,6 @@ beforeEach(() => {
     }),
   );
 });
-afterEach(() => vi.unstubAllGlobals());
 
 describe("ArtificialPage", () => {
   it("marks failed generated datasets with the shared failure badge style", async () => {

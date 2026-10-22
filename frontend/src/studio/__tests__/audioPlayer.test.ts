@@ -68,7 +68,6 @@ afterEach(() => {
   DecodeContext.decodes = [];
   DecodeContext.closed = [];
   document.body.innerHTML = "";
-  vi.unstubAllGlobals();
 });
 
 describe("Studio review waveform", () => {

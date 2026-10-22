@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import StudioShell from "../components/StudioShell.vue";
+import { json } from "./fakeStudio";
 
 const words = [
   {
@@ -25,8 +26,6 @@ let wrapper: VueWrapper | undefined;
 let records = structuredClone(words);
 let requests: { path: string; init?: RequestInit }[];
 let intercept: ((path: string, init?: RequestInit) => Promise<Response> | undefined) | undefined;
-const json = (data: unknown, status = 200) =>
-  new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 
 beforeEach(() => {
   records = structuredClone(words);
@@ -78,7 +77,6 @@ beforeEach(() => {
 afterEach(() => {
   wrapper?.unmount();
   wrapper = undefined;
-  vi.unstubAllGlobals();
   document.body.innerHTML = "";
 });
 function mediaQuery(initial: boolean) {

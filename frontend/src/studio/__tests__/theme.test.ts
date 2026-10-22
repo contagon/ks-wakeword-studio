@@ -2,7 +2,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 beforeEach(() => localStorage.clear());
 afterEach(() => {
-  vi.unstubAllGlobals();
   document.documentElement.removeAttribute("data-studio-theme");
 });
 

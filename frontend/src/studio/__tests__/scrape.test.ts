@@ -1,21 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
-import { provide } from "vue";
 import ClassifyPage from "../pages/ClassifyPage.vue";
-import { createWorkspace, workspaceKey } from "../workspace";
-import { useStudioRoutes } from "../routes";
+import { json, workspaceHost } from "./fakeStudio";
 
-const json = (data: unknown) => new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } });
 function host() {
-  return {
-    components: { ClassifyPage },
-    setup() {
-      const workspace = createWorkspace(useStudioRoutes());
-      provide(workspaceKey, workspace);
-      void workspace.load();
-    },
-    template: "<ClassifyPage />",
-  };
+  return workspaceHost(ClassifyPage, (w) => {
+    void w.load();
+  });
 }
 beforeEach(() => {
   history.replaceState(null, "", "#/scrape?word=a");
@@ -170,7 +161,6 @@ beforeEach(() => {
     }),
   );
 });
-afterEach(() => vi.unstubAllGlobals());
 
 describe("Classify collection", () => {
   it("retains fleet outcomes, queues a workspace collection and maps sources explicitly", async () => {
