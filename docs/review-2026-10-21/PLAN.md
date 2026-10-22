@@ -509,6 +509,14 @@ Also:
   - **Small items:** the augmenter defaults loop; calibration defaults in one place; the `QWEN_LANGUAGE_NAMES` alias; dead shell defaults and parser state.
   - **Skipped on purpose:** the "TF env setup" duplication. Only the trainer (shell) and augmenter (Python `setdefault`) set it, with different values on purpose.
   - After this phase: pytest 455 passed, 1 skipped; vitest 202; Playwright 18 passed, 1 skipped.
+- **Phase 10 done (commits `f066ddb`, `20dfea4`, `5115369`):** §6.4.
+  - **Python:** `studio_harness` has one `wav()` (call sites pass the duration they relied on, so fixture bytes are unchanged), `api_client()` for the 25 FastAPI+TestClient blocks, and the moved runners. The stateful leader/follower kiosk now lives in `kiosk_fixture.py`, and deployment's in-process fake is `InProcessKiosk`. No test module imports another.
+  - **Folded files:** `test_studio_scoped_collection.py` went into `test_studio_collection.py`; it had re-run all 23 `CollectionTests`, so pytest drops from 455 to 431 tests with no coverage lost. `test_studio_final_fixes.py` went into `test_studio_training.py`.
+  - **Brittle tests:** `test_unicode_shell_wiring.py` is replaced by a behavioural trainer test, mutation-checked against the `${#POSITIONAL_ARGS}` bug. The `find_spec` scaffolding and the packaging test's dead env vars are gone. `test_wham_removal.py` was already deleted.
+  - **Vitest:** `unstubGlobals: true`, a shared `json()`, and `workspaceHost()`. That helper provides a workspace and a running job queue like `StudioShell`; an unstarted queue broke the Classify collection test, which depends on polling.
+  - **E2E:** `e2e/helpers.ts` `createWord()`. The layout and polish specs moved into `studio.spec.ts`, so they now also run under its no-page-errors check.
+  - **Skipped on purpose:** the two loopback kiosk servers stay separate. One is scripted per test and the other simulates a leader/follower fleet; merging them would mean rewriting both.
+  - After this phase: pytest 431 passed, 1 skipped; vitest 202; Playwright 18 passed, 1 skipped.
 
 ## 11. Order of work
 
