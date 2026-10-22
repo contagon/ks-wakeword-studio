@@ -18,6 +18,15 @@ const loading = ref(false),
 let request: AbortController | undefined;
 let mutation: AbortController | undefined;
 let generation = 0;
+const deploymentMode = computed(() =>
+  settings.value?.deployment.enabled
+    ? settings.value.deployment_policy.after_training
+      ? "Scheduled + after training"
+      : "Scheduled"
+    : settings.value?.deployment_policy.after_training
+      ? "After training"
+      : "Manual only",
+);
 function stageStatus(kind: "scrape" | "classify" | "train" | "deploy"): string {
   const schedule = status.value?.schedules.find((s) => s.scope === `${kind}:${wordId.value}`);
   const job = status.value?.last_jobs[kind];
@@ -188,17 +197,22 @@ onBeforeUnmount(() => {
         <section class="studio-card">
           <div class="studio-section-header mb-2">
             <h2>Automatic deployment</h2>
-            <label class="studio-checkbox-label"
-              ><input v-model="settings.deployment.enabled" name="deployment-enabled" type="checkbox" />Enabled</label
-            >
+            <span class="studio-status studio-status-muted">{{ deploymentMode }}</span>
           </div>
-          <p class="studio-muted">Publish eligible archives to your registered fleet targets on a schedule.</p>
-          <AutomationScheduleFields v-model="settings.deployment" prefix="deployment" />
-          <label class="studio-checkbox-label mt-3"
-            ><input v-model="settings.deployment_policy.after_training" name="after-training" type="checkbox" />Also
-            deploy after successful training</label
+          <p class="studio-muted">Publish eligible archives to your registered fleet targets.</p>
+          <label class="studio-checkbox-label my-3"
+            ><input v-model="settings.deployment_policy.after_training" name="after-training" type="checkbox" />Deploy
+            after successful training</label
           >
-          <p class="studio-muted text-xs mt-1">Failed, cancelled, or skipped runs do not trigger deployment.</p>
+          <p class="studio-muted text-xs">Optional. Failed, cancelled, or skipped runs do not trigger deployment.</p>
+          <label class="studio-checkbox-label my-3"
+            ><input v-model="settings.deployment.enabled" name="deployment-enabled" type="checkbox" />Enable scheduled
+            deployment</label
+          ><AutomationScheduleFields
+            v-if="settings.deployment.enabled"
+            v-model="settings.deployment"
+            prefix="deployment"
+          />
           <p class="studio-muted text-xs mt-3">
             Publish the latest new eligible archive; skip if there is nothing new. Manual rollbacks are retained until a
             new archive is available.
