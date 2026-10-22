@@ -87,8 +87,7 @@ def normalize_audio(data: bytes, max_bytes: int, *, truncate: bool = False) -> b
     executable = shutil.which("ffmpeg")
     if executable is None:
         raise ValidationError("Audio conversion unavailable")
-    temp_root = "/tmp/opencode" if Path("/tmp/opencode").is_dir() else None
-    with tempfile.TemporaryDirectory(prefix="studio-audio-", dir=temp_root) as directory:
+    with tempfile.TemporaryDirectory(prefix="studio-audio-") as directory:
         source = Path(directory) / "source.audio"
         target = Path(directory) / "normalized.wav"
         source.write_bytes(data)

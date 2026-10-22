@@ -22,7 +22,7 @@ def wav(value=0):
 
 class WorkspaceDeletionTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir='/tmp/opencode')
+        self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.runtime = StudioRuntime(Path(self.temp.name))
         self.addCleanup(self.runtime.shutdown)

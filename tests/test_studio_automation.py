@@ -74,6 +74,8 @@ def test_upgrade_preserves_training_disables_global_scrape(tmp_path):
         db.execute('ALTER TABLE devices DROP COLUMN url_override')
         db.execute('ALTER TABLE devices DROP COLUMN removed')
         db.execute('ALTER TABLE devices DROP COLUMN name')
+        db.execute('DROP INDEX studio_jobs_run_number')
+        db.execute('ALTER TABLE studio_jobs DROP COLUMN run_number')
         db.execute("CREATE UNIQUE INDEX one_studio_leader ON devices(role) WHERE role='leader'")
         db.execute('PRAGMA user_version=12')
     runtime.shutdown()

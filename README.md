@@ -81,19 +81,19 @@ just stop
 ```
 
 `just logs` follows logs and `just status` shows service status. The `justfile`
-uses `compose.yaml`, builds `ks-wakeword-studio:local`, and exposes the UI at
-**http://localhost:8790** with GPU access and 8 GiB shared memory. Forward port
-8790 for remote access; it is deliberately bound only to loopback.
+uses `compose.yaml`, builds `ks-wakeword-studio:local`, and exposes the UI on
+port **8790** of every host interface (http://localhost:8790 locally) with GPU
+access and 8 GiB shared memory.
 
-Data stays in the external Docker volume `ks-wakeword-studio-data`; `just start`
-creates it if missing, and stopping/removing the Compose service does not delete
-it. Without `just`, use `docker compose build`, create the volume with
-`docker volume create ks-wakeword-studio-data`, then `docker compose up -d` or
-`docker compose stop`. First startup installs dependencies into the volume.
+Data lives in the host directory named by `DATA` in `.env` (for example
+`DATA=/mnt/datasets/wakeword_studio/`), bind-mounted at `/data`. Stopping or
+removing the Compose service does not delete it. Without `just`, use
+`docker compose build`, then `docker compose up -d` or `docker compose stop`.
+First startup installs dependencies into that directory.
 
 **One-time transition from the existing `docker run` container:** Compose cannot
 adopt a manually created container with the same name. When ready to switch,
-run the commands below; the data volume is retained. Adding these files does
+run the commands below; the data directory is retained. Adding these files does
 not stop or replace the currently running container automatically.
 
 ```bash
@@ -495,21 +495,18 @@ not install the CUDA training requirements just to test the app. Python 3.12,
 `ffmpeg`, `openssl`, Bash, and Node/npm (development only) are used by the suite:
 
 ```bash
-python3 -m venv /tmp/opencode/studio-tests
-/tmp/opencode/studio-tests/bin/python -m pip install fastapi==0.115.6 uvicorn==0.49.0 python-multipart==0.0.9 croniter==6.0.0 httpx==0.28.1 PyYAML numpy
-DATA_DIR=/tmp/opencode/studio-unit-data /tmp/opencode/studio-tests/bin/python -m unittest discover -s tests -v
-npm --prefix frontend ci
-npm --prefix frontend test -- --run
-npm --prefix frontend run typecheck
-npm --prefix frontend run build
-cd frontend
-# Playwright 1.63.0 uses cached Chromium revision 1243; install only if absent:
-npx playwright install chromium
-STUDIO_TEST_PYTHON=/tmp/opencode/studio-tests/bin/python npm run test:e2e
+just test   # creates .venv-test from requirements-dev.txt, runs pytest, vitest and the type check
+just ui     # rebuilds static/ui
+just e2e    # Playwright browser suite (install Chromium once: npx --prefix frontend playwright install chromium)
 ```
 
+Without `just`: `python3 -m venv .venv-test && .venv-test/bin/pip install -r requirements-dev.txt`,
+then `.venv-test/bin/python -m pytest` (`tests/conftest.py` points `DATA_DIR` at a
+temporary directory unless you set it), `npm --prefix frontend test -- --run` and
+`npm --prefix frontend run typecheck`.
+
 Playwright launches the real app and committed static UI with a tests-only,
-constructor-injected GPU command runner, fresh temporary data under `/tmp/opencode`,
+constructor-injected GPU command runner, fresh temporary data in the system temp directory,
 and deterministic loopback HTTP kiosks. There is no production environment variable
 that enables fake GPU success; test code is not copied into either Docker image.
 These tests verify orchestration, not CUDA inference, downloaded ML weights, a

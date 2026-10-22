@@ -117,7 +117,7 @@ class FixtureKiosk:
 
 class StudioWorkflowTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir="/tmp/opencode")
+        self.temp = tempfile.TemporaryDirectory()
         self.now = datetime(2026, 10, 18, tzinfo=timezone.utc)
         self.follower = FixtureKiosk("fixture-follower", leader=False)
         self.leader = FixtureKiosk("fixture-leader", leader=True, follower=self.follower)

@@ -13,7 +13,7 @@ from studio.models import Conflict, ValidationError
 from studio.runtime import StudioRuntime
 
 
-TMP_ROOT = Path("/tmp/opencode")
+TMP_ROOT = Path(tempfile.gettempdir())
 
 
 def wav() -> bytes:

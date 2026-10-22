@@ -34,7 +34,7 @@ def main():
     args = parser.parse_args()
     import uvicorn
 
-    with tempfile.TemporaryDirectory(prefix='studio-browser-', dir='/tmp/opencode') as directory:
+    with tempfile.TemporaryDirectory(prefix='studio-browser-') as directory:
         os.environ['DATA_DIR'] = directory
         os.environ.pop('TRAINER_LEGACY_MODE', None)
         follower = FixtureKiosk('fixture-follower', leader=False)

@@ -61,7 +61,7 @@ class PublicationContractTests(unittest.TestCase):
         # Read-only source contract; no Dart execution or hardware claim. CI can
         # point to its sibling checkout, or skip this source cross-check while
         # retaining the default HTTP and service fixture tests.
-        root = Path(os.environ.get('STUDIO_KIOSK_SOURCE', '/home/contagon/PersonalProjects/kiosk-satellite')) / 'app/lib/managers'
+        root = Path(os.environ.get('STUDIO_KIOSK_SOURCE', Path(__file__).resolve().parents[2] / 'kiosk-satellite')) / 'app/lib/managers'
         if not root.is_dir():
             self.skipTest('Sibling kiosk source unavailable; set STUDIO_KIOSK_SOURCE')
         for relative, evidence in FIXTURE['source_evidence'].items():

@@ -19,8 +19,12 @@ env:
   IMAGE_NAME: tatertotterson/microwakeword
 
 jobs:
+  tests:
+    uses: ./.github/workflows/test.yml
+
   docker:
     name: Docker image
+    needs: tests
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository

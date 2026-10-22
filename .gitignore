@@ -8,3 +8,4 @@ frontend/playwright-report/
 __pycache__/
 *.py[cod]
 .superpowers
+.venv-test/

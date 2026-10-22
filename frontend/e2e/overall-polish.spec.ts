@@ -45,4 +45,6 @@ test('failure badges are red and busy buttons have a spinner in both themes', as
     expect(style.animation).toBe('studio-spin');
     expect(style.background).toBe(theme === 'light' ? 'rgb(237, 243, 248)' : 'rgb(44, 64, 82)');
   }
+  // Don't leave the queued collection job for later tests to drain.
+  expect((await (await request.post('/__test/drain-collection')).json()).ran).toBe(true);
 });

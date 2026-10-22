@@ -54,7 +54,7 @@ test('dark mode follows the system and remembers an explicit light choice', asyn
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-    await page.screenshot({ path: `/tmp/opencode/studio-dark-${width}.png`, fullPage: true });
+    await page.screenshot({ path: test.info().outputPath(`studio-dark-${width}.png`), fullPage: true });
   }
   await toggle.click(); await page.reload();
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
@@ -192,7 +192,7 @@ test('browser generates and selects a batch, queues real training and downloads 
   const versions = await (await request.get(`/api/studio/wakewords/${a.id}/models`)).json();
   expect(versions.total).toBe(1);
   await page.locator('[data-page="deploy"]').click();
-  await expect(page.locator('main').getByText(versions.items[0].id, { exact: true }).first()).toBeVisible();
+  await expect(page.locator(`[data-version-id="${versions.items[0].id}"] [data-run-number]`)).toHaveText('Run #1');
   const archive = await request.get(`/api/studio/wakewords/${a.id}/models/${versions.items[0].id}/archive`);
   expect(archive.ok()).toBeTruthy();
   expect(archive.headers()['content-type']).toBe('application/zip');
@@ -253,7 +253,7 @@ test('all pages have compact controls and no narrow-screen overflow', async ({ p
         expect((await page.locator('table').boundingBox())!.width).toBeGreaterThanOrEqual(680);
         await expect(page.locator('[data-action="relabel"]').first().locator('option:checked')).toHaveText('Set label…');
       }
-      await page.screenshot({ path: `/tmp/opencode/polish-screenshots/${route}-${width}.png`, fullPage: true });
+      await page.screenshot({ path: test.info().outputPath(`polish-${route}-${width}.png`), fullPage: true });
     }
   }
 });
@@ -391,7 +391,7 @@ test('kiosk addresses survive refresh and the global queue follows jobs across w
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Open global job queue' }).click();
   await expect(drawer).toHaveCSS('width', '390px');
-  await page.screenshot({ path: '/tmp/opencode/fleet-queue-mobile.png', fullPage: true });
+  await page.screenshot({ path: test.info().outputPath('fleet-queue-mobile.png'), fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 1280, height: 900 });

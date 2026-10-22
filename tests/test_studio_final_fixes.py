@@ -21,7 +21,7 @@ class AugmentationTests(unittest.TestCase):
     def test_corpus_retention_does_not_hold_metadata_write_lock(self):
         from studio.db import Store
         from studio import augmentation
-        with tempfile.TemporaryDirectory(dir='/tmp/opencode') as directory:
+        with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             augmentation_fixture(root)
             runtime = StudioRuntime(root)
@@ -39,7 +39,7 @@ class AugmentationTests(unittest.TestCase):
                 self.assertEqual(len(runtime.training.snapshot(word.id, 'a' * 32).augmentation), 4)
 
     def test_snapshot_pins_backgrounds_separately_and_replacement_changes_fingerprint(self):
-        with tempfile.TemporaryDirectory(dir='/tmp/opencode') as directory:
+        with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             augmentation_fixture(root)
             runtime = StudioRuntime(root)
@@ -58,7 +58,7 @@ class AugmentationTests(unittest.TestCase):
             self.assertEqual(runtime.training.get_manifest(word.id, first.run_id), first)
 
     def test_missing_augmentation_fails_before_manifest_commit_with_setup_instructions(self):
-        with tempfile.TemporaryDirectory(dir='/tmp/opencode') as directory:
+        with tempfile.TemporaryDirectory() as directory:
             runtime = StudioRuntime(Path(directory))
             self.addCleanup(runtime.shutdown)
             word = runtime.workspaces.create('Robot', 'en', 'robot')

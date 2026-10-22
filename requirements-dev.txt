@@ -1,0 +1,10 @@
+# Server + test dependencies for running the suite without the CUDA training stack.
+# Server pins mirror run.sh.
+fastapi==0.115.6
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+croniter==6.0.0
+httpx==0.28.1
+PyYAML
+numpy
+pytest
