@@ -452,9 +452,10 @@ incompatible feature reuse. Real training also requires independent positive tra
 validation and testing families (and corresponding reviewed-negative splits when
 used); a tiny smoke-test corpus is not sufficient for actual ML training.
 
-The UI bundle in `static/ui` is build output and is not committed. Both dockerfiles build it in a
-`node` stage (`npm ci && npm run build`) and copy only the result into the runtime image, so
-neither NVIDIA image ships Node.js. For local development run `just ui` (or
+The UI bundle in `static/ui` is build output and is not committed. The dockerfile builds it in a
+`node` stage (`npm ci && npm run build`) and copies only the result into the runtime image, so
+neither image variant ships Node.js. `docker build .` builds the default image and
+`docker build --build-arg VARIANT=blackwell .` builds the RTX 50 / Blackwell one. For local development run `just ui` (or
 `npm --prefix frontend run build`); the build type-checks every Vue component first.
 
 ### Offline integration verification (no CUDA or live kiosks)

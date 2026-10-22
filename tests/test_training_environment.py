@@ -49,7 +49,7 @@ class TrainingEnvironmentTests(unittest.TestCase):
     def test_blackwell_setup_explicitly_installs_and_checks_tensorboard(self) -> None:
         setup = (REPO_ROOT / "cli" / "setup_blackwell_venv").read_text(encoding="utf-8")
         health_check = (REPO_ROOT / "cli" / "check_training_venv").read_text(encoding="utf-8")
-        dockerfile = (REPO_ROOT / "dockerfile.blackwell").read_text(encoding="utf-8")
+        dockerfile = (REPO_ROOT / "dockerfile").read_text(encoding="utf-8")
 
         self.assertIn("    tensorboard ", setup)
         self.assertIn('"${VENV}/bin/python" "${HEALTH_CHECK}"', setup)

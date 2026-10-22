@@ -627,10 +627,9 @@ class ModernTtsTests(unittest.TestCase):
             self.assertTrue(any("1/2 accepted" in message for message in messages))
 
     def test_docker_images_are_wired_for_modern_tts(self) -> None:
-        for dockerfile in ("dockerfile", "dockerfile.blackwell"):
-            source = (REPO_ROOT / dockerfile).read_text(encoding="utf-8")
-            self.assertIn("ffmpeg", source)
-            self.assertIn("tts_config.py", source)
+        source = (REPO_ROOT / "dockerfile").read_text(encoding="utf-8")
+        self.assertEqual(source.count("ffmpeg"), 2)  # Both system stages.
+        self.assertIn("tts_config.py", source)
 
 
 if __name__ == "__main__":
