@@ -464,6 +464,17 @@ Also:
   - **Templates now compile with `whitespace: "preserve"`.** Prettier moved a space between inline tags onto a new line, and Vue's default `condense` then dropped it, which broke the Kiosks badge spacing.
   - A pixel diff of all pages (light, dark and 390px) against the pre-format build shows only known noise.
   - `noUnusedLocals` was not enabled; it belongs to phase 7.
+- **Phase 6 done (commits `adf7274`, `c3a7b61`, `698bba5`, plus the mobile commit):** UI polish in §5.
+  - Added shared pieces: row, note, danger and section-header styles, `PageHeader`, `ConfirmDialog` and `format.ts`.
+  - Every change was checked with screenshots (light, dark, 390px).
+  - Kept, deliberately:
+    - The **Samples table scrolls horizontally on phones**; its label and e2e test say it should. Only mid-word breaks were fixed.
+    - **Testing's sensitivity modal**, which shows a description for each option and is covered by an e2e test.
+    - **Manual's two label controls** (§5.3.8).
+    - **The theme toggle's fixed accessible name with `aria-pressed`**, which is a valid ARIA pattern and is e2e-tested.
+    - **Job ids in the expanded queue logs**, which help with debugging.
+    - **Deployment's "Manual only" pill.**
+  - Focus restoration and trapping in dialogs was dropped at the user's request; the native `showModal()` handles focus.
 
 ## 11. Order of work
 
