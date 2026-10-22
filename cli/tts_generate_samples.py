@@ -458,23 +458,10 @@ class Generator:
 
 
     def _reference_qa_python(self) -> Path:
-        candidates = []
-        configured = os.environ.get("REC_VENV_DIR")
-        if configured:
-            candidates.append(Path(configured) / "bin" / "python")
-        candidates.extend(
-            (
-                self.data_dir / ".recorder-venv" / "bin" / "python",
-                self.data_dir.parent.parent / "recorder-venv" / "bin" / "python",
-            )
-        )
-        for candidate in candidates:
-            if candidate.is_file():
-                return candidate
-        raise RuntimeError(
-            "Reference QA requires the trainer recorder environment with "
-            "Faster Whisper and Silero VAD installed."
-        )
+        python = self.data_dir / ".recorder-venv" / "bin" / "python"
+        if python.is_file():
+            return python
+        raise RuntimeError("Reference QA requires the trainer recorder environment with Silero VAD installed.")
 
 
 

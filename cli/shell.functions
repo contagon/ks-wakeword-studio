@@ -69,11 +69,9 @@ for a in "$@"; do
             ;;
         -q | --quiet)
             QUIET=true
-            break
             ;;
         -v | --verbose)
             VERBOSE=true
-            break
             ;;
         --*=*)
             [[ $a =~ --([^=]+)=(.*) ]]

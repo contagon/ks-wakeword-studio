@@ -117,14 +117,15 @@ if not validate_directories(required):
 # -------------------- TF + libs --------------------
 print("   Initializing libraries")
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
-os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
-os.environ["TF_XLA_FLAGS"] = "--tf_xla_auto_jit=0"
-os.environ["NVIDIA_TF32_OVERRIDE"] = "1"
-os.environ["TF_CUDNN_WORKSPACE_LIMIT_IN_MB"] = "512"
-os.environ["GLOG_minloglevel"] = "9"
-os.environ["GRPC_VERBOSITY"] = "ERROR"
+# Defaults only: an explicit environment (e.g. a Blackwell override) wins.
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("TF_FORCE_GPU_ALLOW_GROWTH", "true")
+os.environ.setdefault("TF_GPU_ALLOCATOR", "cuda_malloc_async")
+os.environ.setdefault("TF_XLA_FLAGS", "--tf_xla_auto_jit=0")
+os.environ.setdefault("NVIDIA_TF32_OVERRIDE", "1")
+os.environ.setdefault("TF_CUDNN_WORKSPACE_LIMIT_IN_MB", "512")
+os.environ.setdefault("GLOG_minloglevel", "9")
+os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
 
 print("   Loading Tensorflow")
 import tensorflow as tf

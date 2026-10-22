@@ -60,7 +60,7 @@ find_rev() {
     for rev in "${REV_CANDIDATES[@]}" ; do
         for pattern in "${TAR_PATTERNS[@]}" ; do
             url="https://huggingface.co/datasets/agkphysics/AudioSet/resolve/${rev}/${pattern}0.tar"
-            curl -I -L --fail -s "${url}" > /dev/null && echo "${rev},${pattern}"
+            curl -I -L --fail -s "${url}" > /dev/null && { echo "${rev},${pattern}" ; return 0 ; }
         done
     done
     echo ""

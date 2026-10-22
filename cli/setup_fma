@@ -116,6 +116,7 @@ download_with_fallbacks() {
     local rc=1
 
     for url in "${urls[@]}" ; do
+        [ "${url}" == "${urls[0]}" ] || echo "   ⚠️  Primary source failed; using fallback ${url} (a smaller FMA subset)" >&2
         for attempt in 1 2 3 4 ; do
             curl -sfL "${url}" -o "${output}" && [ -s "${output}" ] && return 0
             rc=$?
