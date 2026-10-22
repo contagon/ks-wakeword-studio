@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import TrainerApp from "../../TrainerApp.vue";
 import { fakeMedia, fakeStudio, press, recording, sample, json, type Req } from "./fakeStudio";
@@ -30,6 +30,7 @@ async function completedCollection(ui: VueWrapper, result: object) {
   server.hold(r => r.url.pathname.endsWith('/jobs/collect-test/logs'), () => json({ text: '' })).release();
   server.hold(r => r.url.pathname.endsWith('/a/collection/jobs'), () => json({ ...job, status: 'queued', result: {} })).release();
   await ui.get('[data-action="collect-now"]').trigger('click'); await settle();
+  await vi.waitFor(() => expect(ui.find('[data-collection-outcome]').exists()).toBe(true), { timeout: 3500 });
 }
 
 describe("keyboard-first classification", () => {
@@ -56,6 +57,8 @@ describe("keyboard-first classification", () => {
     server.hold(r => r.url.pathname.endsWith('/jobs/collect-active'), () => json(job)).release();
     await ui.get('[data-action="collect-now"]').trigger('click'); await settle();
     expect(ui.get('[data-action="collect-now"]').attributes('disabled')).toBeDefined();
+    expect(ui.get('[data-action="collect-now"]').attributes('aria-busy')).toBe('true');
+    expect(ui.find('[data-action="close-job-queue"]').exists()).toBe(false);
     await ui.get('[data-action="collect-now"]').trigger('click'); await settle();
     expect(server.requests.filter(r => r.method === 'POST' && r.url.pathname.endsWith('/collection/jobs'))).toHaveLength(1);
     expect(ui.findAll('button').some(button => /^View collection .* in queue$/.test(button.text()))).toBe(false);

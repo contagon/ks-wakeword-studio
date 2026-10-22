@@ -24,10 +24,11 @@ export type DownloadResult = { dataset_id: string; fingerprint: string } | { aug
 interface JobRecord<K extends string, R extends JobResource, P, T> { id: string; kind: K; word_id: string | null; resource: R; payload: P; status: JobStatus; created_at: string; started_at: string | null; finished_at: string | null; result: T | JobFailure | EmptyJobResult; run_number?: number | null }
 export type TrainJob = JobRecord<"train", "gpu", TrainPayload, TrainResult> & { word_id: string };
 export type GenerationJob = JobRecord<"generation", "gpu", GenerationPayload, GenerationResult> & { word_id: string };
+export type PreviewJob = JobRecord<'preview', 'gpu', GenerationPayload, { preview: boolean }> & { word_id: string };
 export type ScrapeJob = JobRecord<"scrape", "collection", ScrapePayload, ScrapeResult>;
 export type DownloadJob = JobRecord<"download", "download", DownloadPayload, DownloadResult>;
 /** Discriminated on `kind`; the server only admits these four kinds. */
-export type Job = TrainJob | GenerationJob | ScrapeJob | DownloadJob
+export type Job = TrainJob | GenerationJob | PreviewJob | ScrapeJob | DownloadJob
   | JobRecord<'classify', 'gpu', Record<string, never>, Record<string, number | string | boolean>>
   | JobRecord<'deploy', 'collection', Record<string, never>, Record<string, string | boolean>>;
 /** The generic queue endpoint is used only for collection; other kinds have dedicated, validated endpoints. */

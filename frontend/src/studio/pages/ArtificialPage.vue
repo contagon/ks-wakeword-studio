@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { absoluteTime } from '../time';
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { StudioApiError, studioApi } from "../api";
 import { useWorkspace } from "../workspace";
@@ -8,6 +9,10 @@ import { useJobQueue } from '../jobs';
 
 const workspace = useWorkspace();
 const queue = useJobQueue();
+const generationBusy = computed(() => queue.activeJobs.value.some(job => job.kind === 'generation' && job.word_id === activeId.value));
+function isPreviewBusy(engine: string): boolean {
+  return Boolean(previewBusy.value[engine]) || queue.activeJobs.value.some(job => job.kind === 'preview' && job.word_id === activeId.value && job.payload.recipe.engines?.includes(engine));
+}
 const capabilities = ref<GenerationCapability[]>([]); const batches = ref<Batch[]>([]); const total = ref(0); const offset = ref(0); const recipe = ref<GenerationRecipe>({ language: "en", english_accent: "mixed", tts_mode: "hybrid", samples: 1, batch_size: 1 });
 const selected = ref<Set<string>>(new Set()); const loading = ref(false); const saving = ref(false); const error = ref(""); const job = ref<Job | null>(null);
 const previews = ref<Record<string, Job>>({}); const previewBusy = ref<Record<string, boolean>>({}); const previewErrors = ref<Record<string, string>>({});
@@ -79,21 +84,21 @@ function updateLanguage(value: string): void { recipe.value.language = value; re
 function toggleEngine(engine: string, checked: boolean): void { const next = new Set(recipe.value.engines); checked ? next.add(engine) : next.delete(engine); recipe.value.engines = [...next]; if (!next.has('moss')) { recipe.value.moss_after_current = false; recipe.value.moss_source_batch_ids = []; } }
 function valid(): boolean { if (!Number.isInteger(recipe.value.samples) || recipe.value.samples < 1) { error.value = "Sample count must be a positive integer."; return false; } if (!recipe.value.engines?.length) { error.value = 'Select at least one generation model.'; return false; } return true; }
 async function save(): Promise<void> {
-   const id = activeId.value; if (!id || !valid()) return;
+   const id = activeId.value; if (!id || saving.value || generationBusy.value || !valid()) return;
    if (mossEnabled.value && (!Number.isInteger(recipe.value.moss_samples) || (recipe.value.moss_samples ?? 0) < 1)) { error.value = 'MOSS sample count must be a positive integer.'; return; }
    if (mossEnabled.value && (recipe.value.moss_after_current ? !directCount.value : !recipe.value.moss_source_batch_ids?.length)) { error.value = 'Select completed MOSS sources or generate after current direct providers.'; return; }
   mutationRequest?.abort(); const controller = new AbortController(); mutationRequest = controller; const token = ++mutationGeneration; const recipeToSave = { ...recipe.value, engines: [...recipe.value.engines!], english_accent: accentEnabled.value ? recipe.value.english_accent : 'mixed', tts_mode: 'hybrid' as const }; saving.value = true; error.value = "";
   try {
     const submission = await studioApi.submitGeneration(id, recipeToSave, controller.signal);
-    if (mutationCurrent(id, token, controller)) { recipe.value = recipeToSave; for (const child of submission.jobs) { submissionJobs.value[child.id] = child; queue.track(child); } job.value = submission.jobs[0] ?? null; if (job.value) void queue.show(job.value.id); }
+    if (mutationCurrent(id, token, controller)) { recipe.value = recipeToSave; for (const child of submission.jobs) { submissionJobs.value[child.id] = child; queue.track(child); } job.value = submission.jobs[0] ?? null; }
   } catch (cause) { if (mutationCurrent(id, token, controller)) error.value = cause instanceof Error ? cause.message : "Generation job was not started."; }
   finally { if (mutationCurrent(id, token, controller)) saving.value = false; }
 }
 async function preview(engine: string): Promise<void> {
-  const id = activeId.value; if (!id || previewBusy.value[engine]) return;
+  const id = activeId.value; if (!id || isPreviewBusy(engine)) return;
   previewRequests.get(engine)?.abort(); const controller = new AbortController(); previewRequests.set(engine, controller);
   previewBusy.value[engine] = true; previewErrors.value[engine] = ''; delete previews.value[engine];
-   try { const next = await studioApi.preview(id, { ...recipe.value, moss_after_current: false, moss_source_batch_ids: engine === 'moss' ? [...(recipe.value.moss_source_batch_ids ?? [])] : [], tts_mode: 'hybrid', engines: [engine], samples: 1, batch_size: 1, english_accent: capability.value?.accent_applies && engine !== 'piper' ? recipe.value.english_accent : 'mixed' }, controller.signal); if (!controller.signal.aborted && activeId.value === id) { previews.value[engine] = next; queue.track(next); void queue.show(next.id); } }
+   try { const next = await studioApi.preview(id, { ...recipe.value, moss_after_current: false, moss_source_batch_ids: engine === 'moss' ? [...(recipe.value.moss_source_batch_ids ?? [])] : [], tts_mode: 'hybrid', engines: [engine], samples: 1, batch_size: 1, english_accent: capability.value?.accent_applies && engine !== 'piper' ? recipe.value.english_accent : 'mixed' }, controller.signal); if (!controller.signal.aborted && activeId.value === id) { previews.value[engine] = next; queue.track(next); } }
   catch (cause) { if (!controller.signal.aborted && activeId.value === id) previewErrors.value[engine] = cause instanceof Error ? cause.message : 'Preview could not start.'; }
   finally { if (previewRequests.get(engine) === controller) { previewBusy.value[engine] = false; previewRequests.delete(engine); } }
 }
@@ -150,7 +155,7 @@ onBeforeUnmount(() => { loadRequest?.abort(); abortWorkspaceMutations(); });
             <article v-for="model in modelAvailability" :key="model.engine" class="studio-history">
               <div class="flex items-center justify-between gap-3">
                 <label class="studio-checkbox-label"><input type="checkbox" :data-engine="model.engine" :disabled="!model.available" :checked="recipe.engines?.includes(model.engine)" @change="toggleEngine(model.engine, ($event.target as HTMLInputElement).checked)"><strong>{{ engineNames[model.engine] ?? model.engine }}</strong></label>
-                <button type="button" :data-preview="model.engine" :disabled="!model.available || (model.engine === 'moss' && (recipe.moss_after_current || !recipe.moss_source_batch_ids?.length)) || previewBusy[model.engine] || ['queued', 'running', 'cancelling'].includes(previews[model.engine]?.status ?? '') || !activeId" @click="preview(model.engine)">{{ previewBusy[model.engine] ? 'Starting…' : 'Preview' }}</button>
+                 <button type="button" :data-preview="model.engine" :aria-busy="isPreviewBusy(model.engine)" :disabled="!model.available || (model.engine === 'moss' && (recipe.moss_after_current || !recipe.moss_source_batch_ids?.length)) || isPreviewBusy(model.engine) || !activeId" @click="preview(model.engine)">{{ isPreviewBusy(model.engine) ? 'Preparing preview…' : 'Preview' }}</button>
               </div>
               <p v-if="model.reason" class="studio-muted text-xs mt-2">{{ model.reason }}</p>
               <p v-if="previewErrors[model.engine]" role="alert" class="studio-note mt-3">{{ previewErrors[model.engine] }}</p>
@@ -173,18 +178,18 @@ onBeforeUnmount(() => { loadRequest?.abort(); abortWorkspaceMutations(); });
           </div>
         </fieldset>
         <p class="studio-muted text-xs">Each direct provider generates the full samples per provider count into a separate dataset. Requested total: {{ requestedTotal }}. MOSS has its own count. Preview generates one sample without adding training data.</p>
-        <button type="submit" data-action="generate" class="studio-primary justify-self-start" :disabled="saving || loading || !activeId">{{ saving ? 'Starting…' : 'Generate dataset' }}</button>
+        <button type="submit" data-action="generate" class="studio-primary justify-self-start" :aria-busy="saving || generationBusy" :disabled="saving || generationBusy || loading || !activeId">{{ saving ? 'Starting…' : generationBusy ? 'Generating…' : 'Generate dataset' }}</button>
       </form>
       <p v-if="error" class="studio-note mt-3" role="alert">{{ error }}</p>
       <button v-if="job" type="button" class="mt-3" @click="queue.show(job.id)">View generation in queue</button>
     </div>
     <div class="studio-card mt-4">
-      <div class="flex flex-wrap items-center justify-between gap-3"><h2>Generated datasets</h2><button type="button" data-action="save-batches" :disabled="saving || loading || !activeId" @click="saveBatches">Save selection</button></div>
+      <div class="flex flex-wrap items-center justify-between gap-3"><h2>Generated datasets</h2><button type="button" data-action="save-batches" class="studio-selection-action" :disabled="saving || loading || !activeId" @click="saveBatches">Save selection</button></div>
       <p class="studio-muted text-xs">Select completed datasets to include in this wakeword’s training.</p>
       <p v-if="loading" class="studio-muted mt-3">Loading datasets…</p>
       <article v-for="batch in batches" :key="batch.id" class="studio-history mt-3">
         <div class="studio-dataset-row">
-          <label class="studio-checkbox-label"><input :data-batch-id="batch.id" type="checkbox" :checked="selected.has(batch.id)" :disabled="batch.status !== 'complete'" @change="toggle(batch, ($event.target as HTMLInputElement).checked)"><span><strong>{{ batch.phrase }}</strong><span class="studio-muted block text-xs">{{ batch.audio.length }} samples · {{ batch.recipe.engines?.map(engine => engineNames[engine] ?? engine).join(', ') || 'Saved generation models' }} · {{ batch.created_at ? new Date(batch.created_at).toLocaleString() : '' }}</span><span v-if="batch.status !== 'complete'" class="studio-muted block text-xs">{{ batch.status }} — only completed datasets can be selected.</span></span><span class="studio-status ml-auto">{{ batch.status }}</span></label>
+          <label class="studio-checkbox-label"><input :data-batch-id="batch.id" type="checkbox" :checked="selected.has(batch.id)" :disabled="batch.status !== 'complete'" @change="toggle(batch, ($event.target as HTMLInputElement).checked)"><span><strong>{{ batch.phrase }}</strong><span class="studio-muted block text-xs">{{ batch.audio.length }} samples · {{ batch.recipe.engines?.map(engine => engineNames[engine] ?? engine).join(', ') || 'Saved generation models' }} · {{ absoluteTime(batch.created_at) }}</span><span v-if="batch.status !== 'complete'" class="studio-muted block text-xs">{{ batch.status }} — only completed datasets can be selected.</span></span><span class="studio-status ml-auto" :class="`studio-status-${batch.status}`">{{ batch.status }}</span></label>
           <button type="button" :data-delete-batch="batch.id" :disabled="saving || ['queued', 'running', 'cancelling'].includes(batch.status)" @click="deleting = batch">Delete dataset</button>
         </div>
         <p v-if="batch.recipe.moss_source_batch_ids?.length" class="studio-muted text-xs">MOSS sources: {{ batch.recipe.moss_source_batch_ids.join(', ') }}</p>

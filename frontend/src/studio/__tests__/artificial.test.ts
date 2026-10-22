@@ -52,7 +52,7 @@ beforeEach(() => {
       const response = json({ id: 'submission', jobs, batch_ids: jobs.map((item: { id: string }) => item.id) }, 201);
       return delayRecipeSave ? new Promise<Response>(resolve => { resolveRecipeSave = resolve; }) : response;
     }
-    if (path.endsWith('/generation/previews')) return json({ ...job('preview-ready', 'queued'), kind: 'preview' }, 201);
+    if (path.endsWith('/generation/previews')) return json({ ...job('preview-ready', 'queued'), kind: 'preview', payload: { phrase: 'Hey Cedar', recipe: JSON.parse(String(init?.body)) } }, 201);
     if (path.endsWith('/jobs/preview-ready')) return json({ ...job('preview-ready', 'queued'), kind: 'preview', status: 'complete', result: { preview: true } });
     if (path.endsWith('/jobs/preview-ready/logs')) return json({ text: '' });
     const word = path.match(/^\/api\/studio\/wakewords\/([ab])\/generation\/(recipe|batches|jobs)$/);
@@ -71,6 +71,42 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("ArtificialPage", () => {
+  it('marks failed generated datasets with the shared failure badge style', async () => {
+    const ui = mount(host()); await flushPromises();
+    const row = ui.findAll('article').find(row => row.find('[data-batch-id="partial"]').exists())!;
+    expect(row.get('.studio-status').classes()).toContain('studio-status-failed');
+    ui.unmount();
+  });
+  it('keeps generation busy until every submitted provider is terminal', async () => {
+    const ui = mount(host()); await flushPromises();
+    await ui.get('form').trigger('submit'); await flushPromises();
+    const button = ui.get('[data-action="generate"]');
+    expect(queue.open.value).toBe(false);
+    expect(button.attributes('aria-busy')).toBe('true');
+    expect(button.element).toHaveProperty('disabled', true);
+    queue.track({ ...job('generation-queued', 'failed'), kind: 'generation', resource: 'gpu' }); await flushPromises();
+    expect(button.element).toHaveProperty('disabled', true);
+    queue.track({ ...job('generation-qwen3', 'cancelled'), kind: 'generation', resource: 'gpu' }); await flushPromises();
+    expect(button.element).toHaveProperty('disabled', false);
+    ui.unmount();
+  });
+  it('shows restored per-provider previews as busy without blocking other previews', async () => {
+    const ui = mount(host()); await flushPromises();
+    queue.track({ ...job('existing-preview', 'queued'), kind: 'preview', resource: 'gpu', payload: { phrase: 'Hey Cedar', recipe: { ...recipe, engines: ['qwen3'] } } }); await flushPromises();
+    expect(ui.get('[data-preview="qwen3"]').attributes('aria-busy')).toBe('true');
+    expect(ui.get('[data-preview="qwen3"]').element).toHaveProperty('disabled', true);
+    expect(ui.get('[data-preview="omnivoice"]').element).toHaveProperty('disabled', false);
+    queue.track({ ...job('existing-preview', 'cancelled'), kind: 'preview', resource: 'gpu', payload: { phrase: 'Hey Cedar', recipe: { ...recipe, engines: ['qwen3'] } } }); await flushPromises();
+    expect(ui.get('[data-preview="qwen3"]').element).toHaveProperty('disabled', false);
+    ui.unmount();
+  });
+  it('keeps the queue closed when previewing', async () => {
+    const ui = mount(host()); await flushPromises();
+    await ui.get('[data-preview="qwen3"]').trigger('click'); await flushPromises();
+    expect(queue.open.value).toBe(false);
+    expect(ui.get('[data-preview="qwen3"]').attributes('aria-busy')).toBe('true');
+    ui.unmount();
+  });
   it('enables only OmniVoice and Qwen3-TTS by default for an unsaved recipe', async () => {
     newWorkspace = true;
     const ui = mount(host()); await flushPromises(); await flushPromises();
@@ -306,6 +342,7 @@ describe("ArtificialPage", () => {
     const save = vi.mocked(fetch).mock.calls.find(([input, init]) => String(input).endsWith('/generation/submissions') && init?.method === 'POST');
     expect(JSON.parse(String(save?.[1]?.body)).engines).toEqual(['qwen3']);
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+    await queue.cancel('generation-queued'); await flushPromises();
     await ui.get('[data-engine="qwen3"]').setValue(false);
     await ui.get('form').trigger('submit');
     expect(ui.get('[role="alert"]').text()).toContain('at least one');
@@ -318,7 +355,7 @@ describe("ArtificialPage", () => {
     expect((ui.get('input[data-batch-id="partial"]').element as HTMLInputElement).disabled).toBe(true);
     await ui.get('form').trigger('submit'); await flushPromises();
     expect(queue.jobs.value['generation-queued']?.status).toBe('queued');
-    expect(queue.open.value).toBe(true); expect(ui.find('[data-job-id]').exists()).toBe(false);
+    expect(queue.open.value).toBe(false); expect(ui.find('[data-job-id]').exists()).toBe(false);
     await queue.cancel('generation-queued'); await flushPromises();
     expect(queue.jobs.value['generation-queued']?.status).toBe('cancelled');
     workspace.selectedId.value = "b"; await flushPromises(); await flushPromises();

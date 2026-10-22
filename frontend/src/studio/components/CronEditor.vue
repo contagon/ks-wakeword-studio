@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { absoluteTime } from '../time';
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { studioApi } from "../api";
 import type { Schedule } from "../types";
@@ -25,5 +26,5 @@ onBeforeUnmount(() => request?.abort());
 </script>
 
 <template>
-  <section class="studio-card" data-cron-editor :data-scope="scope"><h2>{{ title }}</h2><p class="studio-muted">Standard five-field cron with explicit IANA timezone. The next run below is calculated and validated by the server.</p><form class="studio-schedule-row mt-3" @submit.prevent="save"><label>Cron<input v-model="cron" name="cron" required pattern="\S+(\s+\S+){4}"></label><label>IANA timezone<input v-model="timezone" name="timezone" required></label><label class="studio-checkbox-label"><input v-model="enabled" name="enabled" type="checkbox"> Enabled</label><button type="submit" class="studio-primary" :disabled="saving">{{ saving ? 'Validating…' : 'Save schedule' }}</button></form><p v-if="current" class="studio-muted mt-3">Timezone: {{ current.timezone }} · Server-computed next run: <strong>{{ current.next_run_at }}</strong></p><p v-else class="studio-muted mt-3">No schedule saved. UTC is the default timezone.</p><p v-if="error" role="alert" class="studio-note">{{ error }}</p></section>
+  <section class="studio-card" data-cron-editor :data-scope="scope"><h2>{{ title }}</h2><p class="studio-muted">Standard five-field cron with explicit IANA timezone. The next run below is calculated and validated by the server.</p><form class="studio-schedule-row mt-3" @submit.prevent="save"><label>Cron<input v-model="cron" name="cron" required pattern="\S+(\s+\S+){4}"></label><label>IANA timezone<input v-model="timezone" name="timezone" required></label><label class="studio-checkbox-label"><input v-model="enabled" name="enabled" type="checkbox"> Enabled</label><button type="submit" class="studio-primary" :disabled="saving">{{ saving ? 'Validating…' : 'Save schedule' }}</button></form><p v-if="current" class="studio-muted mt-3">Schedule timezone: {{ current.timezone }} · Next run (your local time): <strong>{{ absoluteTime(current.next_run_at) }}</strong></p><p v-else class="studio-muted mt-3">No schedule saved. UTC is the default timezone.</p><p v-if="error" role="alert" class="studio-note">{{ error }}</p></section>
 </template>

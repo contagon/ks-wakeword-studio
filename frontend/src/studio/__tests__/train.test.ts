@@ -43,6 +43,31 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("TrainPage", () => {
+  it('keeps training busy through submission and queued work, then releases on failure', async () => {
+    const ui = mount(host()); await flushPromises();
+    delayTrainStart = true;
+    const button = ui.get('[data-action="start-training"]');
+    await button.trigger('click'); await flushPromises();
+    expect(button.attributes('aria-busy')).toBe('true');
+    resolveDeferred(resolveTrainStart, json(train('queued'))); await flushPromises();
+    expect(queue.open.value).toBe(false);
+    expect(button.element).toHaveProperty('disabled', true);
+    expect(button.attributes('aria-busy')).toBe('true');
+    await ui.findAll('button').find(button => button.text() === 'View training in queue')!.trigger('click'); await flushPromises();
+    expect(queue.open.value).toBe(true);
+    queue.track({ ...train('failed'), kind: 'train', resource: 'gpu', payload: {} }); await flushPromises();
+    expect(button.element).toHaveProperty('disabled', false);
+    expect(button.attributes('aria-busy')).toBe('false');
+    ui.unmount();
+  });
+  it('reflects restored active training only in its matching workspace', async () => {
+    const ui = mount(host()); await flushPromises();
+    queue.track({ ...train('queued'), kind: 'train', resource: 'gpu', payload: {} }); await flushPromises();
+    expect(ui.get('[data-action="start-training"]').attributes('aria-busy')).toBe('true');
+    workspace.selectedId.value = 'b'; await flushPromises();
+    expect(ui.get('[data-action="start-training"]').element).toHaveProperty('disabled', false);
+    ui.unmount();
+  });
   it('blocks training until augmentation datasets are installed and links to Downloaded', async () => {
     const transport = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/augmentation/datasets')
@@ -69,7 +94,7 @@ describe("TrainPage", () => {
     const ui = mount(host()); await flushPromises(); await flushPromises();
     const run = ui.get('.studio-history');
     expect(run.get('[data-run-number]').text()).toBe('Run #7');
-    expect(run.get('[data-run-time]').text()).toContain('2 hours ago');
+    expect(run.get('[data-run-time]').text()).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date('2026-10-21T10:00:00Z')));
     expect(run.get('[data-run-time]').text()).toContain('2026');
     expect(run.text()).not.toContain('b'.repeat(32));
     ui.unmount();
@@ -143,7 +168,7 @@ describe("TrainPage", () => {
     const saveCall = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === "PUT" && String(init.body).includes("50000"));
     expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual({ training_steps: 50000 });
     await ui.get('[data-action="start-training"]').trigger("click"); await flushPromises(); expect(queue.jobs.value['train-1']?.status).toBe('queued');
-    expect(queue.open.value).toBe(true); expect(ui.find('[data-job-id]').exists()).toBe(false);
+    expect(queue.open.value).toBe(false); expect(ui.find('[data-job-id]').exists()).toBe(false);
     await queue.cancel('train-1'); await flushPromises(); expect(queue.jobs.value['train-1']?.status).toBe('cancelled');
     expect(ui.text()).toContain("Skipped because inputs and configuration were unchanged"); expect(ui.text()).toContain("failed");
     ui.unmount();
@@ -198,7 +223,7 @@ describe("JobConsole", () => {
     }
     function expectSettled(ui: ReturnType<typeof mount>): void {
       expect((ui.get('[data-action="save-training-settings"]').element as HTMLButtonElement).disabled).toBe(false);
-      expect((ui.get('[data-action="start-training"]').element as HTMLButtonElement).disabled).toBe(false);
+      expect((ui.get('[data-action="start-training"]').element as HTMLButtonElement).disabled).toBe(true);
       expect(queue.jobs.value['train-1']?.status).toBe('queued');
       expect(ui.find('[data-job-id]').exists()).toBe(false);
     }

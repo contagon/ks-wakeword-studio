@@ -50,7 +50,7 @@ describe("Deploy page", () => {
     const archive = ui.get('[data-version-id="new"]');
     expect(archive.get('strong time').attributes('datetime')).toBe('2026-10-18T17:00:00Z');
     expect(archive.get('strong time').text()).toContain('2026');
-    expect(archive.get('strong time').text()).toContain('3 days ago');
+    expect(archive.get('strong time').text()).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date('2026-10-18T17:00:00Z')));
     expect(archive.get('strong time').attributes('title')).toContain('2026');
     expect(archive.text()).not.toContain('Run run');
     expect(archive.get('strong').text()).not.toContain('new');
@@ -73,6 +73,14 @@ describe("Deploy page", () => {
     ui.unmount();
   });
 
+  it.each(['failed', 'exhausted', 'archive_invalid', 'rejected', 'hash_mismatch', 'role_changed'])('makes %s publication badges visibly failed', async state => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) => String(input).endsWith('/deployment/status')
+      ? Promise.resolve(json([publication('a', state)])) : transport(input, init));
+    const ui = mount(host()); await flushPromises();
+    expect(ui.get('[data-device-status="leader"] .studio-status').classes()).toContain('studio-status-failed');
+    ui.unmount();
+  });
   it('keeps unvalidated legacy archives downloadable and explains explicit engine validation before publication', async () => {
     legacy = true;
     const ui = mount(host()); await flushPromises(); await flushPromises();

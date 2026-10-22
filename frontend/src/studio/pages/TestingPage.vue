@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { absoluteTime } from '../time';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { studioApi } from '../api';
 import { useWorkspace } from '../workspace';
@@ -105,7 +106,7 @@ onBeforeUnmount(() => { disposed = true; listRequest?.abort(); manifestRequest?.
         <label for="testing-version">Wakeword version
           <select id="testing-version" v-model="versionId" :disabled="loading || !versions.length">
             <option v-if="!versions.length" value="">{{ loading ? 'Loading versions…' : 'No versions available' }}</option>
-            <option v-for="version in versions" :key="version.id" :value="version.id">{{ version.trained_at }} · {{ version.id.slice(0, 8) }}</option>
+            <option v-for="version in versions" :key="version.id" :value="version.id">{{ absoluteTime(version.trained_at) }} · {{ version.id.slice(0, 8) }}</option>
           </select>
         </label>
         <div class="testing-sensitivity"><span class="studio-muted">Sensitivity</span><button type="button" data-action="sensitivity" :disabled="!config" aria-haspopup="dialog" @click="dialog?.showModal()">{{ sensitivityLabel }} ▾</button></div>

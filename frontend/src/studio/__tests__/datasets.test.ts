@@ -61,6 +61,54 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("NegativeDatasetsPage", () => {
+  it('follows a newly discovered active retry instead of an old failed catalog attempt', async () => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const response = await transport(input, init);
+      if (new URL(String(input), 'http://localhost').pathname.match(/\/wakewords\/a\/datasets$/)) {
+        const page = await response.json();
+        return json({ ...page, items: page.items.map((row: ReturnType<typeof dataset>) => row.id === 'set-3' ? { ...row, status: 'failed', job_id: 'old-attempt' } : row) });
+      }
+      return response;
+    });
+    const ui = mount(host()); await flushPromises();
+    const base = { kind: 'download' as const, resource: 'download' as const, word_id: null, payload: { dataset_id: 'set-3' }, started_at: null, finished_at: null, result: {} };
+    queue.track({ ...base, id: 'old-attempt', status: 'failed', created_at: '2026-10-20T10:00:00Z' });
+    queue.track({ ...base, id: 'new-attempt', status: 'running', created_at: '2026-10-21T10:00:00Z' }); await flushPromises();
+    const row = ui.findAll('article').find(row => row.find('[data-dataset-id="set-3"]').exists())!;
+    expect(row.get('.studio-status').text()).toBe('running');
+    expect(row.get('button').attributes('aria-busy')).toBe('true');
+    expect(row.get('button').element).toHaveProperty('disabled', true);
+    await row.get('[data-action="view-dataset-job"]').trigger('click'); await flushPromises();
+    expect(queue.selectedJobId.value).toBe('new-attempt');
+    ui.unmount();
+  });
+  it('keeps only the matching download busy without opening the queue', async () => {
+    const ui = mount(host()); await flushPromises();
+    const row = (id: string) => ui.findAll('article').find(row => row.find(`[data-dataset-id="${id}"]`).exists())!;
+    delayDownload = true;
+    await row('set-3').get('button').trigger('click'); await flushPromises();
+    expect(row('set-3').get('button').attributes('aria-busy')).toBe('true');
+    expect(row('set-4').get('button').element).toHaveProperty('disabled', false);
+    resolveDeferred(resolveDownload, json({ id: 'download-3', kind: 'download', word_id: null, resource: 'download', payload: { dataset_id: 'set-3' }, status: 'queued', created_at: '', started_at: null, finished_at: null, result: {} })); await flushPromises();
+    expect(queue.open.value).toBe(false);
+    expect(row('set-3').get('button').element).toHaveProperty('disabled', true);
+    expect(row('set-2').get('button').attributes('aria-busy')).toBe('true');
+    queue.track({ id: 'download-3', kind: 'download', word_id: null, resource: 'download', payload: { dataset_id: 'set-3' }, status: 'failed', created_at: '', started_at: null, finished_at: '', result: {} }); await flushPromises();
+    expect(row('set-3').get('button').element).toHaveProperty('disabled', false);
+    ui.unmount();
+  });
+  it('shows augmentation activity on its button until cancellation without opening the queue', async () => {
+    const ui = mount(host()); await flushPromises();
+    const row = ui.get('[data-augmentation-id="mit_rirs_16k"]');
+    await row.get('button').trigger('click'); await flushPromises();
+    expect(queue.open.value).toBe(false);
+    expect(row.get('button').attributes('aria-busy')).toBe('true');
+    expect(row.get('button').element).toHaveProperty('disabled', true);
+    queue.track({ id: 'aug-1', kind: 'download', word_id: null, resource: 'download', payload: { augmentation_id: 'mit_rirs_16k' }, status: 'cancelled', created_at: '', started_at: null, finished_at: '', result: {} }); await flushPromises();
+    expect(row.get('button').element).toHaveProperty('disabled', false);
+    ui.unmount();
+  });
   it('does not let an older local failure override the catalog current attempt', async () => {
     const transport = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation((input, init) => {
@@ -244,9 +292,9 @@ describe("NegativeDatasetsPage", () => {
     function expectSettled(ui: ReturnType<typeof mount>): void {
       expect((ui.get('[data-action="save-datasets"]').element as HTMLButtonElement).disabled).toBe(false);
       const download = ui.findAll("article").find(article => article.find('input[data-dataset-id="set-3"]').exists())?.find("button");
-      expect((download?.element as HTMLButtonElement).disabled).toBe(false);
+      expect((download?.element as HTMLButtonElement).disabled).toBe(true);
       expect(queue.jobs.value['download-3']?.status).toBe('running');
-      expect(queue.open.value).toBe(true); expect(ui.find('[data-job-id]').exists()).toBe(false);
+      expect(queue.open.value).toBe(false); expect(ui.find('[data-job-id]').exists()).toBe(false);
     }
 
     let ui = mount(host()); await flushPromises(); await flushPromises(); await startBoth(ui);

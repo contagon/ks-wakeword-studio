@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { absoluteTime } from '../time';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { studioApi } from '../api';
 import type { AutomationSettings, AutomationStatus } from '../types';
@@ -20,8 +21,8 @@ function stageStatus(kind: 'scrape' | 'classify' | 'train' | 'deploy'): string {
   const schedule = status.value?.schedules.find(s => s.scope === `${kind}:${wordId.value}`);
   const job = status.value?.last_jobs[kind];
   const skipped = job && 'skipped' in job.result && job.result.skipped;
-  const result = job ? `Last run: ${skipped ? 'skipped' : job.status}${job.finished_at ? ` · ${new Date(job.finished_at).toLocaleString()}` : ''}` : 'No runs yet';
-  return `${result} · ${schedule?.enabled ? `Next: ${new Date(schedule.next_run_at).toLocaleString()}` : 'Not scheduled'}`;
+  const result = job ? `Last run: ${skipped ? 'skipped' : job.status}${job.finished_at ? ` · ${absoluteTime(job.finished_at)}` : ''}` : 'No runs yet';
+  return `${result} · ${schedule?.enabled ? `Next: ${absoluteTime(schedule.next_run_at)}` : 'Not scheduled'}`;
 }
 async function load() {
   request?.abort(); mutation?.abort(); const controller = new AbortController(); request = controller;

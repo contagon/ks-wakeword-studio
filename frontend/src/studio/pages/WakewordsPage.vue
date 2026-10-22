@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { absoluteTime } from '../time';
 import { onScopeDispose, reactive, ref, watch } from "vue";
 import { StudioApiError, studioApi } from "../api";
 import { useWorkspace } from "../workspace";
@@ -70,8 +71,8 @@ async function save() {
       <div class="flex items-start justify-between gap-3"><h2 class="min-w-0 break-words">{{ selected.phrase }} · Overview</h2><button class="shrink-0" data-action="delete-workspace" type="button" :disabled="saving" @click="confirmingDelete = true">Delete workspace</button></div>
       <dl class="grid gap-3 sm:grid-cols-3 text-sm">
         <div><dt class="studio-muted">Pending classification</dt><dd>{{ summary.pending }} pending</dd></div>
-        <div><dt class="studio-muted">Archived models</dt><dd>{{ summary.modelCount }} versions</dd><dd class="text-xs">{{ summary.latestModel ? `Latest: ${summary.latestModel.trained_at}` : 'No trained models yet' }}</dd></div>
-        <div><dt class="studio-muted">Autotrain</dt><dd>{{ summary.schedule?.enabled ? `${summary.schedule.cron} · ${summary.schedule.timezone}` : 'Not scheduled' }}</dd><dd v-if="summary.schedule?.enabled" class="text-xs">Next: {{ summary.schedule.next_run_at }}</dd></div>
+        <div><dt class="studio-muted">Archived models</dt><dd>{{ summary.modelCount }} versions</dd><dd class="text-xs">{{ summary.latestModel ? `Latest: ${absoluteTime(summary.latestModel.trained_at)}` : 'No trained models yet' }}</dd></div>
+        <div><dt class="studio-muted">Autotrain</dt><dd>{{ summary.schedule?.enabled ? `${summary.schedule.cron} · ${summary.schedule.timezone}` : 'Not scheduled' }}</dd><dd v-if="summary.schedule?.enabled" class="text-xs">Next: {{ absoluteTime(summary.schedule.next_run_at) }}</dd></div>
       </dl>
     </div>
     <p v-if="formError" role="alert" class="studio-note">{{ formError }}</p>

@@ -188,7 +188,7 @@ test('browser generates and selects a batch, queues real training and downloads 
   expect((await (await request.post('/__test/drain-gpu')).json()).ran).toBe(true);
   const completed = await (await request.get(`/api/studio/jobs/${job.id}`)).json();
   expect(completed.status).toBe('complete');
-  await page.getByRole('button', { name: 'Close job queue', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Global job queue' })).toHaveCount(0);
   const versions = await (await request.get(`/api/studio/wakewords/${a.id}/models`)).json();
   expect(versions.total).toBe(1);
   await page.locator('[data-page="deploy"]').click();
@@ -209,7 +209,7 @@ test('single-model preview plays isolated audio without creating a dataset', asy
   expect(preview.payload.recipe.engines).toEqual(['qwen3']);
   expect((await (await request.post('/__test/drain-gpu')).json()).ran).toBe(true);
   const audio = page.locator('[data-preview-audio="qwen3"]');
-  await page.getByRole('button', { name: 'Close job queue', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Global job queue' })).toHaveCount(0);
   await expect(audio).toBeVisible();
   await expect.poll(async () => audio.evaluate((element: HTMLAudioElement) => element.readyState)).toBeGreaterThanOrEqual(2);
   await expect.poll(async () => audio.evaluate((element: HTMLAudioElement) => element.currentTime)).toBeGreaterThan(0);
@@ -323,7 +323,7 @@ test('workspace Automate controls scoped collection and explicitly opted-in publ
   await expect(page.getByRole('status')).toContainText('Automation settings saved');
   await page.locator('[data-page="classify"]').click();
   await page.locator('[data-action="collect-now"]').click();
-  await page.getByRole('button', { name: 'Close job queue', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Global job queue' })).toHaveCount(0);
   expect((await (await request.post('/__test/drain-collection')).json()).ran).toBe(true);
   expect((await (await request.post('/__test/drain-gpu')).json()).ran).toBe(true);
   const samples = await (await request.get(`/api/studio/wakewords/${a.id}/samples`)).json();
@@ -373,6 +373,8 @@ test('kiosk addresses survive refresh and the global queue follows jobs across w
   await page.locator('[data-page="artificial"]').click();
   await page.locator('[data-preview="qwen3"]').click();
   const drawer = page.getByRole('dialog', { name: 'Global job queue' });
+  await expect(drawer).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open global job queue' }).click();
   await expect(drawer).toBeVisible();
   await expect(drawer).toContainText('queue_cedar');
   const card = drawer.locator('[data-job-id]').filter({ hasText: 'queue_cedar' }).first();

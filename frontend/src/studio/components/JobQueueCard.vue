@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { absoluteTime } from '../time';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useDeviceRegistry } from '../devices';
 import { studioApi } from '../api';
@@ -36,7 +37,7 @@ onBeforeUnmount(stop);
     <div class="studio-job-heading"><h3>{{ names[job.kind] ?? job.kind }}</h3><span class="studio-status" :class="`studio-status-${job.status}`">{{ job.status }}</span><button v-if="isActiveJob(job)" type="button" data-action="cancel-job" :aria-label="`Cancel ${names[job.kind] ?? job.kind}`" :disabled="job.status === 'cancelling' || queue.cancelling.value.has(job.id)" @click="queue.cancel(job.id)">Cancel</button></div>
     <p class="studio-job-meta">{{ scope }} · {{ devices }}</p>
     <p v-if="jobError(job)" class="studio-note" role="alert">{{ jobError(job) }}</p>
-    <p class="studio-job-meta">{{ job.started_at ? 'Started' : 'Created' }} {{ new Date(job.started_at ?? job.created_at).toLocaleString() }}</p>
+    <p class="studio-job-meta">{{ job.started_at ? 'Started' : 'Created' }} {{ absoluteTime(job.started_at ?? job.created_at) }}</p>
     <details @toggle="expanded = ($event.target as HTMLDetailsElement).open"><summary>View logs</summary><p v-if="loading && !logs" class="studio-job-meta">Loading logs…</p><pre v-if="logs" class="studio-log" aria-label="Job log tail">{{ logs }}</pre><p v-else-if="!loading && !error" class="studio-job-meta">No retained log output.</p><p v-if="error" class="studio-note" role="alert">{{ error }} <button type="button" @click="loadLogs">Retry</button></p><p class="studio-job-meta">Job {{ job.id }}</p></details>
     <p v-if="queue.cancelErrors.value[job.id]" class="studio-note" role="alert">{{ queue.cancelErrors.value[job.id] }}</p>
   </article>

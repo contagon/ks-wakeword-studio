@@ -68,7 +68,7 @@ async function download(row: AugmentationDataset): Promise<void> {
     const job = await studioApi.downloadAugmentation(row.id, controller.signal);
     if (!disposed && !controller.signal.aborted) {
       if (catalog.value) catalog.value.items = catalog.value.items.map(item => item.id === row.id ? { ...item, status: job.status, job_id: job.id, job_created_at: job.created_at, error_code: null } : item);
-      queue.track(job); void queue.show(job.id);
+      queue.track(job);
     }
   } catch (cause) { if (!controller.signal.aborted) error.value = cause instanceof Error ? cause.message : 'Unable to start augmentation download.'; }
   finally { mutations.delete(controller); const next = new Set(starting.value); next.delete(row.id); starting.value = next; }
@@ -82,13 +82,13 @@ onBeforeUnmount(() => { disposed = true; request?.abort(); saveRequest?.abort();
 
 <template>
   <section data-augmentation-datasets class="studio-card mt-4">
-    <div class="studio-toolbar"><h2>Augmentation datasets</h2><button type="button" :disabled="loading" @click="load()">Refresh status</button><button type="button" data-action="save-augmentation" class="studio-primary" :disabled="saving || loading || !activeId || !catalog" @click="save">{{ saving ? 'Saving…' : 'Save selection' }}</button></div>
+    <div class="studio-toolbar"><h2>Augmentation datasets</h2><button type="button" :disabled="loading" @click="load()">Refresh status</button><button type="button" data-action="save-augmentation" class="studio-primary studio-selection-action" :disabled="saving || loading || !activeId || !catalog" @click="save">{{ saving ? 'Saving…' : 'Save selection' }}</button></div>
     <p class="studio-muted mt-3">Downloads are shared; select usage per wakeword. All are enabled by default. Training mixes selected backgrounds and room echoes into your samples before creating model features.</p>
     <p v-if="loading && !catalog" class="studio-muted mt-3">Checking augmentation datasets…</p>
     <p v-if="error" class="studio-note mt-3" role="alert">{{ error }}</p>
     <article v-for="row in catalog?.items ?? []" :key="row.id" :data-augmentation-id="row.id" class="studio-history mt-3">
       <div class="studio-dataset-row"><label class="studio-checkbox-label"><input type="checkbox" :disabled="!activeId || saving" :checked="selected.has(row.id)" @change="toggle(row.id, ($event.target as HTMLInputElement).checked)"><div class="studio-dataset-copy"><strong>{{ row.name }}</strong><p class="studio-muted text-xs">{{ row.description }} · {{ row.source }}</p><p class="studio-muted text-xs">{{ datasetBytes(row.installed_bytes ?? row.download_bytes) }}{{ row.installed_bytes !== null ? ' installed' : '' }} · {{ datasetSamples(row.file_count) }}</p></div></label>
-        <div class="studio-dataset-actions"><span class="studio-status" :class="`studio-status-${state(row)}`">{{ state(row) }}</span><button v-if="state(row) !== 'installed'" type="button" :disabled="busy(row)" @click="download(row)">{{ busy(row) ? 'Preparing…' : ['failed', 'cancelled', 'interrupted'].includes(state(row)) ? 'Retry download' : 'Download & prepare' }}</button><button v-if="jobId(row)" type="button" @click="queue.show(jobId(row)!)">View in queue</button></div>
+        <div class="studio-dataset-actions"><span class="studio-status" :class="`studio-status-${state(row)}`">{{ state(row) }}</span><button v-if="state(row) !== 'installed'" type="button" :aria-busy="busy(row)" :disabled="busy(row)" @click="download(row)">{{ busy(row) ? 'Preparing…' : ['failed', 'cancelled', 'interrupted'].includes(state(row)) ? 'Retry download' : 'Download & prepare' }}</button><button v-if="jobId(row)" type="button" @click="queue.show(jobId(row)!)">View in queue</button></div>
       </div>
       <p v-if="failure(row)" class="studio-note text-xs mt-3" role="alert">{{ failure(row) }}</p>
     </article>

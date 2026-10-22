@@ -46,7 +46,10 @@
 - [x] again list them by dates not by run ids.
 
 # Overall
-- [ ] Make all timestamps pretty and relative to browser timestamps throughout.
-- [ ] when adding somethign to the queue, don't open teh queue. Do convert the button into grayed out with a spinner on it
-- [ ] make all failed tags more prominent throughout. maybe red
-- [ ] move all save selection buttons to the far right.
+- [x] Make all timestamps pretty using browser-local dates and times throughout.
+- [x] when adding somethign to the queue, don't open teh queue. Do convert the button into grayed out with a spinner on it
+- [x] make all failed tags more prominent throughout. maybe red
+- [x] move all save selection buttons to the far right.
+
+# Automate
+- [ ] Take classification rules out of a drop down
