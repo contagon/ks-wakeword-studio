@@ -453,6 +453,12 @@ Also:
   - Deferred:
     - **The `:not(.legacy-scope *)` qualifiers in `studio.css`.** Removing them lowers selector specificity, and a pixel diff showed 1px shifts on checkboxes and a changed corner on the selected wakeword card. Handle them in §5 along with the B1 trim-dialog rebuild; `AudioTrimModal.vue` still wraps itself in `legacy-scope`.
     - **Service methods that are now test-only.** `GenerationService.enqueue/save_recipe/get_batch`, `TrainingService.get_manifest`, `ScheduleService.save`, `WorkspaceService.update/source_mappings`, and `StudioRuntime.health` (plus the WorkerPool health bookkeeping) are kept because many tests use them for setup. `publication_history` is still written but no longer read. Tidy these in phase 8.
+- **Phase 4 done (commits `391e76b`, `e290d2e`, `bf9cd85`, `d866b9f`):**
+  - Fixed B1–B4, B7–B19 and B23.
+  - **B5 was not a bug.** `test_import_filter_retains_existing_legacy_membership_but_excludes_microphone` deliberately counts migrated samples under both Import and Legacy, so that change was reverted.
+  - **B11 reverses an asserted behaviour.** The e2e test used to require that a letter key on a focused button does nothing. Letters now always work (matching Manual), while Space/Enter on a focused control keep their native click.
+  - **B22 was only partly done.** The FMA fallback now warns. The mp3-vs-wav count compare only re-extracts after an interrupted conversion, so it was left as is.
+  - After this phase: pytest 450 passed, 1 skipped; vitest 205; Playwright 18 passed, 1 skipped. Screenshots confirmed the trim dialog (desktop and mobile), the kiosk editor, the status pills and the mobile header.
 
 ## 11. Order of work
 
