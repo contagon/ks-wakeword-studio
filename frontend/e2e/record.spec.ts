@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { createWord } from "./helpers";
 
 test.use({
   permissions: ["microphone"],
@@ -8,11 +9,7 @@ test.use({
 test("records through real browser media, trims, saves and finds the recorded source", async ({ page, request }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  const response = await request.post("/api/studio/wakewords", {
-    data: { phrase: "Browser recording", language: "en", model_id: "browser_record" },
-  });
-  expect(response.ok()).toBeTruthy();
-  const word = await response.json();
+  const word = await createWord(request, "Browser recording", "browser_record");
   // VAD model availability is deliberately independent of real browser capture/decoding.
   await page.route("**/samples/capture/preview", async (route) => {
     await route.fulfill({ json: { duration_s: 3, start_s: 0.2, end_s: 2.8, trim_method: "silero", warning: null } });

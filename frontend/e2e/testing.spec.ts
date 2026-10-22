@@ -1,5 +1,6 @@
 import { expect, test, type Page, type APIRequestContext, type Route } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { createWord } from "./helpers";
 
 test.use({
   permissions: ["microphone"],
@@ -7,11 +8,7 @@ test.use({
 });
 
 async function openTester(page: Page, request: APIRequestContext) {
-  const response = await request.post("/api/studio/wakewords", {
-    data: { phrase: `Testing ${Date.now()}`, language: "en" },
-  });
-  expect(response.ok()).toBeTruthy();
-  const word = await response.json();
+  const word = await createWord(request, `Testing ${Date.now()}`, null);
   await page.addInitScript(() => {
     const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     (window as any).testingTracks = [];

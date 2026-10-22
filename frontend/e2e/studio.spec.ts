@@ -1,12 +1,6 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { createWord } from "./helpers";
 
-async function word(request: APIRequestContext, model: string) {
-  const response = await request.post("/api/studio/wakewords", {
-    data: { phrase: model, language: "en", model_id: model },
-  });
-  expect(response.ok()).toBeTruthy();
-  return response.json();
-}
 async function content(page: Page) {
   await page.locator("#studio-content").focus();
 }
@@ -22,7 +16,7 @@ test.afterEach(async ({ page }) => {
 });
 
 test("Downloaded preserves old links and saves per-wakeword augmentation selections", async ({ page, request }) => {
-  const a = await word(request, "browser_online_datasets");
+  const a = await createWord(request, "browser_online_datasets");
   await page.goto(`/#/negative-datasets?word=${a.id}`);
   await expect(page.getByRole("heading", { name: "Downloaded", exact: true })).toBeVisible();
   await expect(page.locator('nav [data-page="online-datasets"]')).toHaveAttribute("aria-current", "page");
@@ -53,7 +47,7 @@ test("Downloaded preserves old links and saves per-wakeword augmentation selecti
 });
 
 test("dark mode follows the system and remembers an explicit light choice", async ({ page, request }) => {
-  const a = await word(request, "browser_theme");
+  const a = await createWord(request, "browser_theme");
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto(`/#/automate?word=${a.id}`);
   await expect(page.locator("html")).toHaveAttribute("data-studio-theme", "dark");
@@ -73,8 +67,8 @@ test("dark mode follows the system and remembers an explicit light choice", asyn
 });
 
 test("real kiosk collection, keyboard labels, focus suppression and workspace isolation", async ({ page, request }) => {
-  const a = await word(request, "browser_a");
-  const b = await word(request, "browser_b");
+  const a = await createWord(request, "browser_a");
+  const b = await createWord(request, "browser_b");
   const fixtures = await (await request.get("/__test/fixtures")).json();
   const enrolled = await request.post("/api/studio/devices", {
     data: { url: fixtures.leader, password: fixtures.password, role: "leader" },
@@ -147,7 +141,7 @@ test("real kiosk collection, keyboard labels, focus suppression and workspace is
 });
 
 test("200-entry real catalog pagination, filtering, selection and server error", async ({ page, request }) => {
-  const a = await word(request, "catalog_a");
+  const a = await createWord(request, "catalog_a");
   await page.goto(`/#/negative-datasets?word=${a.id}`);
   await expect(page.locator("[data-dataset-id]")).toHaveCount(50);
   for (let offset = 0; offset < 200; offset += 50) {
@@ -175,7 +169,7 @@ test("200-entry real catalog pagination, filtering, selection and server error",
 });
 
 test("compact responsive navigation is keyboard usable without horizontal overflow", async ({ page, request }) => {
-  const a = await word(request, "narrow_a");
+  const a = await createWord(request, "narrow_a");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/#/classify?word=${a.id}`);
   const menu = page.getByRole("button", { name: "Menu", exact: true });
@@ -199,7 +193,7 @@ test("browser generates and selects a batch, queues real training and downloads 
   page,
   request,
 }) => {
-  const a = await word(request, "browser_training");
+  const a = await createWord(request, "browser_training");
   expect(
     (await request.put(`/api/studio/wakewords/${a.id}/datasets`, { data: { dataset_ids: [] } })).ok(),
   ).toBeTruthy();
@@ -246,7 +240,7 @@ test("browser generates and selects a batch, queues real training and downloads 
 });
 
 test("single-model preview plays isolated audio without creating a dataset", async ({ page, request }) => {
-  const a = await word(request, "browser_preview");
+  const a = await createWord(request, "browser_preview");
   await page.goto(`/#/artificial?word=${a.id}`);
   await expect(page.locator('[data-preview="qwen3"]')).toBeEnabled();
   const queued = page.waitForResponse(
@@ -398,11 +392,11 @@ test("workspace creation hides identity and permanent deletion blocks active job
 });
 
 test("workspace Automate controls scoped collection and explicitly opted-in publication", async ({ page, request }) => {
-  const a = await word(request, "automate_a");
+  const a = await createWord(request, "automate_a");
   expect(
     (await request.put(`/api/studio/wakewords/${a.id}/datasets`, { data: { dataset_ids: [] } })).ok(),
   ).toBeTruthy();
-  const b = await word(request, "automate_b");
+  const b = await createWord(request, "automate_b");
   const fixtures = await (await request.get("/__test/fixtures")).json();
   const enrolled = await request.post("/api/studio/devices", {
     data: { url: fixtures.leader, password: fixtures.password, role: "leader" },
@@ -465,8 +459,8 @@ test("kiosk addresses survive refresh and the global queue follows jobs across w
   page,
   request,
 }) => {
-  const a = await word(request, "queue_cedar"),
-    b = await word(request, "queue_willow");
+  const a = await createWord(request, "queue_cedar"),
+    b = await createWord(request, "queue_willow");
   const fixtures = await (await request.get("/__test/fixtures")).json();
   const leader = await (
     await request.post("/api/studio/devices", {
@@ -533,4 +527,89 @@ test("kiosk addresses survive refresh and the global queue follows jobs across w
   await page.getByRole("button", { name: "Remove from Studio", exact: true }).click();
   release();
   await expect(row).toHaveCount(0);
+});
+
+test("wakeword selectors fill their grid columns on desktop and mobile", async ({ page, request }) => {
+  await createWord(request, "Layout test", "browser_layout");
+  await page.goto("/#/wakewords");
+  const card = page.locator(".studio-word-card").filter({ hasText: "Layout test" });
+  await expect(card).toBeVisible();
+
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const { actual, expected } = await card.evaluate((element) => {
+      const grid = element.parentElement!;
+      const columns = getComputedStyle(grid).gridTemplateColumns.split(" ");
+      return {
+        actual: element.getBoundingClientRect().width,
+        expected: parseFloat(columns[0]!),
+      };
+    });
+    expect(Math.abs(actual - expected)).toBeLessThan(1);
+  }
+});
+
+test("selection actions sit at the far right on desktop and mobile", async ({ page, request }) => {
+  const word = await createWord(request, "Overall layout", "overall_layout");
+  for (const route of ["online-datasets", "artificial"]) {
+    await page.goto(`/#/${route}?word=${word.id}`);
+    const actions = page.getByRole("button", { name: "Save selection", exact: true });
+    await expect(actions).toHaveCount(route === "online-datasets" ? 2 : 1);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      for (const button of await actions.all()) {
+        const gap = await button.evaluate(
+          (element) => element.parentElement!.getBoundingClientRect().right - element.getBoundingClientRect().right,
+        );
+        expect(Math.abs(gap)).toBeLessThan(1);
+      }
+    }
+  }
+});
+
+test("failure badges are red and busy buttons have a spinner in both themes", async ({ page, request }) => {
+  const word = await createWord(request, "Overall statuses", "overall_statuses");
+  const job = {
+    id: "visual-failure",
+    word_id: word.id,
+    kind: "train",
+    resource: "gpu",
+    payload: {},
+    result: {},
+    status: "failed",
+    created_at: "2026-10-21T10:00:00Z",
+    started_at: null,
+    finished_at: "2026-10-21T10:01:00Z",
+  };
+  await page.route("**/training/runs*", (route) =>
+    route.fulfill({ json: { items: [job], total: 1, offset: 0, limit: 50 } }),
+  );
+  for (const theme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: theme });
+    await page.goto(`/#/train?word=${word.id}`);
+    const badge = page.locator('[data-run-id="visual-failure"] .studio-status');
+    await expect(badge).toHaveCSS("color", theme === "light" ? "rgb(159, 28, 38)" : "rgb(255, 181, 188)");
+    await expect(badge).toHaveCSS("background-color", theme === "light" ? "rgb(253, 226, 229)" : "rgb(87, 31, 43)");
+    // A collection job uses the real queue API, with workers deliberately idle in this harness.
+    await page.goto(`/#/classify?word=${word.id}`);
+    const collect = page.locator('[data-action="collect-now"]');
+    if (theme === "light") await collect.click();
+    await expect(collect).toBeDisabled();
+    await expect(collect).toHaveAttribute("aria-busy", "true");
+    await expect(page.locator('[data-action="close-job-queue"]')).toHaveCount(0);
+    const style = await collect.evaluate((element) => {
+      const spinner = getComputedStyle(element, "::before");
+      return {
+        content: spinner.content,
+        animation: spinner.animationName,
+        color: getComputedStyle(element).color,
+        background: getComputedStyle(element).backgroundColor,
+      };
+    });
+    expect(style.content).toBe('""');
+    expect(style.animation).toBe("studio-spin");
+    expect(style.background).toBe(theme === "light" ? "rgb(237, 243, 248)" : "rgb(44, 64, 82)");
+  }
+  // Don't leave the queued collection job for later tests to drain.
+  expect((await (await request.post("/__test/drain-collection")).json()).ran).toBe(true);
 });
