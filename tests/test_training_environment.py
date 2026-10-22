@@ -44,8 +44,7 @@ class TrainingEnvironmentTests(unittest.TestCase):
         self.assertIn("TensorFlow GPU preflight", trainer_script)
         self.assertIn("NVIDIA GPU passthrough is present", trainer_script)
         self.assertIn('${INITIAL_TRAINING_DEVICE} training', trainer_script)
-        self.assertIn('package_directory("nvidia.cublas.lib")', trainer_script)
-        self.assertIn('package_directory("nvidia.cudnn.lib")', trainer_script)
+        self.assertIn('"${PROGDIR}/cuda_library_path.py"', trainer_script)
 
     def test_blackwell_setup_explicitly_installs_and_checks_tensorboard(self) -> None:
         setup = (REPO_ROOT / "cli" / "setup_blackwell_venv").read_text(encoding="utf-8")

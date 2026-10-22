@@ -23,11 +23,7 @@ def main():
     env['HF_HOME'] = str(shared / '.cache/huggingface')
     env['HUGGINGFACE_HUB_CACHE'] = str(shared / '.cache/huggingface/hub')
     python = shared / '.venv/bin/python'
-    try:
-        subprocess.run([str(python), str(cli / 'check_training_venv')], env=env, cwd=shared, check=True)
-    except (OSError, subprocess.CalledProcessError):
-        subprocess.run(['bash', str(cli / 'setup_python_venv'), f'--data-dir={shared}'], env=env, cwd=shared, check=True)
-        subprocess.run([str(python), str(cli / 'check_training_venv')], env=env, cwd=shared, check=True)
+    subprocess.run([str(cli / 'setup_python_venv'), f'--data-dir={shared}'], env=env, cwd=shared, check=True)
     subprocess.run([str(python), str(cli / 'prepare_corpus.py'), f'--corpus={args.corpus}', f'--data-dir={stage}',
                     '--cleanup-archives', '--cleanup-intermediate-files'], cwd=stage, env=env, check=True)
     # Written only after the full source setup succeeds, never by a partial job.

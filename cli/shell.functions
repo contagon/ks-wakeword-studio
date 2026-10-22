@@ -119,3 +119,55 @@ if ${print_seps}:
     print(f"{'=' * 80}")
 EOF
 }
+
+# pip install, reduced to a progress dot per output line unless --verbose.
+pip_install() {
+    if $VERBOSE ; then
+        pip install "$@" || return 1
+    else
+        { pip install "$@" || return 1 ; } | stdbuf -i0 -o0 tr -d '[:print:]' | stdbuf -i0 -o0 tr '\n' '.'
+    fi
+    echo
+}
+
+# Sets GPU_COMPUTE_CAPABILITY and IS_BLACKWELL (compute capability 12.x, or
+# MWW_BLACKWELL_IMAGE when nvidia-smi cannot report a capability).
+detect_blackwell() {
+    GPU_COMPUTE_CAPABILITY=""
+    if command -v nvidia-smi >/dev/null 2>&1 ; then
+        GPU_COMPUTE_CAPABILITY="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null \
+            | head -n 1 | tr -d '[:space:]')" || :
+    fi
+    IS_BLACKWELL=false
+    case "${GPU_COMPUTE_CAPABILITY}" in
+        12.*) IS_BLACKWELL=true ;;
+        "")
+            case "${MWW_BLACKWELL_IMAGE:-}" in
+                1|true|TRUE|True|yes|YES|on|ON) IS_BLACKWELL=true ;;
+            esac
+            ;;
+    esac
+}
+
+# Pinned tool checkouts. Bump a commit here to move every install to it.
+MWW_URL="https://github.com/TaterTotterson/micro-wake-word"
+MWW_COMMIT="97a4053537e749ba7eb4d32711adcbe1d9f9a653"
+PSG_URL="https://github.com/TaterTotterson/piper-sample-generator"
+PSG_COMMIT="d4fa7af249c7c65c7d625614f348e7ee54cc5830"
+
+# checkout_tool <dir> <url> <commit>: check out the pinned commit, re-cloning a
+# missing, modified or foreign checkout.
+checkout_tool() {
+    local dir="$1" url="$2" commit="$3" origin
+    origin="$(git -C "${dir}" remote get-url origin 2>/dev/null || :)"
+    if [ "${origin%.git}" != "${url}" ] || [ -n "$(git -C "${dir}" status --porcelain 2>/dev/null)" ] ; then
+        rm -rf "${dir}"
+        mkdir -p "$(dirname "${dir}")"
+        echo "   Cloning ${url} to ${dir}"
+        git clone -q "${url}" "${dir}"
+    fi
+    if [ "$(git -C "${dir}" rev-parse HEAD)" != "${commit}" ] ; then
+        git -C "${dir}" fetch -q origin "${commit}"
+        git -C "${dir}" checkout -q "${commit}"
+    fi
+}

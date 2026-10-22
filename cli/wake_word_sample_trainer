@@ -69,24 +69,7 @@ normalize_bool() {
   esac
 }
 
-detect_gpu_compute_capability() {
-  if command -v nvidia-smi >/dev/null 2>&1; then
-    nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null \
-      | head -n 1 \
-      | tr -d '[:space:]'
-  fi
-}
-
-GPU_COMPUTE_CAPABILITY="$(detect_gpu_compute_capability)"
-IS_BLACKWELL="false"
-case "${GPU_COMPUTE_CAPABILITY}" in
-  12.*) IS_BLACKWELL="true" ;;
-  "")
-    if [ "$(normalize_bool "${MWW_BLACKWELL_IMAGE:-false}")" = "true" ]; then
-      IS_BLACKWELL="true"
-    fi
-    ;;
-esac
+detect_blackwell
 
 ALLOW_CPU_FALLBACK_DEFAULT="true"
 ALLOW_CPU_FALLBACK="$(normalize_bool "${MWW_ALLOW_CPU_FALLBACK:-${ALLOW_CPU_FALLBACK_DEFAULT}}")"
@@ -442,34 +425,7 @@ fi
 
 # Prefer CUDA libraries installed with the selected TensorFlow interpreter.
 # The dedicated Blackwell wheel uses the preserved system CUDA path instead.
-TRAINING_CUDA_LIBRARY_PATH="$("${PYTHON_BIN:-python}" - <<'PY'
-from importlib.util import find_spec
-from pathlib import Path
-
-
-def package_directory(name):
-    try:
-        spec = find_spec(name)
-    except (ImportError, AttributeError, ValueError):
-        return ""
-    if spec is None:
-        return ""
-    for location in spec.submodule_search_locations or ():
-        if location:
-            return str(Path(location).resolve())
-    origin = spec.origin
-    if origin and origin not in {"built-in", "frozen"}:
-        return str(Path(origin).resolve().parent)
-    return ""
-
-
-paths = [
-    package_directory("nvidia.cublas.lib"),
-    package_directory("nvidia.cudnn.lib"),
-]
-print(":".join(dict.fromkeys(path for path in paths if path)))
-PY
-)"
+TRAINING_CUDA_LIBRARY_PATH="$("${PYTHON_BIN:-python}" "${PROGDIR}/cuda_library_path.py")"
 if [ -n "${TRAINING_CUDA_LIBRARY_PATH}" ]; then
   export LD_LIBRARY_PATH="${TRAINING_CUDA_LIBRARY_PATH}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
   echo "→ Using CUDA libraries from the selected TensorFlow training environment."

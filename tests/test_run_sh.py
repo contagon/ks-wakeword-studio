@@ -14,20 +14,13 @@ RUN_SH = REPO_ROOT / "run.sh"
 
 
 def _cuda_path_probe() -> str:
-    source = RUN_SH.read_text(encoding="utf-8")
-    match = re.search(
-        r'WHISPER_CUDA_LIBRARY_PATH="\$\("\$\{PY\}" - <<\'PY\'\n(?P<probe>.*?)\nPY\n\)"',
-        source,
-        flags=re.DOTALL,
-    )
-    if match is None:
-        raise AssertionError("Could not locate the CUDA library path probe in run.sh")
-    return match.group("probe")
+    return (REPO_ROOT / "cli/cuda_library_path.py").read_text(encoding="utf-8")
 
 
 class RunShCudaLibraryPathTests(unittest.TestCase):
     def test_production_launcher_keeps_real_app_and_port_without_test_harness(self):
         source = RUN_SH.read_text(encoding='utf-8')
+        self.assertIn('"${PY}" "${ROOTDIR}/cli/cuda_library_path.py"', source)
         self.assertIn('PORT="${REC_PORT:-8789}"', source)
         self.assertIn('--factory trainer_server:create_app --host "${HOST}" --port "${PORT}"', source)
         self.assertNotIn('studio_browser_server', source)

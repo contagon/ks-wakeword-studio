@@ -229,11 +229,8 @@ def main(argv=None):
     cli = REPO / 'cli'
     python = shared / '.venv/bin/python'
     _stage(env, 'preparing')
-    try:
-        _run([python, cli / 'check_training_venv'], cwd=root, env=env)
-    except (OSError, subprocess.CalledProcessError):
-        _run(['bash', cli / 'setup_python_venv', f'--data-dir={shared}'], cwd=shared, env=env)
-        _run([python, cli / 'check_training_venv'], cwd=root, env=env)
+    # Exits quickly when the venv is healthy and built from the pinned tools.
+    _run([cli / 'setup_python_venv', f'--data-dir={shared}'], cwd=shared, env=env)
     _stage(env, 'staging')
     split_path = stage_inputs(manifest, root)
     # Engine-specific explicit manifests: never fall back to catalog defaults.

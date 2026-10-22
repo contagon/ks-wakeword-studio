@@ -202,7 +202,7 @@ lite.Interpreter = Interpreter
             augmentation = pinned_augmentation_fixture(shared)
             capture = base / 'calls.jsonl'
             stub = "#!/usr/bin/env python3\nimport json, os, sys\nfrom pathlib import Path\nwith open(os.environ['CAPTURE'], 'a') as f: f.write(json.dumps([Path(__file__).name, sys.argv[1:]])+'\\n')\n"
-            for name in ('check_training_venv', 'wake_word_sample_augmenter', 'wake_word_sample_trainer', 'validate_studio_model.py'):
+            for name in ('setup_python_venv', 'wake_word_sample_augmenter', 'wake_word_sample_trainer', 'validate_studio_model.py'):
                 path = repo / 'cli' / name
                 path.write_text(stub)
                 path.chmod(0o755)
@@ -222,12 +222,12 @@ lite.Interpreter = Interpreter
                                     env={**os.environ, 'CAPTURE': str(capture)}, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             calls = [json.loads(line) for line in capture.read_text().splitlines()]
-            self.assertEqual([c[0] for c in calls], ['check_training_venv', 'wake_word_sample_augmenter', 'wake_word_sample_trainer', 'validate_studio_model.py'])
+            self.assertEqual([c[0] for c in calls], ['setup_python_venv', 'wake_word_sample_augmenter', 'wake_word_sample_trainer', 'validate_studio_model.py'])
             split_path = Path(next(a.split('=', 1)[1] for a in calls[1][1] if a.startswith('--split-manifest=')))
             self.assertEqual(set(json.loads(split_path.read_text()).values()), {'training', 'validation', 'testing'})
             for flag, item in zip(('mit-rirs-16k-dir', 'audioset-16k-dir', 'fma-16k-dir', 'chime-16k-dir'), augmentation):
                 self.assertIn(f'--{flag}={item["path"]}', calls[1][1])
-            self.assertFalse(any('setup_' in call[0] for call in calls))
+            self.assertFalse(any('setup_' in call[0] for call in calls[1:]))
             trainer = calls[2][1]
             self.assertIn('--artifact-slug=stable_robot', trainer)
             self.assertIn('--training-steps=123', trainer)

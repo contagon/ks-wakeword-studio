@@ -119,36 +119,7 @@ fi
 
 # Faster Whisper/CTranslate2 loads these CUDA libraries before Python starts.
 # They live in the persistent UI venv so both Docker image variants can use GPU STT.
-WHISPER_CUDA_LIBRARY_PATH="$("${PY}" - <<'PY'
-from importlib.util import find_spec
-from pathlib import Path
-
-
-def package_directory(name):
-    try:
-        spec = find_spec(name)
-    except (ImportError, AttributeError, ValueError):
-        return ""
-    if spec is None:
-        return ""
-
-    for location in spec.submodule_search_locations or ():
-        if location:
-            return str(Path(location).resolve())
-
-    origin = spec.origin
-    if origin and origin not in {"built-in", "frozen"}:
-        return str(Path(origin).resolve().parent)
-    return ""
-
-
-paths = [
-    package_directory("nvidia.cublas.lib"),
-    package_directory("nvidia.cudnn.lib"),
-]
-print(":".join(dict.fromkeys(path for path in paths if path)))
-PY
-)"
+WHISPER_CUDA_LIBRARY_PATH="$("${PY}" "${ROOTDIR}/cli/cuda_library_path.py")"
 if [[ -n "${WHISPER_CUDA_LIBRARY_PATH}" ]]; then
   export LD_LIBRARY_PATH="${WHISPER_CUDA_LIBRARY_PATH}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 fi
