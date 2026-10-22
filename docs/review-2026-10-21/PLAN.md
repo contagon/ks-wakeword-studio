@@ -467,13 +467,8 @@ Also:
 - **Phase 6 done (commits `adf7274`, `c3a7b61`, `698bba5`, plus the mobile commit):** UI polish in §5.
   - Added shared pieces: row, note, danger and section-header styles, `PageHeader`, `ConfirmDialog` and `format.ts`.
   - Every change was checked with screenshots (light, dark, 390px).
-  - Kept, deliberately:
-    - The **Samples table scrolls horizontally on phones**; its label and e2e test say it should. Only mid-word breaks were fixed.
-    - **Testing's sensitivity modal**, which shows a description for each option and is covered by an e2e test.
-    - **Manual's two label controls** (§5.3.8).
-    - **The theme toggle's fixed accessible name with `aria-pressed`**, which is a valid ARIA pattern and is e2e-tested.
-    - **Job ids in the expanded queue logs**, which help with debugging.
-    - **Deployment's "Manual only" pill.**
+  - On request, the items first kept as-is were reworked too: Samples stacks as cards on phones, Testing sensitivity is a native select, Manual uses one label toggle, the theme toggle's visible text matches its name, and Automate deployment has an Enabled checkbox like the other cards.
+  - Only the job ids in the expanded queue logs remain, for debugging.
   - Focus restoration and trapping in dialogs was dropped at the user's request; the native `showModal()` handles focus.
 
 ## 11. Order of work
