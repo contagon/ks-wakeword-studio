@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { absoluteTime } from '../time';
-import { onScopeDispose, reactive, ref, watch } from "vue";
+import { nextTick, onScopeDispose, reactive, ref, watch } from "vue";
 import { StudioApiError, studioApi } from "../api";
 import { useWorkspace } from "../workspace";
 
@@ -46,9 +46,12 @@ async function save() {
     // Use mutation response; never derive stable identity from display text.
     workspace.wakewords.value = [...wakewords.value, word];
     create.phrase = "";
+    // The request is finished: detach it so selecting the new word (which reloads it) can't abort it.
+    mutation = undefined;
+    saving.value = false;
     workspace.select(word.id);
-    await workspace.refreshSelected();
-    if (!controller.signal.aborted) saved.value = "Workspace saved.";
+    await nextTick(); // let the selection watcher reset transient messages first
+    saved.value = "Workspace saved.";
   } catch (cause) {
     if (!controller.signal.aborted) formError.value = cause instanceof Error ? cause.message : "Unable to save workspace.";
   } finally { if (mutation === controller) saving.value = false; }

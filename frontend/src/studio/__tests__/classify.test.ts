@@ -246,11 +246,19 @@ describe("keyboard-first classification", () => {
     expect(labels()).toHaveLength(1);
   });
 
-  it("suppresses shortcuts in text controls, buttons, with modifiers, and behind an open modal", async () => {
+  it("keeps letter shortcuts working while a clicked button has focus", async () => {
     const ui = await open();
-    const search = ui.get("input[name=search]").element as HTMLInputElement;
-    search.focus();
-    press("p", {}, search); press(" ", {}, search);
+    const button = ui.get("[data-action=replay]").element as HTMLButtonElement;
+    button.focus();
+    press("p", {}, button); await settle();
+    expect(labels()).toHaveLength(1);
+  });
+
+  it("suppresses shortcuts in form controls, Space on buttons, with modifiers, and behind an open modal", async () => {
+    const ui = await open();
+    const kind = ui.get("select[name=kind]").element as HTMLSelectElement;
+    kind.focus();
+    press("p", {}, kind); press(" ", {}, kind);
     const button = ui.get("[data-action=replay]").element as HTMLButtonElement;
     press(" ", {}, button);
     press("p", { ctrlKey: true }); press("n", { metaKey: true }); press("p", { altKey: true }); press("P", { shiftKey: true });

@@ -15,7 +15,9 @@ const filters = ref({ label: "", source: "", kind: "", after: "", before: "" });
 const trimTarget = ref<Sample | null>(null); const deleteTarget = ref<Sample | null>(null);
 const audio = ref<HTMLAudioElement>(); const playingId = ref<string | null>(null); const loadingAudioId = ref<string | null>(null);
 let request: AbortController | undefined; let mutation: AbortController | undefined; let audioRequest: AbortController | undefined; let audioUrl: string | undefined; let generation = 0;
-const query = computed<SampleQuery>(() => ({ offset: offset.value, limit: Math.min(100, limit.value), ...(filters.value.label ? { label: filters.value.label } : {}), ...(filters.value.source ? { source: filters.value.source } : {}), ...(filters.value.kind ? { near_miss: filters.value.kind === "true" } : {}), ...(filters.value.after ? { after: `${filters.value.after}T00:00:00+00:00` } : {}), ...(filters.value.before ? { before: `${filters.value.before}T23:59:59+00:00` } : {}) }));
+/** Date inputs mean the viewer's local day, matching how timestamps are displayed. */
+const localDayBound = (day: string, time: string) => new Date(day + time).toISOString();
+const query = computed<SampleQuery>(() => ({ offset: offset.value, limit: Math.min(100, limit.value), ...(filters.value.label ? { label: filters.value.label } : {}), ...(filters.value.source ? { source: filters.value.source } : {}), ...(filters.value.kind ? { near_miss: filters.value.kind === "true" } : {}), ...(filters.value.after ? { after: localDayBound(filters.value.after, 'T00:00:00') } : {}), ...(filters.value.before ? { before: localDayBound(filters.value.before, 'T23:59:59.999') } : {}) }));
 function stopAudio(): void {
   audioRequest?.abort(); audioRequest = undefined;
   const element = audio.value; if (element) { element.pause(); element.removeAttribute("src"); }

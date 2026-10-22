@@ -166,6 +166,8 @@ describe("compact studio workspace", () => {
     expect(JSON.parse(String(requests.find(r => r.init?.method === 'POST')?.init?.body))).toEqual({ phrase: 'Hi Birch', language: 'en' });
     expect((ui.get('#studio-word').element as HTMLSelectElement).value).toBe('c');
     expect(location.hash).toBe('#/wakewords?word=c');
+    expect(ui.text()).toContain('Workspace saved.');
+    expect((ui.get('[data-form="create"] button[type="submit"]').element as HTMLButtonElement).disabled).toBe(false);
   });
   it("requires confirmation before permanent deletion and selects a surviving workspace", async () => {
     const ui = await open();

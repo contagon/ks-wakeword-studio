@@ -66,8 +66,8 @@ describe("provenance-aware sample library", () => {
     const q = lists().at(-1)!.url.searchParams;
     expect(Object.fromEntries(q)).toMatchObject({ label: "negative", source: "diagnostic", near_miss: "true", offset: "0" });
     expect(q.has("search")).toBe(false);
-    expect(q.get("after")).toMatch(/^2026-02-01T00:00:00/);
-    expect(q.get("before")).toMatch(/^2026-04-01T23:59:59/);
+    expect(q.get("after")).toBe(new Date("2026-02-01T00:00:00").toISOString());
+    expect(q.get("before")).toBe(new Date("2026-04-01T23:59:59.999").toISOString());
     expect(ui.findAll("[data-row-id]").map(r => r.attributes("data-row-id"))).toEqual(["s1"]);
   });
 

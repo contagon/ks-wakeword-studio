@@ -85,15 +85,14 @@ test('real kiosk collection, keyboard labels, focus suppression and workspace is
   await expect(page.locator('[data-progress]')).toContainText('2 pending');
   const current = page.locator('[data-classify-current]');
   const original = await current.getAttribute('data-sample-id');
-  const search = page.getByRole('searchbox', { name: 'Queue search' });
-  await search.focus();
-  await search.pressSequentially('pnszrd');
-  await expect(current).toHaveAttribute('data-sample-id', original!);
-  await expect(page.locator('[data-progress]')).toContainText('0 reviewed');
-  await expect(page.getByRole('dialog')).not.toBeVisible();
+  // Letter shortcuts keep working after a button was clicked (and so focused).
   await page.getByRole('button', { name: 'Positive (P)', exact: true }).focus();
   await page.keyboard.press('n');
+  await expect(page.locator('[data-progress]')).toContainText('1 reviewed');
+  await expect(current).not.toHaveAttribute('data-sample-id', original!);
+  await page.keyboard.press('z');
   await expect(page.locator('[data-progress]')).toContainText('0 reviewed');
+  await expect(page.locator('[data-progress]')).toContainText('2 pending');
   await content(page);
   await expect(page.locator('[data-waveform]')).toHaveAttribute('data-ready', 'true');
   await page.keyboard.press('Space');

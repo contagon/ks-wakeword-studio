@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { studioApi } from '../api';
+import { shortcutTarget } from '../shortcuts';
 import { useMicrophoneCapture } from '../capture';
 import CaptureReview from '../components/CaptureReview.vue';
 import { useWorkspace } from '../workspace';
@@ -56,13 +57,11 @@ async function importAudio() {
   } catch (cause) { if (current === generation && !controller.signal.aborted) error.value = cause instanceof Error ? cause.message : 'Audio was not uploaded. Try again.'; }
   finally { if (current === generation) uploading.value = false; }
 }
-function isTyping(target: Element | null) { return Boolean(target?.closest('input,textarea,select,[contenteditable],[inert]')); }
 function onKeydown(event: KeyboardEvent) {
   if (event.repeat || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.defaultPrevented) return;
-  const target = event.target instanceof Element ? event.target : null;
-  if (isTyping(target) || document.querySelector('[role="dialog"],[aria-modal="true"],dialog[open]')) return;
+  const { typing, onControl } = shortcutTarget(event);
+  if (typing || document.querySelector('[role="dialog"],[aria-modal="true"],dialog[open]')) return;
   // Space and Enter activate focused controls natively; letter shortcuts work regardless of button focus.
-  const onControl = Boolean(target?.closest('button:not(:disabled),a,[role="button"]'));
   const key = event.key.toLowerCase();
   if (reviewing.value) {
     if (event.code === 'Space' && !onControl) { event.preventDefault(); if (review.value?.canPlay) void review.value.play(); }

@@ -1,12 +1,16 @@
 <script lang="ts">
+import { reactive } from "vue";
 import type { Sample } from "../types";
-let persistedUndo: Array<{ word: string; sample: Sample }> = [];
+// Per-workspace undo history; module scope keeps it across page visits.
+const undoStacks = reactive(new Map<string, Sample[]>());
+const undoStack = (word: string) => { if (!undoStacks.has(word)) undoStacks.set(word, []); return undoStacks.get(word)!; };
 </script>
 
 <script setup lang="ts">
 import { absoluteTime } from '../time';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { studioApi } from "../api";
+import { StudioApiError, studioApi } from "../api";
+import { shortcutTarget } from "../shortcuts";
 import AudioPlayer from "../components/AudioPlayer.vue";
 import { useWorkspace } from "../workspace";
 import type { Recording, Job } from "../types";
@@ -146,22 +150,23 @@ async function label(label: "positive" | "negative" | "discarded"): Promise<void
   try {
     const updated = await studioApi.label(item.word_id, item.id, label, item.revision, controller.signal);
     if (!current() || active.value?.id !== item.id) return;
-    persistedUndo.push({ word: item.word_id, sample: updated }); reviewedCount.value += 1; notice.value = `Saved ${label} label.`; removeCurrent();
+    undoStack(item.word_id).push(updated); reviewedCount.value += 1; notice.value = `Saved ${label} label.`; removeCurrent();
   } catch (cause) {
     if (current()) {
-      if (cause instanceof Error && cause.message.includes("conflict")) { error.value = "This recording changed elsewhere. Review the latest version before saving."; await conflict(item, controller, token); }
+      if (cause instanceof StudioApiError && cause.status === 409) { error.value = "This recording changed elsewhere. Review the latest version before saving."; await conflict(item, controller, token); }
       else error.value = "Label was not saved. Try again; this recording remains in the queue.";
     }
   } finally { if (current()) saving.value = false; }
 }
 function skip(): void { const item = active.value; if (!item || saving.value || loading.value) return; hasGesture.value = true; skipped.value = new Set([...skipped.value, item.id]); sessionSkips.set(item.word_id, skipped.value); position.value = Math.min(position.value, Math.max(0, visible.value.length - 1)); player.value?.stop(); autoplayNext.value = false; notice.value = "Skipped for this session; this recording remains pending."; void refill(); }
 async function undo(): Promise<void> {
-  if (saving.value || !persistedUndo.length) return; hasGesture.value = true; saving.value = true; error.value = ""; const action = persistedUndo[persistedUndo.length - 1]; const controller = new AbortController(); mutation?.abort(); mutation = controller;
+  const stack = undoStack(workspace.selectedId.value);
+  if (saving.value || !stack.length) return; hasGesture.value = true; saving.value = true; error.value = ""; const action = { word: workspace.selectedId.value, sample: stack[stack.length - 1] }; const controller = new AbortController(); mutation?.abort(); mutation = controller;
   const token = ++mutationGeneration, word = workspace.selectedId.value;
   const current = () => !controller.signal.aborted && token === mutationGeneration && workspace.selectedId.value === word;
   try {
     const restored = await studioApi.undo(action.word, action.sample.id, action.sample.revision, controller.signal);
-    if (!current()) return; persistedUndo.pop(); notice.value = "Last label restored to pending.";
+    if (!current()) return; stack.pop(); notice.value = "Last label restored to pending.";
     if (workspace.selectedId.value === action.word) { queue.value = [restored, ...queue.value.filter(item => item.id !== restored.id)]; total.value += 1; reviewedCount.value = Math.max(0, reviewedCount.value - 1); position.value = 0; autoplayNext.value = false; }
   } catch { if (current()) error.value = "Undo was not saved. Refresh and try again."; }
   finally { if (current()) saving.value = false; }
@@ -189,14 +194,15 @@ async function assign(recording: Recording): Promise<void> {
     if (assignment === controller) { assignment = undefined; saving.value = false; }
   }
 }
-function editing(event: KeyboardEvent): boolean { const target = event.target instanceof HTMLElement ? event.target : document.activeElement; return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName)); }
 function shortcut(event: KeyboardEvent): void {
   if (jobs.open.value || tab.value !== 'review') return;
-  if (event.repeat || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || editing(event)) return;
+  const { typing, onControl } = shortcutTarget(event);
+  if (event.repeat || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || typing) return;
   const key = event.key.toLowerCase();
   if (discardOpen.value) { if (event.key === "Escape") { event.preventDefault(); discardOpen.value = false; } return; }
   if (key === "d") { event.preventDefault(); if (active.value && !saving.value) discardOpen.value = true; return; }
-  if (!["p", "n", " ", "r", "s", "z"].includes(key)) return;
+  // Letters work even after clicking a button; Space on a focused control keeps its native click.
+  if (!["p", "n", " ", "r", "s", "z"].includes(key) || (key === " " && onControl)) return;
   event.preventDefault(); hasGesture.value = true;
   if (key === "p") void label("positive"); else if (key === "n") void label("negative"); else if (key === " ") player.value?.toggle(); else if (key === "r") player.value?.replay(); else if (key === "s") skip(); else void undo();
 }
@@ -222,8 +228,8 @@ onBeforeUnmount(() => { document.removeEventListener("keydown", shortcut); inbox
       <div class="flex flex-wrap justify-between gap-3"><div><h2>Recording {{ active.recording?.clip_id ?? active.id }}</h2><p class="studio-muted text-sm">{{ active.recording ? registry.deviceLabel(active.recording.device_id) : active.source }} · {{ active.recording?.near_miss ? "Near miss" : "Activation" }} · {{ absoluteTime(active.recording?.timestamp ?? active.created_at) }}</p></div><span class="studio-muted">Revision {{ active.revision }}</span></div>
       <AudioPlayer ref="player" :sample-id="active.id" :src="source" :autoplay-requested="autoplayNext" @ready="autoplayNext = false; readySampleId = active.id" @playback-error="error = $event" />
       <p v-if="readySampleId === active.id" class="studio-muted text-xs">Press Space once to enable playback; then acknowledged labels play the next clip.</p>
-      <div class="flex flex-wrap gap-2"><button type="button" class="studio-primary" :disabled="saving" @click="label('positive')">Positive (P)</button><button type="button" :disabled="saving" @click="label('negative')">Negative (N)</button><button type="button" :disabled="saving" @click="skip">Skip (S)</button><button type="button" :disabled="saving" data-action="discard" @click="discardOpen = true">Discard (D)</button><button type="button" :disabled="saving || !persistedUndo.length" @click="undo">Undo (Z)</button></div>
-      <p data-shortcuts class="studio-muted text-xs">P positive · N negative · Space play/pause · R replay · S skip for this session · Z undo.</p><input name="search" type="search" aria-label="Queue search" placeholder="Shortcuts pause while editing">
+      <div class="flex flex-wrap gap-2"><button type="button" class="studio-primary" :disabled="saving" @click="label('positive')">Positive (P)</button><button type="button" :disabled="saving" @click="label('negative')">Negative (N)</button><button type="button" :disabled="saving" @click="skip">Skip (S)</button><button type="button" :disabled="saving" data-action="discard" @click="discardOpen = true">Discard (D)</button><button type="button" :disabled="saving || !undoStacks.get(workspace.selectedId.value)?.length" @click="undo">Undo (Z)</button></div>
+      <p data-shortcuts class="studio-muted text-xs">P positive · N negative · Space play/pause · R replay · S skip for this session · Z undo.</p>
     </div><div v-else class="studio-card"><span v-if="total === 0">No pending recordings for this workspace.</span><span v-else>Pending recordings are skipped for this session or the local window needs reloading.</span><button v-if="total > 0" type="button" @click="refill">Retry pending window</button></div>
     </div>
     <div v-if="tab === 'collect'" id="classify-panel-collect" role="tabpanel" aria-labelledby="classify-tab-collect"><div class="studio-card mb-4"><h2>Collect recordings</h2><p class="studio-muted">Use Collect above to fetch recordings for the selected workspace now, even when its schedule is off. Unknown sources are retained in the shared Unmapped inbox.</p><a :href="workspace.routes.href('automate')" @click.prevent="workspace.routes.navigate('automate')">Collection settings →</a></div><CollectionHistory :refresh-key="collectionJob?.status" :active-run-id="collectionOutcome?.run_id" /></div>

@@ -64,7 +64,8 @@ async function load(): Promise<void> {
 }
 async function publish(version: ModelVersion): Promise<void> {
   const word = workspace.selectedId.value;
-  if (!word) return;
+  // One publication at a time: aborting the first request would not stop it server-side.
+  if (!word || publishing.value) return;
   action?.abort();
   const controller = new AbortController();
   action = controller;
@@ -111,7 +112,7 @@ onBeforeUnmount(() => {
             <div class="min-w-0 flex-1"><p v-if="version.run_number" data-run-number class="font-semibold">Run #{{ version.run_number }}</p><strong><time :datetime="version.trained_at" :title="absoluteTime(version.trained_at)">{{ absoluteTime(version.trained_at) }}</time></strong><p v-if="version.origin === 'legacy'" class="studio-note text-xs">Legacy import · {{ version.validation_state }}. Never automatically published. Explicit publication first requires structural TensorFlow validation in the prepared training environment (cli/setup_python_venv); validation failure leaves the archive available without changing the desired version.</p></div>
             <div class="flex flex-wrap items-center gap-2">
               <a class="studio-button" :href="studioApi.archiveUrl(version.word_id, version.id)">Download</a>
-              <button type="button" class="studio-primary" :disabled="publishing === version.id" @click="publish(version)">{{ version.origin === 'legacy' ? 'Validate and publish' : 'Publish' }}</button>
+              <button type="button" class="studio-primary" :disabled="Boolean(publishing)" :aria-busy="publishing === version.id" @click="publish(version)">{{ version.origin === 'legacy' ? 'Validate and publish' : 'Publish' }}</button>
             </div>
           </div>
           <p v-if="readModelMetrics(version.metrics).recall !== null" class="studio-muted text-xs">Recall {{ readModelMetrics(version.metrics).recall }}</p>
