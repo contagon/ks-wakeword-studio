@@ -11,16 +11,17 @@ from studio.models import AugmentationInput, ValidationError
 from studio.storage import ensure_directory, flock, fsync_directories, open_directory
 
 
-# Corpus id -> (setup script, display name, description, source). The id also
-# names the corpus directory and the augmenter's --<id>-dir flag.
+# Corpus id -> (display name, description, source). The id also names the
+# corpus directory and the augmenter's --<id>-dir flag; cli/prepare_corpus.py
+# downloads and converts each one.
 CATALOG = {
-    'mit_rirs_16k': ('setup_mit_audio', 'MIT room impulse responses', 'Room echoes and reverberation.',
+    'mit_rirs_16k': ('MIT room impulse responses', 'Room echoes and reverberation.',
                      'MIT environmental impulse responses (Hugging Face mirror)'),
-    'audioset_16k': ('setup_audioset', 'AudioSet', 'Everyday environmental background sounds.',
+    'audioset_16k': ('AudioSet', 'Everyday environmental background sounds.',
                      'AudioSet balanced training subset (agkphysics mirror)'),
-    'fma_16k': ('setup_fma', 'Free Music Archive', 'Music mixed behind wakeword recordings.',
+    'fma_16k': ('Free Music Archive', 'Music mixed behind wakeword recordings.',
                 'FMA small, with an extra-small fallback mirror'),
-    'chime_16k': ('setup_chime', 'CHiME-Home', 'Real household background recordings.',
+    'chime_16k': ('CHiME-Home', 'Real household background recordings.',
                   'CHiME-Home (Internet Archive mirror)'),
 }
 
@@ -55,12 +56,13 @@ def _snapshot(store, selected):
     result = []
     parent = store.root / 'augmentation'
     ensure_directory(parent)
-    for name, (setup, *_) in CATALOG.items():
+    for name in CATALOG:
         if name not in selected:
             continue
         source = store.data_dir / 'training_datasets' / name
         if not source.is_dir() or source.is_symlink():
-            raise ValidationError(f'Missing augmentation corpus {name}; run bash cli/{setup} --data-dir={store.data_dir} before training')
+            raise ValidationError(f'Missing augmentation corpus {name}; run {store.data_dir}/.venv/bin/python '
+                                  f'cli/prepare_corpus.py --corpus={name} --data-dir={store.data_dir} before training')
         fingerprint = tree_fingerprint(source)
         target = parent / fingerprint
         if not target.exists():

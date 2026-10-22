@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Run existing allowlisted setup scripts inside an owned job's staging tree."""
+"""Prepare one allowlisted augmentation corpus inside an owned job's staging tree."""
 import argparse
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -29,8 +28,7 @@ def main():
     except (OSError, subprocess.CalledProcessError):
         subprocess.run(['bash', str(cli / 'setup_python_venv'), f'--data-dir={shared}'], env=env, cwd=shared, check=True)
         subprocess.run([str(python), str(cli / 'check_training_venv')], env=env, cwd=shared, check=True)
-    os.symlink(shared / '.venv', stage / '.venv', target_is_directory=True)
-    subprocess.run(['bash', str(cli / CATALOG[args.corpus][0]), f'--data-dir={stage}',
+    subprocess.run([str(python), str(cli / 'prepare_corpus.py'), f'--corpus={args.corpus}', f'--data-dir={stage}',
                     '--cleanup-archives', '--cleanup-intermediate-files'], cwd=stage, env=env, check=True)
     # Written only after the full source setup succeeds, never by a partial job.
     (stage / 'augmentation-complete.json').write_text(json.dumps({'schema_version': 1, 'corpus': args.corpus}))

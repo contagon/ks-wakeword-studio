@@ -89,7 +89,7 @@ class AugmentationDatasetService:
         items = []
         with self.store.transaction() as db:
             latest = {key: self._attempts(db, key) for key in CATALOG}
-        for key, (_, name, description, source) in CATALOG.items():
+        for key, (name, description, source) in CATALOG.items():
             job = latest[key][-1] if latest[key] else None
             size = count = None
             error_code = None

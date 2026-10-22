@@ -60,6 +60,6 @@ class AugmentationTests(unittest.TestCase):
             runtime = StudioRuntime(Path(directory))
             self.addCleanup(runtime.shutdown)
             word = runtime.workspaces.create('Robot', 'en', 'robot')
-            with self.assertRaisesRegex(ValidationError, 'setup_mit_audio'):
+            with self.assertRaisesRegex(ValidationError, 'prepare_corpus.py --corpus=mit_rirs_16k'):
                 runtime.training.snapshot(word.id, 'a' * 32)
             self.assertEqual(runtime.training.store._connection.execute('SELECT count(*) FROM training_runs').fetchone()[0], 0)

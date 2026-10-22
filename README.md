@@ -291,10 +291,9 @@ be committed. Prepare them explicitly (substitute your mounted `DATA_DIR`):
 
 ```bash
 bash cli/setup_python_venv --data-dir=/data
-bash cli/setup_mit_audio --data-dir=/data
-bash cli/setup_audioset --data-dir=/data
-bash cli/setup_fma --data-dir=/data
-bash cli/setup_chime --data-dir=/data
+for corpus in mit_rirs_16k audioset_16k fma_16k chime_16k; do
+    /data/.venv/bin/python cli/prepare_corpus.py --corpus=$corpus --data-dir=/data
+done
 ```
 
 If CHiME-Home's Internet Archive source is unavailable, setup retries failed or

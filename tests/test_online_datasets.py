@@ -4,10 +4,7 @@ import sys
 import tempfile
 import unittest
 import importlib.util
-import io
 import errno
-import subprocess
-import tarfile
 import threading
 from unittest.mock import patch
 from pathlib import Path
@@ -64,15 +61,16 @@ class OnlineDatasetTests(unittest.TestCase):
         calls = []
         def run(argv, **kwargs):
             calls.append((argv, kwargs))
-            if 'setup_chime' in str(argv[1]):
-                self.assertEqual((stage / '.venv').resolve(), self.root / '.venv')
         args = ['setup_augmentation.py', '--corpus=chime_16k', f'--data-dir={self.root}', f'--stage-dir={stage}']
         with patch.object(sys, 'argv', args), patch.dict(os.environ, {'LD_LIBRARY_PATH': f'{self.root}/.recorder-venv/lib:/opt/vendor/lib'}), patch.object(bridge.subprocess, 'run', side_effect=run):
             bridge.main()
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[-1][1]['env']['LD_LIBRARY_PATH'], '/opt/vendor/lib')
         self.assertEqual(calls[-1][1]['env']['HF_HOME'], str(self.root / '.cache/huggingface'))
+        self.assertEqual(calls[-1][0][:3], [str(self.root / '.venv/bin/python'),
+                                            str(Path('cli/prepare_corpus.py').resolve()), '--corpus=chime_16k'])
         self.assertIn(f'--data-dir={stage}', calls[-1][0])
+        self.assertFalse((stage / '.venv').exists())
         self.assertIn('--cleanup-archives', calls[-1][0])
         self.assertEqual(json.loads((stage / 'augmentation-complete.json').read_text())['corpus'], 'chime_16k')
 
@@ -130,46 +128,6 @@ class OnlineDatasetTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()['code'], 'negative_datasets_missing')
         self.assertFalse(any(job.kind == 'train' for job in self.runtime.jobs.list().items))
-
-    def test_mit_metadata_cannot_escape_the_download_directory(self):
-        import urllib.request
-        script = Path('cli/setup_mit_audio').read_text()
-        code = script.split('python - "${HF_RIR_REPO_ID}" "${HF_RIR_API_URL}" "${AUDIO_DIR}" <<-\'EOF\'\n', 1)[1].split('\nEOF', 1)[0]
-        outside = self.root / 'operator.wav'
-        outside.write_bytes(b'keep')
-        destination = self.root / 'stage/mit_rirs'
-        metadata = {'siblings': [{'rfilename': '16khz/../../../operator.wav'}]}
-        def urlopen(request, **kwargs):
-            return io.BytesIO(json.dumps(metadata).encode() if isinstance(request, urllib.request.Request) else b'overwrite')
-        with patch.object(sys, 'argv', ['download', 'repo', 'https://example.invalid/api', str(destination)]), patch('urllib.request.urlopen', side_effect=urlopen):
-            with self.assertRaises((ValueError, SystemExit)):
-                exec(compile(code, 'setup_mit_audio_download', 'exec'), {})
-        self.assertEqual(outside.read_bytes(), b'keep')
-
-    def test_audioset_missing_source_tarball_is_not_a_successful_setup(self):
-        stage, tools = self.root / 'source-stage', self.root / 'fake-tools'
-        stage.mkdir(); tools.mkdir()
-        venv = stage / '.venv/bin'; venv.mkdir(parents=True)
-        (venv / 'activate').write_text(f'export PATH="{tools}:$PATH"\n')
-        archive = self.root / 'source.tar'
-        with tarfile.open(archive, 'w') as tar:
-            member = tarfile.TarInfo('fixture.flac'); member.size = 4
-            tar.addfile(member, io.BytesIO(b'audi'))
-        wav = self.root / 'fixture.wav'; wav.write_bytes(StubGpuRunner._wav())
-        (tools / 'curl').write_text('''#!/bin/bash
-if [[ " $* " == *" -I "* ]]; then exit 0; fi
-while (( $# )); do
-  if [[ "$1" == "-o" ]]; then shift; out="$1"; fi
-  shift
-done
-if [[ "$out" == "downloads/bal_train00.tar" ]]; then cp "$FIXTURE_TAR" "$out"; else exit 22; fi
-''')
-        (tools / 'python').write_text('#!/bin/bash\ncat >/dev/null\ncp "$FIXTURE_WAV" ./audioset_16k/fixture.wav\n')
-        for file in tools.iterdir(): file.chmod(0o755)
-        env = {**os.environ, 'PATH': f'{tools}:{os.environ["PATH"]}', 'FIXTURE_TAR': str(archive), 'FIXTURE_WAV': str(wav)}
-        result = subprocess.run(['bash', str(Path('cli/setup_audioset').resolve()), f'--data-dir={stage}'], env=env, capture_output=True, timeout=15)
-        self.assertNotEqual(result.returncode, 0, result.stdout.decode())
-        self.assertFalse((stage / 'audioset_16k/fixture.wav').exists())
 
     def test_unreceipted_partial_source_corpus_is_not_published(self):
         self.runner.mode = 'incomplete'
