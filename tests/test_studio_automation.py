@@ -1,7 +1,8 @@
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import pytest
 
+from studio.automation import settings_from_dict
 from studio.models import NotFound, ValidationError
 from studio.runtime import StudioRuntime
 from studio_harness import api_client
@@ -17,7 +18,9 @@ def test_new_workspace_automation_defaults(tmp_path):
         assert settings.collection.cron == '*/30 * * * *'
         assert settings.training.cron == '0 2 * * *'
         assert settings.deployment.cron == '0 4 * * *'
-        assert settings.classification.engine == 'faster_whisper'
+        # Settings saved while Parakeet existed still load.
+        assert settings_from_dict({**asdict(settings), 'classification': {**asdict(settings.classification),
+                                                                         'engine': 'parakeet_onnx'}}) == settings
         assert settings.classification.auto_negatives is True
         assert settings.classification.promote_close_misses is False
         assert not any(s.enabled for s in (settings.collection, settings.training, settings.deployment))
@@ -37,11 +40,11 @@ def test_settings_roundtrip_isolated_and_strict(tmp_path):
         assert hasattr(runtime, 'automation'), 'Workspace automation service is missing'
         original = runtime.automation.get(a.id).settings
         changed = replace(original, collection=replace(original.collection, enabled=True, timezone='Europe/Berlin'),
-                          classification=replace(original.classification, enabled=True, engine='parakeet_onnx'))
+                          classification=replace(original.classification, enabled=True, trigger='schedule'))
         runtime.automation.save(a.id, changed)
         assert runtime.automation.get(b.id).settings.collection.enabled is False
         for invalid in (replace(changed, collection=replace(changed.collection, cron='invalid')),
-                        replace(changed, classification=replace(changed.classification, engine='unknown')),
+                        replace(changed, classification=replace(changed.classification, trigger='unknown')),
                         replace(changed, collection=replace(changed.collection, enabled=1))):
             with pytest.raises(ValidationError):
                 runtime.automation.save(a.id, invalid)
@@ -119,11 +122,11 @@ def test_automation_api_roundtrip_and_strict_nested_validation(tmp_path):
             settings = response.json()['settings']
             settings['collection']['enabled'] = True
             assert api.put(path, json=settings).status_code == 200
-            settings['classification']['engine'] = 'bogus-sensitive-input'
+            settings['classification']['trigger'] = 'bogus-sensitive-input'
             rejected = api.put(path, json=settings)
             assert rejected.status_code == 422
             assert 'bogus-sensitive-input' not in rejected.text
-            assert api.get(path).json()['settings']['classification']['engine'] == 'faster_whisper'
+            assert api.get(path).json()['settings']['classification']['trigger'] == 'after_collection'
             assert api.get('/api/studio/wakewords/missing/automation').status_code == 404
     finally:
         runtime.shutdown()

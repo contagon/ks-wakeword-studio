@@ -10,9 +10,10 @@ const settings = () => ({
   classification: {
     enabled: false,
     trigger: "after_collection",
-    engine: "faster_whisper",
+    confirm_activations: false,
     auto_negatives: true,
     promote_close_misses: false,
+    near_miss_negatives: false,
   },
   classification_schedule: schedule(),
   training: schedule(),
@@ -52,16 +53,49 @@ it("edits separate workspace collection, classification, training and deployment
   expect(ui.text()).not.toContain("Wakewords to collect");
   await ui.get('[name="collection-enabled"]').setValue(true);
   await ui.get('[name="after-training"]').setValue(true);
+  await ui.get('[name="near_miss_negatives"]').setValue(true);
   await ui.get("form").trigger("submit");
   await flushPromises();
   const saved = requests.find((r) => r.body)!.body as ReturnType<typeof settings>;
   expect(saved.collection.enabled).toBe(true);
+  expect(saved.classification).toMatchObject({ near_miss_negatives: true, confirm_activations: false });
   expect(saved.training.enabled).toBe(false);
   expect(saved.deployment.enabled).toBe(false);
   expect(saved.deployment_policy.after_training).toBe(true);
   expect(
     requests.filter((r) => r.path.endsWith("/automation")).every((r) => r.path.includes("/wakewords/a/automation")),
   ).toBe(true);
+  ui.unmount();
+});
+
+it("runs classification on demand with the saved rules only", async () => {
+  const requests: { path: string; method?: string }[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string, init?: RequestInit) => {
+      requests.push({ path, method: init?.method });
+      if (path.endsWith("/classification/jobs"))
+        return new Response(JSON.stringify({ id: "c1", kind: "classify", word_id: "a", status: "queued" }), {
+          status: 201,
+        });
+      return new Response(JSON.stringify({ settings: settings(), schedules: [], last_jobs: {} }), { status: 200 });
+    }),
+  );
+  history.replaceState(null, "", "#/automate?word=a");
+  const ui = mount(
+    workspaceHost(AutomatePage, (workspace) => {
+      workspace.selectedId.value = "a";
+    }),
+  );
+  await flushPromises();
+  const run = ui.get("[data-action=classify-now]");
+  await ui.get('[name="near_miss_negatives"]').setValue(true);
+  expect(run.attributes("disabled")).toBeDefined();
+  await ui.get('[name="near_miss_negatives"]').setValue(false);
+  await run.trigger("click");
+  await flushPromises();
+  expect(requests.some((r) => r.method === "POST" && r.path.endsWith("/wakewords/a/classification/jobs"))).toBe(true);
+  expect(ui.text()).toContain("Classification queued");
   ui.unmount();
 });
 

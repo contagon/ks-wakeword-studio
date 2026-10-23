@@ -114,9 +114,10 @@ class ScheduleBody(StrictBody):
 class ClassificationBody(StrictBody):
     enabled: bool
     trigger: Literal['after_collection', 'schedule']
-    engine: Literal['faster_whisper', 'parakeet_onnx']
+    confirm_activations: bool
     auto_negatives: bool
     promote_close_misses: bool
+    near_miss_negatives: bool
 
 
 class DeploymentPolicyBody(StrictBody):
@@ -164,8 +165,9 @@ class PublishBody(StrictBody):
 def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
                  label: str | None = None, device_id: str | None = None,
                  near_miss: bool | None = None, source: str | None = None,
-                 search: str = "", after: str | None = None, before: str | None = None) -> SampleQuery:
-    return SampleQuery(offset, limit, label, device_id, near_miss, source, search, after, before)
+                 search: str = "", after: str | None = None, before: str | None = None,
+                 labelled_by: Literal['auto', 'manual'] | None = None) -> SampleQuery:
+    return SampleQuery(offset, limit, label, device_id, near_miss, source, search, after, before, labelled_by)
 
 
 def create_router(runtime: StudioRuntime) -> APIRouter:
@@ -330,6 +332,10 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.post('/jobs/{job_id}/cancel', response_model=Job)
     def cancel_job(job_id: str) -> Job:
         return runtime.jobs.cancel(job_id)
+
+    @router.post('/wakewords/{word_id}/classification/jobs', response_model=Job, status_code=201)
+    def classify_workspace(word_id: str) -> Job:
+        return runtime.jobs.enqueue('classify', word_id, {'manual': True})
 
     @router.post('/wakewords/{word_id}/collection/jobs', response_model=Job, status_code=201)
     def collect_workspace(word_id: str, body: ScrapeBody = ScrapeBody()) -> Job:

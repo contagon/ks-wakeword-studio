@@ -25,9 +25,10 @@ export type ScheduleInput = Pick<Schedule, "cron" | "timezone" | "enabled">;
 export interface ClassificationPolicy {
   enabled: boolean;
   trigger: "after_collection" | "schedule";
-  engine: "faster_whisper" | "parakeet_onnx";
+  confirm_activations: boolean;
   auto_negatives: boolean;
   promote_close_misses: boolean;
+  near_miss_negatives: boolean;
 }
 export interface AutomationSettings {
   collection: ScheduleInput;
@@ -339,6 +340,7 @@ export interface SampleQuery extends Pagination {
   search?: string;
   after?: string;
   before?: string;
+  labelled_by?: "auto" | "manual";
 }
 export interface WorkspaceSummary {
   pending: number;

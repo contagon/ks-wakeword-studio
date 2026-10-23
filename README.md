@@ -253,15 +253,17 @@ diagnostic file; retry once after upgrading to capture the original error.
 classification, training, and deployment have independent enable controls and
 five-field cron/timezone schedules. Switching workspaces does not enable or start
 anything. Automatic classification can run after collection or on a schedule,
-using Faster Whisper (recommended, managed `small.en`/`small`) or Parakeet ONNX
-(managed INT8 `nemo-parakeet-tdt-0.6b-v3`). STT uses the same queue-owned GPU
+using Silero VAD and Faster Whisper (managed `small.en`/`small`). STT uses the same queue-owned GPU
 resource as training/generation, with CUDA/CPU fallback and lazy model caching in
 `/data/auto_train_models`. Model downloads happen only when inference is requested;
 fixture tests do not download or run these models.
 
-Clear non-wake activations may become negatives; empty/ambiguous speech stays
-pending. Close misses never become automatic negatives, and confirmed positive
-promotion is separately opt-in. Manual labels/trims win revision conflicts; no
+Each kiosk clip is sorted in order: no speech (VAD) is *something else*; Whisper
+hearing the wake phrase is *the phrase*; otherwise Whisper decodes again primed
+with the phrase, and still not hearing it is *something else*, while hearing it only
+when primed is *unclear* (primed Whisper invents the phrase over noise). Activations
+and close misses each have a positive and a negative toggle; only activation
+negatives are on by default, and unclear clips always stay pending. Manual labels/trims win revision conflicts; no
 automatic rule deletes audio. Disabling collection preserves existing recordings
 but cannot preserve future clips evicted from a kiosk's finite rolling buffer.
 

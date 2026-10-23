@@ -5,9 +5,11 @@ import { computed, onBeforeUnmount, ref, toRaw, watch } from "vue";
 import { studioApi } from "../api";
 import type { AutomationSettings, AutomationStatus } from "../types";
 import { useWorkspace } from "../workspace";
+import { useJobQueue } from "../jobs";
 import AutomationScheduleFields from "../components/AutomationScheduleFields.vue";
 
 const workspace = useWorkspace();
+const jobs = useJobQueue();
 const wordId = computed(() => workspace.selectedId.value);
 const settings = ref<AutomationSettings | null>(null);
 const status = ref<AutomationStatus | null>(null);
@@ -18,6 +20,42 @@ const loading = ref(false),
 let request: AbortController | undefined;
 let mutation: AbortController | undefined;
 let generation = 0;
+const classifying = ref(false);
+// Runs use the saved rules, so unsaved rule edits must be saved first.
+const classificationUnsaved = computed(
+  () => JSON.stringify(settings.value?.classification) !== JSON.stringify(status.value?.settings.classification),
+);
+async function classifyNow() {
+  const id = wordId.value;
+  if (!id || classifying.value) return;
+  classifying.value = true;
+  error.value = "";
+  notice.value = "";
+  try {
+    jobs.track(await studioApi.classify(id));
+    if (wordId.value === id) notice.value = "Classification queued. Follow it in the job queue.";
+  } catch (cause) {
+    if (wordId.value === id) error.value = cause instanceof Error ? cause.message : "Classification was not started.";
+  } finally {
+    classifying.value = false;
+  }
+}
+const RULE_ROWS = [
+  {
+    kind: "Activation",
+    cells: [
+      { key: "confirm_activations", heard: "the phrase", label: "Positive" },
+      { key: "auto_negatives", heard: "something else", label: "Negative" },
+    ],
+  },
+  {
+    kind: "Close miss",
+    cells: [
+      { key: "promote_close_misses", heard: "the phrase", label: "Positive" },
+      { key: "near_miss_negatives", heard: "something else", label: "Negative" },
+    ],
+  },
+] as const;
 const deploymentMode = computed(() =>
   settings.value?.deployment.enabled
     ? settings.value.deployment_policy.after_training
@@ -139,16 +177,16 @@ onBeforeUnmount(() => {
             />Enabled</label
           >
         </div>
-        <p class="studio-muted">
-          Review pending diagnostic audio conservatively. Uncertain clips remain for manual review.
+        <p class="studio-muted">Review pending kiosk audio conservatively. Uncertain clips remain for manual review.</p>
+        <p data-classification-method class="studio-muted text-xs mt-2">
+          Each clip is checked in order. Clips with no speech (Silero VAD) are <em>something else</em>. If Whisper hears
+          the wake phrase, the clip <em>heard the phrase</em>. Otherwise Whisper listens again, told to expect the
+          phrase: if it still doesn't hear it, the clip is <em>something else</em>. If it only hears the phrase when
+          told to expect it, the clip is <em>unclear</em>, because Whisper also invents the phrase over noise when
+          primed this way.
         </p>
         <div class="grid gap-3 sm:grid-cols-2 mt-3">
           <label
-            >Speech recognition engine<select v-model="settings.classification.engine" name="stt-engine">
-              <option value="faster_whisper">Faster Whisper · recommended</option>
-              <option value="parakeet_onnx">Parakeet ONNX</option>
-            </select></label
-          ><label
             >Run<select v-model="settings.classification.trigger" name="classification-trigger">
               <option value="after_collection">After collection</option>
               <option value="schedule">On a schedule</option>
@@ -162,19 +200,50 @@ onBeforeUnmount(() => {
         />
         <div class="grid gap-2 mt-4">
           <h3>Classification rules</h3>
-          <label class="studio-checkbox-label"
-            ><input v-model="settings.classification.auto_negatives" type="checkbox" />Label clear non-wake activations
-            as negatives</label
-          ><label class="studio-checkbox-label"
-            ><input v-model="settings.classification.promote_close_misses" type="checkbox" />Promote confirmed close
-            misses to positives</label
-          >
+          <table data-classification-rules class="studio-rule-grid text-sm">
+            <thead>
+              <tr>
+                <th>Kiosk clip</th>
+                <th>Heard the phrase</th>
+                <th>Heard something else</th>
+                <th>Unclear</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in RULE_ROWS" :key="row.kind">
+                <th scope="row">{{ row.kind }}</th>
+                <td v-for="cell in row.cells" :key="cell.key">
+                  <label class="studio-checkbox-label"
+                    ><input
+                      v-model="settings.classification[cell.key]"
+                      :name="cell.key"
+                      :aria-label="`${row.kind}, heard ${cell.heard}: label ${cell.label}`"
+                      type="checkbox"
+                    />{{ cell.label }}</label
+                  >
+                </td>
+                <td class="studio-muted">Pending</td>
+              </tr>
+            </tbody>
+          </table>
           <p class="studio-muted text-xs">
-            Empty or ambiguous transcripts stay pending. Close misses are never automatic negatives. No audio is
+            Checked cells apply their label automatically; unchecked cells stay pending for review. No audio is
             automatically deleted.
           </p>
         </div>
-        <p class="studio-muted text-xs mt-3">{{ stageStatus("classify") }}</p>
+        <div class="flex flex-wrap items-center gap-3 mt-3">
+          <button
+            type="button"
+            data-action="classify-now"
+            :disabled="classifying || classificationUnsaved"
+            @click="classifyNow"
+          >
+            {{ classifying ? "Starting…" : "Run classification now" }}
+          </button>
+          <span class="studio-muted text-xs">{{
+            classificationUnsaved ? "Save your rule changes to run with them." : stageStatus("classify")
+          }}</span>
+        </div>
       </section>
       <div class="grid gap-4 lg:grid-cols-2">
         <section class="studio-card">

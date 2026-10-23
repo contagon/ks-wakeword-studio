@@ -12,7 +12,8 @@ def settings_from_dict(data):
         values = dict(data)
         for key in ('collection', 'classification_schedule', 'training', 'deployment'):
             values[key] = AutomationSchedule(**values[key])
-        values['classification'] = ClassificationPolicy(**values['classification'])
+        # Parakeet was removed; older saved settings still carry the engine choice.
+        values['classification'] = ClassificationPolicy(**{k: v for k, v in values['classification'].items() if k != 'engine'})
         values['deployment_policy'] = DeploymentPolicy(**values['deployment_policy'])
         return AutomationSettings(**values)
     except (TypeError, KeyError, ValueError) as exc:
@@ -54,10 +55,9 @@ class AutomationService:
         if not isinstance(settings, AutomationSettings):
             raise ValidationError('Invalid automation settings')
         policy = settings.classification
-        if (policy.engine not in ('faster_whisper', 'parakeet_onnx')
-                or policy.trigger not in ('after_collection', 'schedule')
-                or any(type(value) is not bool for value in (policy.enabled, policy.auto_negatives,
-                    policy.promote_close_misses, settings.skip_unchanged, settings.deployment_policy.after_training))):
+        if (policy.trigger not in ('after_collection', 'schedule')
+                or any(type(value) is not bool for value in (policy.enabled, policy.confirm_activations, policy.auto_negatives,
+                    policy.promote_close_misses, policy.near_miss_negatives, settings.skip_unchanged, settings.deployment_policy.after_training))):
             raise ValidationError('Invalid automation policy')
         with self.store.transaction() as db:
             self.settings_in(db, word_id)

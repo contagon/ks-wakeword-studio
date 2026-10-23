@@ -549,6 +549,9 @@ html[data-studio-theme="dark"] .studio-app {
 .studio-content table {
   min-width: 680px;
 }
+.studio-content table.studio-rule-grid {
+  min-width: 0;
+}
 .studio-content .overflow-x-auto {
   position: relative;
 }

@@ -17,7 +17,9 @@ class ClassificationService:
         context.log('Checking classification policy and pending recordings')
         status = self.automation.get(job.word_id)
         policy = status.settings.classification
-        if not policy.enabled or self.automation.scheduled_disabled(job):
+        # "Enabled" governs automatic runs; a manual run applies the saved rules regardless.
+        manual = job.payload.get('manual') is True
+        if not (policy.enabled or manual) or self.automation.scheduled_disabled(job):
             return {'skipped': True, 'reason': 'disabled'}
         with self.store.transaction() as db:
             word = db.execute('SELECT * FROM wakewords WHERE id=?', (job.word_id,)).fetchone()
@@ -36,7 +38,7 @@ class ClassificationService:
                 break
             context.log(f'Classifying batch {batch + 1}: {len(candidates)} recordings')
             eligible = [r for r in candidates if not json.loads(r['metadata']).get('blocked_by_vad')]
-            manifest = {'engine': policy.engine, 'phrase': word['phrase'], 'language': word['language'],
+            manifest = {'phrase': word['phrase'], 'language': word['language'],
                         'cache_dir': str(self.store.data_dir / 'auto_train_models'),
                         'samples': [{'id': r['id'], 'path': str(self.samples.blobs.root / r['normalized_hash'])} for r in eligible]}
             input_path, output_path = root / f'classify-{batch}.json', root / f'result-{batch}.json'
@@ -54,7 +56,7 @@ class ClassificationService:
                     raise ValidationError('Incomplete speech results')
             by_id = {}
             for result in results:
-                if (not isinstance(result, dict) or result.get('engine') != policy.engine
+                if (not isinstance(result, dict) or type(result.get('speech')) is not bool
                         or not isinstance(result.get('id'), str) or result['id'] in by_id
                         or any(not isinstance(result.get(k, ''), str) or len(result.get(k, '')) > 16000
                                for k in ('transcript', 'guided_transcript', 'model'))):
@@ -63,12 +65,13 @@ class ClassificationService:
             if set(by_id) != {r['id'] for r in eligible}:
                 raise ValidationError('Invalid speech identities')
             for snapshot in candidates:
-                if context.cancelled() or not self.automation.get(job.word_id).settings.classification.enabled:
+                if context.cancelled() or not (manual or self.automation.get(job.word_id).settings.classification.enabled):
                     return counts
                 result = by_id.get(snapshot['id'], {})
-                outcome = classify_transcript(result.get('transcript', ''), word['phrase'],
-                    near_miss=bool(snapshot['near_miss']), promote=policy.promote_close_misses,
-                    auto_negatives=policy.auto_negatives, guided=result.get('guided_transcript', ''))
+                # Kiosk-VAD-blocked clips are never transcribed and stay pending.
+                outcome = classify_transcript(word['phrase'], policy, near_miss=bool(snapshot['near_miss']),
+                    speech=result['speech'], text=result.get('transcript', ''),
+                    primed=result.get('guided_transcript', '')) if result else 'pending'
                 with self.store.transaction() as db:
                     try:
                         current = self.samples.fetch(db, snapshot['id'], job.word_id)
@@ -84,7 +87,7 @@ class ClassificationService:
                         counts['reviewed'] += 1
                         counts[outcome] += 1
                     db.execute('INSERT OR IGNORE INTO automation_reviews VALUES (?,?,?,?,?,?,?)',
-                        (snapshot['id'], snapshot['audio_id'], fingerprint, outcome, policy.engine,
+                        (snapshot['id'], snapshot['audio_id'], fingerprint, outcome, 'faster_whisper',
                          result.get('model', '')[:200], iso_now(self.samples.clock)))
             batch += 1
             context.log(f'Classification progress: {counts["reviewed"]} reviewed, {counts["conflicts"]} conflicts')

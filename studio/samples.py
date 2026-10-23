@@ -330,7 +330,8 @@ class SampleService:
                                 parent_id=row["audio_id"], start=start_s, end=end_s)
         return self.apply_change(db, row, row["label"], audio_id, "trim")
 
-    def _query(self, query: SampleQuery, created_at: str = "r.created_at") -> tuple[list[str], list[object]]:
+    def _query(self, query: SampleQuery, created_at: str = "r.created_at",
+               searched: tuple[str, ...] = ("r.phrase", "r.clip_id")) -> tuple[list[str], list[object]]:
         check_page(query.offset, query.limit)
         if query.label not in (None, "pending", "positive", "negative", "discarded") or query.source not in (None, "diagnostic", "import", "legacy", "microphone"):
             raise ValidationError("Invalid filter")
@@ -346,12 +347,12 @@ class SampleService:
                 clauses.append(f"COALESCE(r.timestamp,{created_at})" + op + "?")
                 params.append(self._date(value))
         if query.search:
-            clauses.append("instr(lower(r.phrase),lower(?))>0")
+            clauses.append("instr(lower(" + "||' '||".join(f"COALESCE({c},'')" for c in searched) + "),lower(?))>0")
             params.append(query.search)
         return clauses, params
 
     def list(self, word_id: str, query: SampleQuery) -> Page[Sample]:
-        clauses, params = self._query(query, created_at="s.created_at")
+        clauses, params = self._query(query, created_at="s.created_at", searched=("r.phrase", "r.clip_id", "s.id"))
         clauses += ["s.word_id=?", "s.deleted=0", "COALESCE(r.quarantined,0)=0"]
         params.append(word_id)
         if query.label is not None:
@@ -363,6 +364,12 @@ class SampleService:
             else:
                 clauses.append('mp.source=?' if query.source == 'legacy' else 's.source=? AND cm.sample_id IS NULL')
                 params.append(query.source)
+        if query.labelled_by is not None:
+            # ponytail: a human relabel back to automation's own label still counts as auto;
+            # record the labeller in sample_history if that distinction matters.
+            auto = ("EXISTS (SELECT 1 FROM automation_reviews v WHERE v.sample_id=s.id AND v.audio_id=s.audio_id "
+                    "AND v.outcome=s.label AND v.outcome!='pending')")
+            clauses.append(auto if query.labelled_by == 'auto' else f"s.label!='pending' AND NOT {auto}")
         where = " WHERE " + " AND ".join(clauses)
         with self.store.transaction() as db:
             require_word(db, word_id)
@@ -377,7 +384,7 @@ class SampleService:
 
     def unmapped(self, query: SampleQuery) -> Page[Recording]:
         clauses, params = self._query(query)
-        if query.label is not None or query.source not in (None, "diagnostic"):
+        if query.label is not None or query.labelled_by is not None or query.source not in (None, "diagnostic"):
             raise ValidationError("Invalid unmapped filter")
         clauses += ["r.word_id IS NULL", "r.quarantined=0"]
         where = " WHERE " + " AND ".join(clauses)

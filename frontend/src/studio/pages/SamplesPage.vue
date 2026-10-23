@@ -21,7 +21,7 @@ const limit = ref(25);
 const loading = ref(false);
 const error = ref("");
 const status = ref("");
-const filters = ref({ label: "", source: "", kind: "", after: "", before: "" });
+const filters = ref({ search: "", label: "", labelledBy: "", source: "", kind: "", after: "", before: "" });
 const trimTarget = ref<Sample | null>(null);
 const deleteTarget = ref<Sample | null>(null);
 const audio = ref<HTMLAudioElement>();
@@ -38,6 +38,8 @@ const query = computed<SampleQuery>(() => ({
   offset: offset.value,
   limit: Math.min(100, limit.value),
   ...(filters.value.label ? { label: filters.value.label } : {}),
+  ...(filters.value.search.trim() ? { search: filters.value.search.trim() } : {}),
+  ...(filters.value.labelledBy ? { labelled_by: filters.value.labelledBy as "auto" | "manual" } : {}),
   ...(filters.value.source ? { source: filters.value.source } : {}),
   ...(filters.value.kind ? { near_miss: filters.value.kind === "true" } : {}),
   ...(filters.value.after ? { after: localDayBound(filters.value.after, "T00:00:00") } : {}),
@@ -218,12 +220,25 @@ onBeforeUnmount(() => {
     <p v-if="status" data-samples-status class="studio-note" role="status" aria-live="polite">{{ status }}</p>
     <p v-if="error" data-samples-error class="studio-note" role="alert" aria-live="assertive">{{ error }}</p>
     <div class="studio-card mb-4">
-      <div data-sample-filters class="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div data-sample-filters class="grid gap-3 sm:grid-cols-3 lg:grid-cols-7">
         <label
+          >Search<input
+            name="search"
+            v-model="filters.search"
+            type="search"
+            placeholder="Sample or clip ID"
+            @input="filterChanged" /></label
+        ><label
           >Label<select name="label" v-model="filters.label" @change="filterChanged">
             <option value="">All labels</option>
             <option value="pending">Pending</option>
             <option v-for="(name, value) in LABELS" :key="value" :value="value">{{ name }}</option>
+          </select></label
+        ><label
+          >Labelled by<select name="labelled-by" v-model="filters.labelledBy" @change="filterChanged">
+            <option value="">Anyone</option>
+            <option value="auto">Automatic</option>
+            <option value="manual">Manual</option>
           </select></label
         ><label
           >Source<select name="source" v-model="filters.source" @change="filterChanged">
@@ -251,7 +266,6 @@ onBeforeUnmount(() => {
             <th>Sample</th>
             <th>Label</th>
             <th>Source</th>
-            <th>Revision</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -277,7 +291,6 @@ onBeforeUnmount(() => {
                 · {{ item.capture.duration_s.toFixed(2) }} s original</small
               >
             </td>
-            <td data-caption="Revision">rev {{ item.revision }}</td>
             <td data-caption="Actions">
               <div class="flex flex-wrap gap-1">
                 <button
@@ -303,7 +316,7 @@ onBeforeUnmount(() => {
             </td>
           </tr>
           <tr v-if="!items.length">
-            <td colspan="5">No samples match these filters.</td>
+            <td colspan="4">No samples match these filters.</td>
           </tr>
         </tbody>
       </table>

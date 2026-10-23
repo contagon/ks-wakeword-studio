@@ -58,12 +58,11 @@ const lists = () =>
 const row = (ui: VueWrapper, id: string) => ui.get(`[data-row-id="${id}"]`);
 
 describe("provenance-aware sample library", () => {
-  it("shows all filters inline without a phrase search or disclosure", async () => {
+  it("shows all filters inline without a disclosure", async () => {
     const ui = await open();
     expect(ui.find("details").exists()).toBe(false);
-    expect(ui.find("input[name=search]").exists()).toBe(false);
     const filters = ui.get("[data-sample-filters]");
-    for (const name of ["label", "source", "kind", "after", "before"])
+    for (const name of ["search", "label", "labelled-by", "source", "kind", "after", "before"])
       expect(filters.find(`[name=${name}]`).exists()).toBe(true);
     expect(filters.findAll("select[name=source] option").map((o) => o.text())).toEqual([
       "All sources",
@@ -77,11 +76,11 @@ describe("provenance-aware sample library", () => {
     const ui = await open();
     expect(ui.get("h1").text()).toBe("Samples");
     expect(ui.find("[data-legacy-trainer]").exists()).toBe(false);
-    expect(ui.findAll("thead th").map((th) => th.text())).toContain("Source");
+    expect(ui.findAll("thead th").map((th) => th.text())).toEqual(["Sample", "Label", "Source", "Actions"]);
     expect(lists().at(-1)?.url.searchParams.get("offset")).toBe("0");
     expect(ui.findAll("[data-row-id]")).toHaveLength(25);
     const first = row(ui, "s0").text();
-    for (const text of ["positive", "Kitchen satellite", "phrase 0", "mww", "rev 0"]) expect(first).toContain(text);
+    for (const text of ["positive", "Kitchen satellite", "phrase 0", "mww"]) expect(first).toContain(text);
     expect(first).not.toContain("diagnostic");
     expect(row(ui, "s1").text()).toContain("Hall satellite");
     expect(row(ui, "s1").text()).toContain("close miss");
@@ -116,6 +115,14 @@ describe("provenance-aware sample library", () => {
     expect(ui.findAll("[data-row-id]").map((r) => r.attributes("data-row-id"))).toEqual(["s1"]);
   });
 
+  it("searches by sample or clip ID", async () => {
+    const ui = await open();
+    await ui.get("input[name=search]").setValue(" imp ");
+    await settle();
+    expect(lists().at(-1)!.url.searchParams.get("search")).toBe("imp");
+    expect(ui.findAll("[data-row-id]").map((r) => r.attributes("data-row-id"))).toEqual(["imp"]);
+  });
+
   it("relabels with the row's server revision and applies the acknowledged record", async () => {
     const ui = await open();
     expect(row(ui, "s2").get("select[data-action=relabel]").element.closest(".sr-only")).toBeNull();
@@ -126,7 +133,7 @@ describe("provenance-aware sample library", () => {
       "/api/studio/wakewords/a/samples/s2/label",
       { label: "discarded", expected_revision: 2 },
     ]);
-    expect(row(ui, "s2").text()).toContain("rev 3");
+    expect(row(ui, "s2").get("td[data-caption=Label]").text()).toBe("discarded");
     expect(ui.get("[data-samples-status]").text()).toContain("saved");
   });
 
@@ -139,7 +146,6 @@ describe("provenance-aware sample library", () => {
     expect(ui.get("[data-samples-error]").attributes("role")).toBe("alert");
     expect(ui.get("[data-samples-error]").text()).toContain("changed elsewhere");
     expect(lists().length).toBe(before + 1);
-    expect(row(ui, "s4").text()).toContain("rev 9");
   });
 
   it("trims non-destructively through the server with the current revision", async () => {
@@ -164,7 +170,6 @@ describe("provenance-aware sample library", () => {
     expect(request.body).toEqual({ start_s: 0.2, end_s: 1, expected_revision: 2 });
     expect(server.requests.some((r) => r.method === "DELETE")).toBe(false);
     expect(ui.find("[aria-label='Trim audio']").exists()).toBe(false);
-    expect(row(ui, "s5").text()).toContain("rev 3");
   });
 
   it("deletes only after confirmation and with the server revision", async () => {

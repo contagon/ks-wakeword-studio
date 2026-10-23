@@ -496,6 +496,19 @@ describe("NegativeDatasetsPage", () => {
     ui.unmount();
   });
 
+  it("warns by free space left, not by percentage of a large disk", async () => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) =>
+      String(input).endsWith("/augmentation/datasets")
+        ? Promise.resolve(json({ ...augmentationCatalog(false), storage_free_bytes: 200e9, storage_total_bytes: 2e12 }))
+        : transport(input, init),
+    );
+    const ui = mount(host());
+    await flushPromises();
+    expect(ui.find("[data-disk-warning]").exists()).toBe(false);
+    ui.unmount();
+  });
+
   it("shows negative dataset details as description, then GB and sample count", async () => {
     const transport = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation((input, init) =>

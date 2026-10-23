@@ -10,6 +10,8 @@ import PaginatedTable from "../components/PaginatedTable.vue";
 import { isActiveStatus, useJobQueue, statusClass } from "../jobs";
 import AugmentationDatasets from "../components/AugmentationDatasets.vue";
 
+/** Warn below this much free space (decimal GB, matching how sizes are shown). */
+const LOW_DISK_BYTES = 20e9;
 const workspace = useWorkspace();
 const queue = useJobQueue();
 const rows = ref<Dataset[]>([]);
@@ -153,9 +155,7 @@ onBeforeUnmount(abortWorkspaceMutations);
       description="Download shared training resources. Choose negative, evaluation, and augmentation datasets per wakeword; all are enabled by default."
     />
     <p
-      v-if="
-        storage && storage.storage_total_bytes > 0 && storage.storage_free_bytes / storage.storage_total_bytes < 0.1
-      "
+      v-if="storage && storage.storage_free_bytes < LOW_DISK_BYTES"
       data-disk-warning
       class="studio-note studio-note-warning mb-4"
       role="status"

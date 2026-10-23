@@ -4,7 +4,7 @@ import json
 
 from studio.models import DiagnosticClip, SampleQuery
 from studio.runtime import StudioRuntime
-from studio_harness import wav
+from studio_harness import api_client, wav
 
 
 class SpeechRunner:
@@ -14,7 +14,7 @@ class SpeechRunner:
     def run(self, context, argv, **kwargs):
         args = dict(a[2:].split('=', 1) for a in argv if a.startswith('--'))
         manifest = json.loads(open(args['input-manifest']).read())
-        results = [{'id': s['id'], 'transcript': self.transcript, 'engine': manifest['engine'],
+        results = [{'id': s['id'], 'speech': True, 'transcript': self.transcript, 'guided_transcript': self.transcript,
                     'model': 'small.en'} for s in manifest['samples']]
         if self.before_result:
             self.before_result()
@@ -47,6 +47,8 @@ def test_auto_negative_and_undo_not_immediately_reclassified(tmp_path):
         updated = runtime.samples.get(sample.id)
         assert updated.label == 'negative'
         assert 'turn the lights' not in json.dumps(runtime.jobs.get(job.id).result)
+        by = lambda who: [s.id for s in runtime.samples.list(word.id, SampleQuery(labelled_by=who)).items]
+        assert (by('auto'), by('manual')) == ([sample.id], [])
         runtime.samples.undo(sample.id, updated.revision)
         runtime.jobs.enqueue('classify', word.id, {})
         runtime.workers.run_once('gpu')
@@ -63,6 +65,8 @@ def test_manual_revision_wins(tmp_path):
         runtime.jobs.enqueue('classify', word.id, {})
         runtime.workers.run_once('gpu')
         assert runtime.samples.get(sample.id).label == 'positive'
+        assert runtime.samples.list(word.id, SampleQuery(labelled_by='manual')).total == 1
+        assert runtime.samples.list(word.id, SampleQuery(labelled_by='auto')).total == 0
     finally:
         runtime.shutdown()
 
@@ -91,5 +95,22 @@ def test_only_unmapped_imports_do_not_trigger_classification(tmp_path):
         runtime.jobs.finish(job.id, {'run_id': 'unknown-only', 'new': 1, 'new_mapped': 0, 'status': 'complete'})
         runtime.automation.reconcile()
         assert not any(j.kind == 'classify' for j in runtime.jobs.list().items)
+    finally:
+        runtime.shutdown()
+
+
+def test_manual_run_applies_saved_rules_while_automatic_runs_are_disabled(tmp_path):
+    runtime, word, runner = setup_runtime(tmp_path)
+    try:
+        settings = runtime.automation.get(word.id).settings
+        runtime.automation.save(word.id, replace(settings, classification=replace(settings.classification, enabled=False)))
+        sample = add_sample(runtime, word)
+        runtime.jobs.enqueue('classify', word.id, {})
+        runtime.workers.run_once('gpu')
+        assert runtime.samples.get(sample.id).label == 'pending'
+        with api_client(runtime) as api:
+            assert api.post(f'/api/studio/wakewords/{word.id}/classification/jobs').status_code == 201
+        runtime.workers.run_once('gpu')
+        assert runtime.samples.get(sample.id).label == 'negative'
     finally:
         runtime.shutdown()

@@ -35,7 +35,7 @@ class RunShCudaLibraryPathTests(unittest.TestCase):
         import types
         versions = {'fastapi': '0.115.6', 'uvicorn': '0.30.6', 'python-multipart': '0.0.9',
                     'croniter': '6.0.0', 'silero-vad': '5.0.0', 'numpy': '1.24.0',
-                    'faster-whisper': '1.0.0', 'onnx-asr': '0.12.0', 'nvidia-cudnn-cu12': '9.0.0'}
+                    'faster-whisper': '1.0.0', 'nvidia-cudnn-cu12': '9.0.0'}
         from unittest.mock import patch
         for version in ('6.0.0', '5.0.1', None):
             def installed(package):
@@ -89,10 +89,10 @@ class RunShCudaLibraryPathTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "")
 
-    def test_parakeet_uses_cuda_onnxruntime_package(self) -> None:
+    def test_silero_onnx_runtime_is_installed_without_parakeet(self) -> None:
         source = RUN_SH.read_text(encoding="utf-8")
 
-        self.assertIn('"onnx-asr[hub]>=0.12.0"', source)
+        self.assertNotIn("onnx-asr", source)
         self.assertIn('"onnxruntime-gpu[cuda,cudnn]<1.27"', source)
         self.assertIn('"CUDAExecutionProvider"', source)
 

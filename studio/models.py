@@ -84,9 +84,11 @@ class AutomationSchedule:
 class ClassificationPolicy:
     enabled: bool = False
     trigger: Literal['after_collection', 'schedule'] = 'after_collection'
-    engine: Literal['faster_whisper', 'parakeet_onnx'] = 'faster_whisper'
+    # One switch per (clip kind x what speech recognition heard) cell.
+    confirm_activations: bool = False
     auto_negatives: bool = True
     promote_close_misses: bool = False
+    near_miss_negatives: bool = False
 
 
 @dataclass(frozen=True)
@@ -431,6 +433,7 @@ class SampleQuery:
     search: str = ""
     after: str | None = None
     before: str | None = None
+    labelled_by: str | None = None
 
 
 T = TypeVar("T")

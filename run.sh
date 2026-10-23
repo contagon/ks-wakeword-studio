@@ -35,7 +35,6 @@ install_ui_deps() {
     "silero-vad>=5.0.0" \
     "numpy>=1.24.0" \
     "faster-whisper>=1.0.0" \
-    "onnx-asr[hub]>=0.12.0" \
     "nvidia-cublas-cu12" \
     "nvidia-cudnn-cu12==9.*"
   ${PIP} uninstall -y onnxruntime
@@ -89,7 +88,6 @@ minimum = {
     "silero-vad": "5.0.0",
     "numpy": "1.24.0",
     "faster-whisper": "1.0.0",
-    "onnx-asr": "0.12.0",
     "nvidia-cudnn-cu12": "9.0.0",
 }
 present = (

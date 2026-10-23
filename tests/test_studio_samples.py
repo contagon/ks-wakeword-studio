@@ -145,10 +145,13 @@ class SampleTests(unittest.TestCase):
 
     def test_library_filters_pagination_and_validation(self):
         self.ingest()
-        self.ingest(device='b', clip='2')
+        self.ingest(device='b', clip='kz-2')
         self.service.import_audio(self.word.id, 'negative', io.BytesIO(wav(400)))
         query = SampleQuery(device_id='b', near_miss=True, search='Hello', limit=1)
         self.assertEqual(self.service.list(self.word.id, query).total, 1)
+        self.assertEqual(self.service.list(self.word.id, SampleQuery(search='KZ-')).total, 1)
+        imported = self.service.list(self.word.id, SampleQuery(source='import')).items[0]
+        self.assertEqual([s.id for s in self.service.list(self.word.id, SampleQuery(search=imported.id[:12])).items], [imported.id])
         self.assertEqual(self.service.list(self.word.id, SampleQuery(label='negative', source='import')).total, 1)
         self.assertEqual(self.service.queue(self.word.id, SampleQuery(offset=1, limit=1)).total, 2)
         for query in (SampleQuery(limit=101), SampleQuery(label='skip'), SampleQuery(after='bad')):

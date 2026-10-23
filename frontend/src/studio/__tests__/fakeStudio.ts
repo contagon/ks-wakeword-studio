@@ -164,7 +164,8 @@ export function fakeStudio() {
         (!q.get("label") || s.label === q.get("label")) &&
         (!q.get("source") || s.source === q.get("source")) &&
         (!q.get("near_miss") || String(s.recording?.near_miss ?? false) === q.get("near_miss")) &&
-        (!q.get("search") || (s.recording?.phrase ?? "").includes(q.get("search")!)),
+        (!q.get("search") ||
+          [s.recording?.phrase, s.recording?.clip_id, s.id].some((v) => (v ?? "").includes(q.get("search")!))),
     );
   }
   function revisionError(s: Sample | undefined, expected: unknown) {

@@ -249,6 +249,8 @@ export const studioApi = {
     put<TrainingSettings>(`${wordPath(word)}/training/settings`, body, signal),
   trainingCounts: (word: string, signal?: AbortSignal) =>
     get<TrainingCounts>(`${wordPath(word)}/training/counts`, undefined, signal),
+  classify: (word: string, signal?: AbortSignal) =>
+    post<Job>(`${wordPath(word)}/classification/jobs`, undefined, signal),
   train: (word: string, signal?: AbortSignal) => post<Job>(`${wordPath(word)}/training/jobs`, undefined, signal),
   trainingRuns: (word: string, params?: Pagination, signal?: AbortSignal) =>
     get<Page<Job>>(`${wordPath(word)}/training/runs`, params, signal),
