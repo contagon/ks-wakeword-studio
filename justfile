@@ -50,6 +50,12 @@ e2e: test-venv
 format:
     npm --prefix frontend run format
 
+# Score automatic classification against your manual kiosk labels (read-only).
+# Options pass through, e.g. `just evaluate-classification --phrase "Hey Doof"`; set CPU=1 when the GPU is busy.
+[positional-arguments]
+evaluate-classification *args:
+    docker compose exec {{ if env("CPU", "") != "" { "-e CUDA_VISIBLE_DEVICES=" } else { "" } }} studio /data/.recorder-venv/bin/python cli/evaluate_classification.py "$@"
+
 # Open a shell in the running studio container.
 shell:
     docker compose exec studio bash

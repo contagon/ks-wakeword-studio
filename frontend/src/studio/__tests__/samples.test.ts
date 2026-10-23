@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import StudioShell from "../components/StudioShell.vue";
 import { fakeMedia, fakeStudio, recording, sample, wav } from "./fakeStudio";
+import { absoluteTime } from "../time";
 
 let wrapper: VueWrapper | undefined;
 let server: ReturnType<typeof fakeStudio>;
@@ -66,7 +67,9 @@ describe("provenance-aware sample library", () => {
       expect(filters.find(`[name=${name}]`).exists()).toBe(true);
     expect(filters.findAll("select[name=source] option").map((o) => o.text())).toEqual([
       "All sources",
-      "Kiosk",
+      "All kiosks",
+      "Kitchen satellite",
+      "Hall satellite",
       "Recorded",
       "Import",
     ]);
@@ -76,7 +79,7 @@ describe("provenance-aware sample library", () => {
     const ui = await open();
     expect(ui.get("h1").text()).toBe("Samples");
     expect(ui.find("[data-legacy-trainer]").exists()).toBe(false);
-    expect(ui.findAll("thead th").map((th) => th.text())).toEqual(["Sample", "Label", "Source", "Actions"]);
+    expect(ui.findAll("thead th").map((th) => th.text())).toEqual(["Sample", "Date", "Label", "Source", "Actions"]);
     expect(lists().at(-1)?.url.searchParams.get("offset")).toBe("0");
     expect(ui.findAll("[data-row-id]")).toHaveLength(25);
     const first = row(ui, "s0").text();
@@ -113,6 +116,21 @@ describe("provenance-aware sample library", () => {
     expect(q.get("after")).toBe(new Date("2026-02-01T00:00:00").toISOString());
     expect(q.get("before")).toBe(new Date("2026-04-01T23:59:59.999").toISOString());
     expect(ui.findAll("[data-row-id]").map((r) => r.attributes("data-row-id"))).toEqual(["s1"]);
+  });
+
+  it("filters by a single kiosk and dates each row by its recording time", async () => {
+    const ui = await open();
+    await ui.get("select[name=source]").setValue("device:kiosk-1");
+    await settle();
+    expect(Object.fromEntries(lists().at(-1)!.url.searchParams)).toMatchObject({
+      source: "diagnostic",
+      device_id: "kiosk-1",
+    });
+    const rows = ui.findAll("[data-row-id]");
+    expect(rows.length).toBe(15);
+    expect(rows.every((r) => r.text().includes("Hall satellite"))).toBe(true);
+    const timestamp = server.db.samples.find((s) => s.id === "s1")!.recording!.timestamp!;
+    expect(row(ui, "s1").get("td[data-caption=Date]").text()).toBe(absoluteTime(timestamp));
   });
 
   it("searches by sample or clip ID", async () => {

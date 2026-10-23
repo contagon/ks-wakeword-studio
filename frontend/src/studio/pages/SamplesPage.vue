@@ -8,6 +8,7 @@ import SampleTrimDialog from "../components/SampleTrimDialog.vue";
 import PaginatedTable from "../components/PaginatedTable.vue";
 import { useWorkspace } from "../workspace";
 import type { Sample, SampleQuery } from "../types";
+import { absoluteTime } from "../time";
 
 const workspace = useWorkspace();
 const registry = useDeviceRegistry();
@@ -40,7 +41,12 @@ const query = computed<SampleQuery>(() => ({
   ...(filters.value.label ? { label: filters.value.label } : {}),
   ...(filters.value.search.trim() ? { search: filters.value.search.trim() } : {}),
   ...(filters.value.labelledBy ? { labelled_by: filters.value.labelledBy as "auto" | "manual" } : {}),
-  ...(filters.value.source ? { source: filters.value.source } : {}),
+  // A single kiosk is "device:<id>": kiosk samples from that device only.
+  ...(filters.value.source.startsWith("device:")
+    ? { source: "diagnostic", device_id: filters.value.source.slice("device:".length) }
+    : filters.value.source
+      ? { source: filters.value.source }
+      : {}),
   ...(filters.value.kind ? { near_miss: filters.value.kind === "true" } : {}),
   ...(filters.value.after ? { after: localDayBound(filters.value.after, "T00:00:00") } : {}),
   ...(filters.value.before ? { before: localDayBound(filters.value.before, "T23:59:59.999") } : {}),
@@ -243,7 +249,13 @@ onBeforeUnmount(() => {
         ><label
           >Source<select name="source" v-model="filters.source" @change="filterChanged">
             <option value="">All sources</option>
-            <option v-for="value in ['diagnostic', 'microphone', 'import']" :key="value" :value="value">
+            <optgroup label="Kiosks">
+              <option value="diagnostic">All kiosks</option>
+              <option v-for="device in registry.devices.value" :key="device.id" :value="`device:${device.id}`">
+                {{ registry.deviceLabel(device.id) }}
+              </option>
+            </optgroup>
+            <option v-for="value in ['microphone', 'import']" :key="value" :value="value">
               {{ SOURCES[value] }}
             </option>
           </select></label
@@ -264,6 +276,7 @@ onBeforeUnmount(() => {
         <thead>
           <tr>
             <th>Sample</th>
+            <th>Date</th>
             <th>Label</th>
             <th>Source</th>
             <th>Actions</th>
@@ -277,6 +290,7 @@ onBeforeUnmount(() => {
                 >{{ item.recording.phrase }} · {{ item.recording.engine }} · {{ rowKind(item) }}</small
               >
             </td>
+            <td data-caption="Date">{{ absoluteTime(item.recording?.timestamp ?? item.created_at) }}</td>
             <td data-caption="Label">{{ item.label }}</td>
             <td data-caption="Source">
               {{ sourceLabel(item)
@@ -316,7 +330,7 @@ onBeforeUnmount(() => {
             </td>
           </tr>
           <tr v-if="!items.length">
-            <td colspan="4">No samples match these filters.</td>
+            <td colspan="5">No samples match these filters.</td>
           </tr>
         </tbody>
       </table>

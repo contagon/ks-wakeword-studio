@@ -163,6 +163,7 @@ export function fakeStudio() {
         s.word_id === word &&
         (!q.get("label") || s.label === q.get("label")) &&
         (!q.get("source") || s.source === q.get("source")) &&
+        (!q.get("device_id") || s.recording?.device_id === q.get("device_id")) &&
         (!q.get("near_miss") || String(s.recording?.near_miss ?? false) === q.get("near_miss")) &&
         (!q.get("search") ||
           [s.recording?.phrase, s.recording?.clip_id, s.id].some((v) => (v ?? "").includes(q.get("search")!))),
