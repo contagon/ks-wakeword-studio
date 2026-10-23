@@ -1,12 +1,13 @@
-<script setup lang="ts">
-const label = defineModel<"positive" | "negative">({ required: true });
-defineProps<{ groupLabel: string; disabled?: boolean; attribute?: string }>();
+<script setup lang="ts" generic="T extends string">
+const label = defineModel<T>({ required: true });
+defineProps<{ groupLabel: string; disabled?: boolean; attribute?: string; values?: readonly T[] }>();
+const NAMES: Record<string, string> = { positive: "Positive", negative: "Negative", discarded: "Discard" };
 </script>
 
 <template>
   <div class="studio-capture-label" role="group" :aria-label="groupLabel">
     <button
-      v-for="value in ['positive', 'negative'] as const"
+      v-for="value in values ?? (['positive', 'negative'] as unknown as T[])"
       :key="value"
       type="button"
       v-bind="{ [attribute ?? 'data-label']: value }"
@@ -15,7 +16,7 @@ defineProps<{ groupLabel: string; disabled?: boolean; attribute?: string }>();
       :disabled="disabled"
       @click="label = value"
     >
-      {{ value === "positive" ? "Positive" : "Negative" }}
+      {{ NAMES[value] ?? value }}
     </button>
   </div>
 </template>

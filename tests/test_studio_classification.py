@@ -45,7 +45,7 @@ def test_auto_negative_and_undo_not_immediately_reclassified(tmp_path):
         runtime.workers.run_once('gpu')
         assert runtime.jobs.get(job.id).status == 'complete'
         updated = runtime.samples.get(sample.id)
-        assert updated.label == 'negative'
+        assert (updated.label, updated.labelled_by) == ('negative', 'auto')
         assert 'turn the lights' not in json.dumps(runtime.jobs.get(job.id).result)
         by = lambda who: [s.id for s in runtime.samples.list(word.id, SampleQuery(labelled_by=who)).items]
         assert (by('auto'), by('manual')) == ([sample.id], [])
@@ -57,6 +57,24 @@ def test_auto_negative_and_undo_not_immediately_reclassified(tmp_path):
         runtime.shutdown()
 
 
+
+def test_manual_relabel_to_automation_label_counts_as_manual(tmp_path):
+    runtime, word, runner = setup_runtime(tmp_path)
+    try:
+        sample = add_sample(runtime, word)
+        runtime.jobs.enqueue('classify', word.id, {})
+        runtime.workers.run_once('gpu')
+        auto = runtime.samples.get(sample.id)
+        flipped = runtime.samples.set_label(sample.id, 'positive', auto.revision)
+        back = runtime.samples.set_label(sample.id, 'negative', flipped.revision)
+        assert (back.label, back.labelled_by) == ('negative', 'manual')
+        assert runtime.samples.list(word.id, SampleQuery(labelled_by='auto')).total == 0
+        undone = runtime.samples.undo(sample.id, runtime.samples.undo(sample.id, back.revision).revision)
+        assert (undone.label, undone.labelled_by) == ('negative', 'auto')
+        assert runtime.samples.list(word.id, SampleQuery(labelled_by='auto')).total == 1
+    finally:
+        runtime.shutdown()
+
 def test_manual_revision_wins(tmp_path):
     runtime, word, runner = setup_runtime(tmp_path)
     try:
@@ -66,6 +84,7 @@ def test_manual_revision_wins(tmp_path):
         runtime.workers.run_once('gpu')
         assert runtime.samples.get(sample.id).label == 'positive'
         assert runtime.samples.list(word.id, SampleQuery(labelled_by='manual')).total == 1
+        assert runtime.samples.get(sample.id).labelled_by == 'manual'
         assert runtime.samples.list(word.id, SampleQuery(labelled_by='auto')).total == 0
     finally:
         runtime.shutdown()

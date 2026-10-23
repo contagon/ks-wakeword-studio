@@ -176,6 +176,7 @@ export interface Sample {
   source: string;
   created_at: string;
   updated_at: string;
+  labelled_by?: "auto" | "manual" | null;
   recording: Recording | null;
   capture?: (CaptureSelection & { duration_s: number }) | null;
 }

@@ -24,7 +24,10 @@ from studio.storage import BlobStore, normalize_audio
 from studio.workspaces import WorkspaceService, clean_text, require_word, source_word
 
 
-SAMPLE_SELECT = """SELECT s.*, CASE WHEN cm.sample_id IS NOT NULL THEN 'microphone'
+# Undo pops history, so the newest live label change set the current label; none means it was given at intake.
+LABELLED_BY = ("CASE WHEN s.label='pending' THEN NULL ELSE COALESCE((SELECT h.actor FROM sample_history h "
+               "WHERE h.sample_id=s.id AND h.action='label' AND h.undone=0 ORDER BY h.revision DESC LIMIT 1),'manual') END")
+SAMPLE_SELECT = f"""SELECT s.*, {LABELLED_BY} AS labelled_by, CASE WHEN cm.sample_id IS NOT NULL THEN 'microphone'
     ELSE COALESCE(mp.source, s.source) END AS migration_source,
     a.original_hash, a.normalized_hash, a.family_id, cm.trim_method AS capture_trim_method,
     cm.start_s AS capture_start_s, cm.end_s AS capture_end_s, cm.duration_s AS capture_duration_s
@@ -265,11 +268,12 @@ class SampleService:
         if row["recording_id"] and db.execute("SELECT quarantined FROM recordings WHERE id=?", (row["recording_id"],)).fetchone()[0]:
             raise Conflict("Recording is quarantined")
 
-    def apply_change(self, db: sqlite3.Connection, row: sqlite3.Row, label: str, audio_id: str, action: str) -> Sample:
+    def apply_change(self, db: sqlite3.Connection, row: sqlite3.Row, label: str, audio_id: str, action: str,
+                     actor: str = "manual") -> Sample:
         self.check_editable(db, row)
         revision, now = row["revision"] + 1, iso_now(self.clock)
-        db.execute("INSERT INTO sample_history (sample_id,revision,action,old_label,old_audio_id,new_label,new_audio_id,created_at) VALUES (?,?,?,?,?,?,?,?)",
-                   (row["id"], revision, action, row["label"], row["audio_id"], label, audio_id, now))
+        db.execute("INSERT INTO sample_history (sample_id,revision,action,old_label,old_audio_id,new_label,new_audio_id,created_at,actor) VALUES (?,?,?,?,?,?,?,?,?)",
+                   (row["id"], revision, action, row["label"], row["audio_id"], label, audio_id, now, actor))
         db.execute("UPDATE samples SET label=?,audio_id=?,revision=?,updated_at=? WHERE id=?",
                    (label, audio_id, revision, now, row["id"]))
         return _sample(db, self.fetch(db, row["id"]))
@@ -365,11 +369,8 @@ class SampleService:
                 clauses.append('mp.source=?' if query.source == 'legacy' else 's.source=? AND cm.sample_id IS NULL')
                 params.append(query.source)
         if query.labelled_by is not None:
-            # ponytail: a human relabel back to automation's own label still counts as auto;
-            # record the labeller in sample_history if that distinction matters.
-            auto = ("EXISTS (SELECT 1 FROM automation_reviews v WHERE v.sample_id=s.id AND v.audio_id=s.audio_id "
-                    "AND v.outcome=s.label AND v.outcome!='pending')")
-            clauses.append(auto if query.labelled_by == 'auto' else f"s.label!='pending' AND NOT {auto}")
+            clauses.append(LABELLED_BY + "=?")
+            params.append(query.labelled_by)
         where = " WHERE " + " AND ".join(clauses)
         with self.store.transaction() as db:
             require_word(db, word_id)

@@ -106,7 +106,7 @@ class WorkspaceTests(unittest.TestCase):
         with self.store.transaction() as db:
             self.assertEqual(db.execute("PRAGMA foreign_keys").fetchone()[0], 1)
             self.assertEqual(db.execute("PRAGMA journal_mode").fetchone()[0], "wal")
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 20)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 21)
 
 
 class WorkspaceAPITests(unittest.TestCase):

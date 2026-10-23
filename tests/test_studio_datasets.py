@@ -308,7 +308,7 @@ class DatasetTests(unittest.TestCase):
                 self.assertEqual(WorkspaceService(store).get('word').phrase, 'Hello')
                 self.assertEqual(DatasetService(store, JobQueue(store)).list('word').total, 4)
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 20)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 21)
             finally:
                 store.close()
 

@@ -419,6 +419,7 @@ class Sample:
     source: str
     created_at: str
     updated_at: str
+    labelled_by: str | None = None  # 'auto', 'manual', or None while pending
     recording: Recording | None = None
     capture: CaptureMetadata | None = None
 

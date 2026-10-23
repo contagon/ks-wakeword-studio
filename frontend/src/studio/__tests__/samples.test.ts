@@ -76,14 +76,25 @@ describe("provenance-aware sample library", () => {
     expect(ui.get("#studio-content").find('a[href="#/manual?word=a"]').exists()).toBe(false);
   });
   it("replaces the legacy samples mapping with a paginated, source-labelled table", async () => {
+    server.db.samples[1].labelled_by = "auto";
     const ui = await open();
     expect(ui.get("h1").text()).toBe("Samples");
     expect(ui.find("[data-legacy-trainer]").exists()).toBe(false);
-    expect(ui.findAll("thead th").map((th) => th.text())).toEqual(["Sample", "Date", "Label", "Source", "Actions"]);
+    expect(ui.findAll("thead th").map((th) => th.text())).toEqual([
+      "Sample",
+      "Date",
+      "Label",
+      "Label source",
+      "Source",
+      "Actions",
+    ]);
+    expect(row(ui, "s0").get("td[data-caption=Label] .studio-status").classes()).toContain("studio-status-success");
+    expect(row(ui, "s1").get("td[data-caption=Label] .studio-status").classes()).toContain("studio-status-failed");
+    expect(row(ui, "s1").get("td[data-caption='Label source']").text()).toBe("Automatic");
     expect(lists().at(-1)?.url.searchParams.get("offset")).toBe("0");
     expect(ui.findAll("[data-row-id]")).toHaveLength(25);
     const first = row(ui, "s0").text();
-    for (const text of ["positive", "Kitchen satellite", "phrase 0", "mww"]) expect(first).toContain(text);
+    for (const text of ["Positive", "Kitchen satellite", "phrase 0", "mww"]) expect(first).toContain(text);
     expect(first).not.toContain("diagnostic");
     expect(row(ui, "s1").text()).toContain("Hall satellite");
     expect(row(ui, "s1").text()).toContain("close miss");
@@ -143,15 +154,15 @@ describe("provenance-aware sample library", () => {
 
   it("relabels with the row's server revision and applies the acknowledged record", async () => {
     const ui = await open();
-    expect(row(ui, "s2").get("select[data-action=relabel]").element.closest(".sr-only")).toBeNull();
-    await row(ui, "s2").get("select[data-action=relabel]").setValue("discarded");
+    expect(row(ui, "s2").get("[data-relabel=positive]").attributes("aria-pressed")).toBe("true");
+    await row(ui, "s2").get("[data-relabel=discarded]").trigger("click");
     await settle();
     const request = server.mutations().at(-1)!;
     expect([request.url.pathname, request.body]).toEqual([
       "/api/studio/wakewords/a/samples/s2/label",
       { label: "discarded", expected_revision: 2 },
     ]);
-    expect(row(ui, "s2").get("td[data-caption=Label]").text()).toBe("discarded");
+    expect(row(ui, "s2").get("td[data-caption=Label]").text()).toBe("Discarded");
     expect(ui.get("[data-samples-status]").text()).toContain("saved");
   });
 
@@ -159,7 +170,7 @@ describe("provenance-aware sample library", () => {
     const ui = await open();
     server.db.samples.find((s) => s.id === "s4")!.revision = 9;
     const before = lists().length;
-    await row(ui, "s4").get("select[data-action=relabel]").setValue("negative");
+    await row(ui, "s4").get("[data-relabel=negative]").trigger("click");
     await settle();
     expect(ui.get("[data-samples-error]").attributes("role")).toBe("alert");
     expect(ui.get("[data-samples-error]").text()).toContain("changed elsewhere");
@@ -190,17 +201,9 @@ describe("provenance-aware sample library", () => {
     expect(ui.find("[aria-label='Trim audio']").exists()).toBe(false);
   });
 
-  it("deletes only after confirmation and with the server revision", async () => {
+  it("offers no delete; discard is the way to drop a sample", async () => {
     const ui = await open();
-    await row(ui, "s7").get("[data-action=delete]").trigger("click");
-    await ui.get("[data-action=cancel-delete]").trigger("click");
-    await settle();
-    expect(server.mutations()).toHaveLength(0);
-    await row(ui, "s7").get("[data-action=delete]").trigger("click");
-    await ui.get("[data-action=confirm-delete]").trigger("click");
-    await settle();
-    expect(server.mutations().map((r) => r.path)).toEqual(["/api/studio/wakewords/a/samples/s7?expected_revision=1"]);
-    expect(ui.find('[data-row-id="s7"]').exists()).toBe(false);
+    expect(row(ui, "s7").find("[data-action=delete]").exists()).toBe(false);
   });
 
   it("plays inline, one row at a time, through the authorized studio audio URL", async () => {
@@ -234,7 +237,7 @@ describe("provenance-aware sample library", () => {
     stale.release();
     await settle();
     expect(wrapper!.findAll("[data-row-id]").map((r) => r.attributes("data-row-id"))).toEqual(["b1"]);
-    await row(wrapper!, "b1").get("select[data-action=relabel]").setValue("positive");
+    await row(wrapper!, "b1").get("[data-relabel=positive]").trigger("click");
     await settle();
     expect(server.mutations().map((r) => r.url.pathname)).toEqual(["/api/studio/wakewords/b/samples/b1/label"]);
     void ui;

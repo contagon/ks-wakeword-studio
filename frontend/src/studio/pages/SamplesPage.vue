@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import ConfirmDialog from "../components/ConfirmDialog.vue";
 import PageHeader from "../components/PageHeader.vue";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useDeviceRegistry } from "../devices";
 import { studioApi, StudioApiError } from "../api";
 import SampleTrimDialog from "../components/SampleTrimDialog.vue";
 import PaginatedTable from "../components/PaginatedTable.vue";
+import LabelToggle from "../components/LabelToggle.vue";
 import { useWorkspace } from "../workspace";
 import type { Sample, SampleQuery } from "../types";
 import { absoluteTime } from "../time";
@@ -24,7 +24,6 @@ const error = ref("");
 const status = ref("");
 const filters = ref({ search: "", label: "", labelledBy: "", source: "", kind: "", after: "", before: "" });
 const trimTarget = ref<Sample | null>(null);
-const deleteTarget = ref<Sample | null>(null);
 const audio = ref<HTMLAudioElement>();
 const playingId = ref<string | null>(null);
 const loadingAudioId = ref<string | null>(null);
@@ -101,7 +100,6 @@ async function togglePlay(item: Sample): Promise<void> {
 }
 function resetTransient(): void {
   trimTarget.value = null;
-  deleteTarget.value = null;
   stopAudio();
   error.value = "";
 }
@@ -152,10 +150,11 @@ async function save<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<
     return null;
   }
 }
-async function relabel(item: Sample, event: Event): Promise<void> {
-  const label = (event.target as HTMLSelectElement).value as "positive" | "negative" | "discarded";
+async function relabel(item: Sample, label: string): Promise<void> {
   if (label === item.label) return;
-  const updated = await save((signal) => studioApi.label(item.word_id, item.id, label, item.revision, signal));
+  const updated = await save((signal) =>
+    studioApi.label(item.word_id, item.id, label as keyof typeof LABELS, item.revision, signal),
+  );
   if (updated) {
     replace(updated);
     status.value = "Label saved.";
@@ -173,17 +172,6 @@ async function trim(range: { start: number; end: number }): Promise<void> {
     status.value = "Non-destructive trim saved.";
   }
 }
-async function remove(): Promise<void> {
-  const item = deleteTarget.value;
-  if (!item) return;
-  const removed = await save((signal) => studioApi.deleteSample(item.word_id, item.id, item.revision, signal));
-  if (removed !== null) {
-    items.value = items.value.filter((current) => current.id !== item.id);
-    total.value = Math.max(0, total.value - 1);
-    deleteTarget.value = null;
-    status.value = "Sample removed from this visible library.";
-  }
-}
 function filterChanged(): void {
   offset.value = 0;
   void load();
@@ -192,6 +180,8 @@ function rowKind(item: Sample): string {
   return item.recording?.near_miss ? "close miss" : "activation";
 }
 const LABELS = { positive: "Positive", negative: "Negative", discarded: "Discarded" } as const;
+const LABEL_TONES: Record<string, string> = { positive: "success", negative: "failed", pending: "warning" };
+const LABELLED_BY = { auto: "Automatic", manual: "Manual" } as const;
 const SOURCES: Record<string, string> = {
   diagnostic: "Kiosk",
   microphone: "Recorded",
@@ -278,6 +268,7 @@ onBeforeUnmount(() => {
             <th>Sample</th>
             <th>Date</th>
             <th>Label</th>
+            <th>Label source</th>
             <th>Source</th>
             <th>Actions</th>
           </tr>
@@ -291,7 +282,12 @@ onBeforeUnmount(() => {
               >
             </td>
             <td data-caption="Date">{{ absoluteTime(item.recording?.timestamp ?? item.created_at) }}</td>
-            <td data-caption="Label">{{ item.label }}</td>
+            <td data-caption="Label">
+              <span class="studio-status" :class="`studio-status-${LABEL_TONES[item.label] ?? 'muted'}`">{{
+                LABELS[item.label as keyof typeof LABELS] ?? "Pending"
+              }}</span>
+            </td>
+            <td data-caption="Label source">{{ item.labelled_by ? LABELLED_BY[item.labelled_by] : "—" }}</td>
             <td data-caption="Source">
               {{ sourceLabel(item)
               }}<small v-if="item.capture" class="block studio-muted"
@@ -317,20 +313,20 @@ onBeforeUnmount(() => {
                 >
                   {{ loadingAudioId === item.id ? "Loading…" : playingId === item.id ? "Stop" : "Play" }}
                 </button>
-                <label
-                  ><span class="sr-only">Relabel</span
-                  ><select data-action="relabel" :value="item.label" @change="relabel(item, $event)">
-                    <option v-if="item.label === 'pending'" value="pending" disabled>Set label…</option>
-                    <option v-for="(name, value) in LABELS" :key="value" :value="value">{{ name }}</option>
-                  </select></label
-                >
                 <button type="button" data-action="trim" @click="trimTarget = item">Trim</button>
-                <button type="button" data-action="delete" @click="deleteTarget = item">Delete</button>
+                <LabelToggle
+                  class="ml-3"
+                  :model-value="item.label"
+                  :values="Object.keys(LABELS)"
+                  group-label="Relabel"
+                  attribute="data-relabel"
+                  @update:model-value="relabel(item, $event)"
+                />
               </div>
             </td>
           </tr>
           <tr v-if="!items.length">
-            <td colspan="5">No samples match these filters.</td>
+            <td colspan="6">No samples match these filters.</td>
           </tr>
         </tbody>
       </table>
@@ -350,17 +346,5 @@ onBeforeUnmount(() => {
       @save="trim($event)"
       @close="trimTarget = null"
     />
-    <ConfirmDialog
-      :open="!!deleteTarget"
-      title="Remove sample?"
-      label="Confirm sample deletion"
-      confirm-label="Remove"
-      confirm-action="confirm-delete"
-      cancel-action="cancel-delete"
-      @confirm="remove"
-      @cancel="deleteTarget = null"
-    >
-      <p>This hides the sample but retains provenance and completed-run inputs.</p>
-    </ConfirmDialog>
   </section>
 </template>

@@ -447,12 +447,6 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
         runtime.samples.get(sample_id, word_id)
         return runtime.samples.trim(sample_id, body.start_s, body.end_s, body.expected_revision)
 
-    @router.delete("/wakewords/{word_id}/samples/{sample_id}", status_code=204)
-    def delete_sample(word_id: str, sample_id: str, expected_revision: int = Query(..., ge=0)) -> Response:
-        runtime.samples.get(sample_id, word_id)
-        runtime.samples.delete(sample_id, expected_revision)
-        return Response(status_code=204)
-
     @router.get("/wakewords/{word_id}/samples/{sample_id}/audio")
     def sample_audio(word_id: str, sample_id: str, original: bool = False) -> Response:
         data = runtime.samples.audio(sample_id, word_id, original)

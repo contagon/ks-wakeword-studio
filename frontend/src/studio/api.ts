@@ -187,8 +187,6 @@ export const studioApi = {
     post<Sample>(`${samplePath(word, id)}/undo`, { expected_revision: revision }, signal),
   trim: (word: string, id: string, start: number, end: number, revision: number, signal?: AbortSignal) =>
     post<Sample>(`${samplePath(word, id)}/trim`, { start_s: start, end_s: end, expected_revision: revision }, signal),
-  deleteSample: (word: string, id: string, revision: number, signal?: AbortSignal) =>
-    request<void>(`${samplePath(word, id)}${query({ expected_revision: revision })}`, "DELETE", undefined, signal),
   audioUrl: (word: string, id: string, original = false) =>
     `${base}${samplePath(word, id)}/audio${query({ original })}`,
   devices: (signal?: AbortSignal) => get<Device[]>("/devices", undefined, signal),

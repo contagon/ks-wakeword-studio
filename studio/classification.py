@@ -80,7 +80,7 @@ class ClassificationService:
                         if current['label'] != 'pending':
                             raise Conflict('Already reviewed')
                         if outcome != 'pending':
-                            self.samples.apply_change(db, current, outcome, current['audio_id'], 'label')
+                            self.samples.apply_change(db, current, outcome, current['audio_id'], 'label', actor='auto')
                     except (Conflict, NotFound):
                         counts['conflicts'] += 1
                     else:

@@ -399,13 +399,14 @@ class CollectionTests(unittest.TestCase):
             db.execute('ALTER TABLE devices DROP COLUMN url_override')
             db.execute('ALTER TABLE devices DROP COLUMN removed')
             db.execute('ALTER TABLE devices DROP COLUMN name')
+            db.execute('ALTER TABLE sample_history DROP COLUMN actor')
             db.execute("CREATE UNIQUE INDEX one_studio_leader ON devices(role) WHERE role='leader'")
             db.execute('PRAGMA user_version=3')
         self.store = Store.open(self.root)
         self.assertEqual(WorkspaceService(self.store).get(self.word.id).phrase, 'Hello')
         self.assertEqual(DeviceService(self.store).get('a').id, 'a')
         with self.store.transaction() as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 20)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 21)
             self.assertEqual(db.execute('SELECT id FROM recordings').fetchone()[0], recording.id)
 
     def test_scoped_collection_does_not_steal_inferred_matches(self):

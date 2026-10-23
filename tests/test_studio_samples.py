@@ -251,7 +251,7 @@ class SampleAPITests(unittest.TestCase):
         self.runtime.blobs.max_bytes = 10
         self.assertEqual(self.upload().status_code, 422)
 
-    def test_routes_revision_ownership_audio_trim_delete(self):
+    def test_routes_revision_ownership_audio_trim(self):
         sample = self.upload().json()
         url = self.base + '/samples/' + sample['id']
         other_url = f'/api/studio/wakewords/{self.other.id}/samples/{sample["id"]}'
@@ -264,10 +264,7 @@ class SampleAPITests(unittest.TestCase):
         self.assertEqual(self.client.post(url + '/undo', json={'expected_revision': 1}).status_code, 409)
         self.assertEqual(self.client.post(url + '/trim', json={'start_s': 0.1, 'end_s': 0.8, 'expected_revision': 2}).status_code, 200)
         self.assertEqual(self.client.post(url + '/trim', json={'start_s': 0.9, 'end_s': 0.1, 'expected_revision': 3}).status_code, 422)
-        self.assertEqual(self.client.delete(url + '?expected_revision=2').status_code, 409)
-        self.assertEqual(self.client.delete(url + '?expected_revision=3').status_code, 204)
-        self.assertEqual(self.client.get(url + '/audio').status_code, 404)
-        self.assertEqual(self.client.get(self.base + '/samples').json()['total'], 0)
+        self.assertEqual(self.client.delete(url + '?expected_revision=3').status_code, 405)
 
     def test_unmapped_assignment_queue_and_bad_requests(self):
         recording = self.runtime.samples.ingest('a', DiagnosticClip(id='1'), io.BytesIO(wav()), None)
