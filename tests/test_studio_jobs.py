@@ -127,6 +127,7 @@ time.sleep(.5)
         with self.store.transaction() as db:
             db.execute('DROP INDEX studio_jobs_run_number')
             db.execute('ALTER TABLE studio_jobs DROP COLUMN run_number')
+            db.execute('ALTER TABLE publications DROP COLUMN published_at')
             db.execute('PRAGMA user_version=17')
         self.store.close()
         self.store = Store.open(self.root)
@@ -383,7 +384,7 @@ time.sleep(.5)
                 self.assertEqual(WorkspaceService(store).get('word').model_id, 'hello')
                 self.assertEqual(JobQueue(store).list().total, 0)
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 19)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 20)
                     self.assertEqual(db.execute("SELECT role FROM devices WHERE id='device'").fetchone()[0], 'standalone')
             finally:
                 store.close()

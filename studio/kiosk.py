@@ -263,7 +263,8 @@ class KioskClient:
         """User-authorized cache-only deletion/restart, not custom-model deletion.
 
         Caller must verify the desired content manifest first, including on
-        followers. Acknowledgement is not evidence of which bytes inference used.
+        followers, and check restarted before claiming delivery. Acknowledgement
+        alone is not a restart, nor evidence of which bytes inference used.
         """
         self._verify(device)
         data = self.command(device, 'clearWakeWordModels', {})

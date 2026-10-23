@@ -404,9 +404,11 @@ class DeploymentService:
             remote = self.devices.client.model_manifest(device)
             if not all(remote.get(k) == v for k, v in expected.items()):
                 return self._pending(p, now, 'sync_pending' if indirect else 'hash_mismatch', manifest_state='unverified')
-            self.devices.client.refresh_models(device)
+            refresh = self.devices.client.refresh_models(device)
+            if not refresh['restarted']:
+                return self._pending(p, now, 'refresh_pending', error_code='restart_not_confirmed')
             return self._save(p, state='synced' if indirect else 'published', refresh_state='acknowledged',
-                              error_code=None, next_retry=None)
+                               published_at=iso_now(self.clock), error_code=None, next_retry=None)
         except StagingFailure as error:
             code = str(error)
             if code in ('rejected', 'hash_mismatch'):
@@ -426,7 +428,8 @@ class DeploymentService:
 
     def _pending(self, p, now, state, **changes):
         exhausted = p.attempts >= self.max_attempts
-        return self._save(p, state='exhausted' if exhausted else state, error_code=state,
+        error_code = changes.pop('error_code', state)
+        return self._save(p, state='exhausted' if exhausted else state, error_code=error_code,
                           next_retry=None if exhausted else (now + timedelta(seconds=min(3600, 30 * 2 ** (p.attempts - 1)))).isoformat(),
                           **changes)
 

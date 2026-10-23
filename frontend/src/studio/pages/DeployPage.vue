@@ -42,6 +42,7 @@ function stateClass(publication: Publication): string {
         publication.state === "credentials_required" ||
         publication.state === "not_covered" ||
         publication.state === "pending" ||
+        publication.state === "refresh_pending" ||
         publication.state === "quarantined" ||
         publication.state === "staging_blocked"
       ? "studio-status-warning"
@@ -206,6 +207,12 @@ onBeforeUnmount(() => {
               publication.run_number ? `Run #${publication.run_number}` : "Run unavailable"
             }}</span>
           </div>
+          <p v-if="publication.published_at" class="studio-muted text-xs">
+            {{ publication.state === "synced" ? "Synced" : "Published" }}
+            <time :datetime="publication.published_at" :title="absoluteTime(publication.published_at)">{{
+              absoluteTime(publication.published_at)
+            }}</time>
+          </p>
           <p v-if="publication.error_code" class="studio-muted text-xs">
             Retry/error: {{ publication.error_code
             }}<span v-if="publication.next_retry"> · next {{ absoluteTime(publication.next_retry) }}</span>

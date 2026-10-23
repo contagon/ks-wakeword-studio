@@ -165,6 +165,56 @@ describe("Deploy page", () => {
     ui.unmount();
   });
 
+  it.each(["published", "synced"])("shows confirmed %s time under target delivery", async (state) => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) =>
+      String(input).endsWith("/deployment/status")
+        ? Promise.resolve(
+            json([
+              { ...publication("a", state), published_at: "2026-10-20T14:35:00Z", updated_at: "2026-10-21T09:00:00Z" },
+            ]),
+          )
+        : transport(input, init),
+    );
+    const ui = mount(host());
+    await flushPromises();
+    const row = ui.get('[data-device-status="leader"]');
+    const time = row.get("time");
+    expect(time.attributes("datetime")).toBe("2026-10-20T14:35:00Z");
+    expect(time.text()).toBe(
+      new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
+        new Date("2026-10-20T14:35:00Z"),
+      ),
+    );
+    expect(row.text()).toContain(state === "synced" ? "Synced" : "Published");
+    ui.unmount();
+  });
+
+  it("does not mistake a pending retry timestamp for publication time", async () => {
+    const transport = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) =>
+      String(input).endsWith("/deployment/status")
+        ? Promise.resolve(
+            json([
+              {
+                ...publication("a", "refresh_pending"),
+                published_at: null,
+                updated_at: "2026-10-21T09:00:00Z",
+                error_code: "restart_not_confirmed",
+              },
+            ]),
+          )
+        : transport(input, init),
+    );
+    const ui = mount(host());
+    await flushPromises();
+    const row = ui.get('[data-device-status="leader"]');
+    expect(row.find("time").exists()).toBe(false);
+    expect(row.text()).toContain("restart_not_confirmed");
+    expect(row.get(".studio-status").classes()).toContain("studio-status-warning");
+    ui.unmount();
+  });
+
   it.each(["failed", "exhausted", "archive_invalid", "rejected", "hash_mismatch", "role_changed"])(
     "makes %s publication badges visibly failed",
     async (state) => {

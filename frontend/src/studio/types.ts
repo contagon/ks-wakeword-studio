@@ -326,6 +326,7 @@ export interface Publication {
   runtime_state: string;
   error_code: string | null;
   updated_at: string;
+  published_at?: string | null;
   cache_effect: string;
 }
 export interface Pagination {

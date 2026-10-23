@@ -331,6 +331,7 @@ class Publication:
     cache_effect: str = ('Refresh restarts detection, clears downloaded model caches for all engines and may '
                           're-download other selected remote models; selections are unchanged.')
     run_number: int | None = None
+    published_at: str | None = None
 
 
 @dataclass(frozen=True)

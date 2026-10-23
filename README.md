@@ -354,6 +354,13 @@ clears all engines' downloaded-model caches. Other selected remote models may ne
 to be downloaded again. Custom uploads and settings remain intact. File verification
 and refresh acknowledgement are **not** proof of the version used by inference;
 offline, uncredentialed, excluded, and lagging followers are not reported as success.
+Publication now requires the kiosk to report `restarted: true`. Acknowledgements
+with `restarted: false` stay `refresh_pending` with `restart_not_confirmed` and use
+the existing bounded retries, without re-uploading files that already match.
+Under **Deploy > Target delivery**, each kiosk shows its confirmed publication
+date/time (or sync time for followers) in your browser's local time. This is stored
+separately from retry/status timestamps; older records have no historical delivery
+time until republished. Existing historical statuses are not retroactively rechecked.
 Rolling back means publishing an older immutable archive as the new desired version and uploads
 it under the **same stable filenames**; it never edits enabled slots or thresholds.
 Retries follow the latest desired revision, not an obsolete queued version.

@@ -27,6 +27,7 @@ class InProcessKiosk(KioskClient):
         self.roles = {'leader': (True, None), 'solo': (False, None), 'follow': (False, 'leader'),
                       'excluded': (False, 'leader'), 'locked': (False, 'leader')}
         self.reject, self.bad_hash, self.refresh_fail = False, False, False
+        self.restarted = True
         self.slots = ['hello_robot', 'ok_nabu']
         self.loaded = {}
         self.upload_hook = None
@@ -72,8 +73,9 @@ class InProcessKiosk(KioskClient):
                 self.refresh_hook(device.id)
             if self.refresh_fail:
                 raise RemoteUnavailable('refresh offline')
-            self.loaded[device.id] = dict(self.files.get(device.id, {}))
-            return {'removed': 3, 'bytesFreed': 100, 'restarted': True}
+            if self.restarted:
+                self.loaded[device.id] = dict(self.files.get(device.id, {}))
+            return {'removed': 3, 'bytesFreed': 100, 'restarted': self.restarted}
         raise AssertionError('Forbidden/unexpected command: ' + name)
 
     def uploads(self, device=None):
@@ -251,6 +253,90 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(self.client.slots, ['ok_nabu', 'hey_jarvis'])
         self.assertEqual(self.status()['solo'].refresh_state, 'acknowledged')
 
+    def test_restart_false_keeps_direct_and_follower_delivery_pending_until_retry(self):
+        self.client.restarted = False
+        self.train()
+        direct = self.status()['leader']
+        self.assertEqual(direct.state, 'refresh_pending')
+        self.assertEqual(direct.error_code, 'restart_not_confirmed')
+        self.assertEqual(direct.manifest_state, 'verified')
+        self.assertEqual(direct.refresh_state, 'pending')
+        self.assertIsNone(direct.published_at)
+        self.client.files['follow'] = dict(self.client.files['leader'])
+        self.now += timedelta(minutes=1)
+        self.service.retry_due(self.now)
+        follower = self.status()['follow']
+        self.assertEqual(follower.state, 'refresh_pending')
+        self.assertEqual(follower.error_code, 'restart_not_confirmed')
+        self.assertIsNone(follower.published_at)
+        uploads = len(self.client.uploads())
+        self.client.restarted = True
+        self.now += timedelta(minutes=2)
+        self.service.retry_due(self.now)
+        for device, state in [('leader', 'published'), ('solo', 'published'), ('follow', 'synced')]:
+            result = self.status()[device]
+            self.assertEqual(result.state, state)
+            self.assertEqual(result.refresh_state, 'acknowledged')
+            self.assertEqual(result.published_at, '2026-10-18T00:03:00+00:00')
+            self.assertEqual(result.runtime_state, 'unverified')
+        self.assertEqual(len(self.client.uploads()), uploads)
+
+    def test_publication_time_is_confirmed_delivery_not_training_or_status_update_time(self):
+        self.client.refresh_fail = True
+        old = self.train()
+        self.assertIsNone(self.status()['solo'].published_at)
+        self.now += timedelta(hours=1)
+        self.client.refresh_fail = False
+        self.service.retry_due(self.now)
+        delivered = self.status()['solo']
+        self.assertEqual(delivered.published_at, '2026-10-18T01:00:00+00:00')
+        self.now += timedelta(hours=1)
+        self.service._save(delivered, state='inactive')
+        self.assertEqual(self.status()['solo'].published_at, delivered.published_at)
+        self.client.refresh_fail = True
+        self.train()
+        self.assertIsNone(self.status()['solo'].published_at)
+        self.client.refresh_fail = False
+        self.now += timedelta(hours=1)
+        self.service.publish(old.id)
+        self.assertEqual(self.status()['solo'].published_at, '2026-10-18T03:00:00+00:00')
+        with api_client(self.runtime) as client:
+            result = client.get(f'/api/studio/wakewords/{self.word.id}/deployment/status')
+        solo = next(p for p in result.json() if p['device_id'] == 'solo')
+        self.assertEqual(solo['published_at'], '2026-10-18T03:00:00+00:00')
+
+    def test_unconfirmed_restarts_exhaust_retries_without_reuploading(self):
+        self.client.restarted = False
+        self.train()
+        uploads = len(self.client.uploads())
+        for _ in range(8):
+            self.now += timedelta(days=1)
+            self.service.retry_due(self.now)
+        result = self.status()['solo']
+        self.assertEqual(result.state, 'exhausted')
+        self.assertEqual(result.error_code, 'restart_not_confirmed')
+        self.assertEqual(result.refresh_state, 'pending')
+        self.assertIsNone(result.published_at)
+        self.assertEqual(len(self.client.uploads()), uploads)
+
+    def test_v19_upgrade_does_not_invent_historical_publication_dates(self):
+        import sqlite3
+        version = self.train()
+        root = Path(self.temp.name)
+        self.runtime.shutdown()
+        with sqlite3.connect(root / 'studio/studio.sqlite3') as db:
+            db.execute('ALTER TABLE publications DROP COLUMN published_at')
+            db.execute('PRAGMA user_version=19')
+        self.runtime.startup()
+        self.runtime.devices.client = self.client
+        self.service = self.runtime.deployment
+        result = self.status()['solo']
+        self.assertEqual(result.state, 'published')
+        self.assertIsNone(result.published_at)
+        self.now += timedelta(hours=1)
+        self.service.publish(version.id)
+        self.assertEqual(self.status()['solo'].published_at, '2026-10-18T01:00:00+00:00')
+
     def test_atomic_outbox_survives_missing_callback_and_new_service_recovers(self):
         self.runtime.workers.completion_hooks.clear()
         version = self.train()
@@ -405,7 +491,7 @@ class DeploymentTests(unittest.TestCase):
             store = Store.open(root)
             try:
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 19)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 20)
                     self.assertEqual(db.execute('SELECT phrase FROM wakewords').fetchone()[0], 'Retained')
                     self.assertEqual(db.execute('SELECT count(*) FROM publications').fetchone()[0], 0)
             finally:
@@ -634,6 +720,7 @@ class DeploymentTests(unittest.TestCase):
             db.execute("CREATE UNIQUE INDEX one_studio_leader ON devices(role) WHERE role='leader'")
             db.execute('DROP INDEX studio_jobs_run_number')
             db.execute('ALTER TABLE studio_jobs DROP COLUMN run_number')
+            db.execute('ALTER TABLE publications DROP COLUMN published_at')
             db.execute('PRAGMA user_version=9')
         self.runtime.startup()
         self.runtime.devices.client = self.client
@@ -641,7 +728,7 @@ class DeploymentTests(unittest.TestCase):
         with self.runtime.devices.store.transaction() as db:
             names = db.execute("SELECT filenames FROM deployment_staging WHERE device_id='leader' AND word_id=?", (self.word.id,)).fetchone()
             self.assertEqual(set(json.loads(names[0])), {'hello_robot.json', 'hello_robot.tflite'})
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 19)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 20)
         other = self.other_version()
         self.service.publish(other.id)
         self.assertEqual(self.client.files['leader']['microwakeword/hello_robot.tflite'],

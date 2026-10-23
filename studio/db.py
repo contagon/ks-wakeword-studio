@@ -33,6 +33,7 @@ MIGRATIONS = (
     "schema_dataset_preferences.sql",
     "schema_training_run_numbers.sql",
     "schema_drop_unused.sql",
+    "schema_publication_time.sql",
 )
 
 
