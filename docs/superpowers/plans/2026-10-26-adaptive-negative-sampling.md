@@ -46,12 +46,12 @@
 - `personal_negative_share(family_count: int) -> float` in `cli/dataset_config.py` returns zero at count zero and the agreed curve otherwise; rejects negative counts.
 - Training YAML retains a `negative_sampling` metadata mapping with family count, target share, effective share and combined negative weight. Engine feature rows retain their existing schema.
 
-- [ ] **Step 1: Write failing tests.** Exercise actual configuration generation and shell forwarding, not source-string assertions. Pin personal shares at 29 families (`0.13799126637554585`), 200 (`0.25`) and 276 (`0.2739495798319328`). Check monotonicity and upper bound at a large count, combined weight 37, unchanged 2/3 positive weights and 1.25 personal loss penalty. Cover zero families, duplicate family IDs, held-out negatives, downloaded subsets, evaluation-only personal pools, personal-only selection, and missing/negative count errors. Extend the fingerprint regression to compare adapter version 3 against the new snapshot.
-- [ ] **Step 2: Verify red.** Run `.venv-test/bin/python -m pytest -q tests/test_studio_negative_sampling.py tests/test_studio_positive_sampling.py tests/test_studio_training_cli.py tests/test_studio_training.py`; confirm failures expose the absent adaptive behavior.
-- [ ] **Step 3: Implement.** Use the interfaces above. For mixed pools, personal weight is `37 * target_share`; distribute the remaining weight proportionately among selected downloaded training providers. With only one kind of negative pool, assign it all 37. Retain evaluation-only feature providers at zero sampling weight. Do not manufacture providers if neither training pool exists; preserve existing validation responsibilities. Reject missing/negative family counts when personal training features are usable, and reject inconsistent positive counts without usable personal training features. Log family count and target/effective shares. Increment adapter fingerprint version to 4.
-- [ ] **Step 4: Verify green.** Rerun the focused command, `just test`, `just e2e`, `bash -n cli/wake_word_sample_trainer`, and `git diff --check`. Inspect generated YAML in tests for effective ratios and unmodified penalties. No GPU training or deployment is authorized by this plan.
-- [ ] **Step 5: Review and document.** Request a read-only review of the implementation diff; resolve blocking findings. Update the recommendations document to distinguish this implementation from untested real-world effectiveness.
-- [ ] **Step 6: Commit.** Commit only the adaptive-sampling changes and related tests/docs on `false-positives`. Do not merge or push without a separate request.
+- [x] **Step 1: Write failing tests.** Exercise actual configuration generation and shell forwarding, not source-string assertions. Pin personal shares at 29 families (`0.13799126637554585`), 200 (`0.25`) and 276 (`0.2739495798319328`). Check monotonicity and upper bound at a large count, combined weight 37, unchanged 2/3 positive weights and 1.25 personal loss penalty. Cover zero families, duplicate family IDs, held-out negatives, downloaded subsets, evaluation-only personal pools, personal-only selection, and missing/negative count errors. Extend the fingerprint regression to compare adapter version 3 against the new snapshot.
+- [x] **Step 2: Verify red.** Run `.venv-test/bin/python -m pytest -q tests/test_studio_negative_sampling.py tests/test_studio_positive_sampling.py tests/test_studio_training_cli.py tests/test_studio_training.py`; confirm failures expose the absent adaptive behavior.
+- [x] **Step 3: Implement.** Use the interfaces above. For mixed pools, personal weight is `37 * target_share`; distribute the remaining weight proportionately among selected downloaded training providers. With only one kind of negative pool, assign it all 37. Retain evaluation-only feature providers at zero sampling weight. Do not manufacture providers if neither training pool exists; preserve existing validation responsibilities. Reject missing/negative family counts when personal training features are usable, and reject inconsistent positive counts without usable personal training features. Log family count and target/effective shares. Increment adapter fingerprint version to 4.
+- [x] **Step 4: Verify green.** Rerun the focused command, `just test`, `just e2e`, `bash -n cli/wake_word_sample_trainer`, and `git diff --check`. Inspect generated YAML in tests for effective ratios and unmodified penalties. No GPU training or deployment is authorized by this plan.
+- [x] **Step 5: Review and document.** Request a read-only review of the implementation diff; resolve blocking findings. Update the recommendations document to distinguish this implementation from untested real-world effectiveness.
+- [x] **Step 6: Commit.** Commit only the adaptive-sampling changes and related tests/docs on `false-positives`. Do not merge or push without a separate request.
 
 ## Execution Checklist
 
@@ -59,4 +59,12 @@
 - [x] Inspect the current adapter, config generator and training tests.
 - [x] Write and self-review this implementation plan.
 - [x] Confirm execution approach and whether to work in an isolated worktree (inline on `false-positives`, as approved).
-- [ ] Complete Task 1 and report verification evidence.
+- [x] Complete Task 1 and report verification evidence.
+
+## Completion evidence
+
+- Implementation: `fae09b2`.
+- Initial focused run: 17 expected failures; final focused run: 76 passed.
+- Full checks: 508 Python passed/1 skipped; 215 frontend passed; 19 browser passed/1 skipped. Build, type-check, frontend formatting, Bash syntax and changed-file whitespace checks passed.
+- Fresh read-only review: no critical, important or minor findings; confirmed installed-engine compatibility of floating-point weights and retained YAML metadata.
+- Scope remains adaptive weighting only. Existing validation governs corrupt downloaded data and malformed manifests. No retraining, deployment, push or merge was performed.
