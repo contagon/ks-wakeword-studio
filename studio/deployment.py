@@ -125,7 +125,7 @@ class DeploymentService:
         self._enroll(db, version.word_id, version.id, revision)
 
     def _enroll(self, db, word_id, version_id, revision):
-        for row in db.execute('SELECT id FROM devices').fetchall():
+        for row in db.execute('SELECT id FROM devices WHERE removed=0').fetchall():
             db.execute("INSERT OR IGNORE INTO publications(word_id,device_id,desired_version,revision,state,updated_at) "
                        "VALUES (?,?,?,?,'pending',?)", (word_id, row[0], version_id, revision, iso_now(self.clock)))
         # Terminal observations must not outlive current registry coverage.
@@ -133,7 +133,7 @@ class DeploymentService:
         # removed followers just to discover that they are no longer eligible.
         rows = db.execute('SELECT p.*,d.active,d.role,d.model_eligible,b.reason staging_reason FROM publications p '
                           'JOIN devices d ON d.id=p.device_id LEFT JOIN deployment_staging_blocks b ON b.device_id=p.device_id '
-                          'WHERE p.word_id=?', (word_id,)).fetchall()
+                          'WHERE p.word_id=? AND d.removed=0', (word_id,)).fetchall()
         for row in rows:
             # Quarantine belongs to the stable device identity, not its current
             # fleet role. Neither profile edits nor membership changes release it.
@@ -157,7 +157,7 @@ class DeploymentService:
         # changes reopen these states; exhausted remote retries stay bounded.
         db.execute("UPDATE publications SET state='pending',attempts=0,next_retry=NULL WHERE word_id=? AND "
                    "state IN ('not_covered','inactive') AND device_id IN "
-                   "(SELECT id FROM devices WHERE active=1 AND (role!='follower' OR model_eligible=1))", (word_id,))
+                   "(SELECT id FROM devices WHERE removed=0 AND active=1 AND (role!='follower' OR model_eligible=1))", (word_id,))
 
     def _reconcile(self):
         # Successful versions are discovered in archive insertion order, not
@@ -257,6 +257,7 @@ class DeploymentService:
             require_word(db, word_id)
             return [Publication(**dict(row)) for row in db.execute(
                 'SELECT p.*,j.run_number FROM publications p '
+                'JOIN devices d ON d.id=p.device_id AND d.removed=0 '
                 'LEFT JOIN model_versions v ON v.id=p.desired_version AND v.word_id=p.word_id '
                 'LEFT JOIN studio_jobs j ON j.id=v.run_id '
                 'WHERE p.word_id=? ORDER BY p.device_id', (word_id,))]
@@ -444,8 +445,8 @@ class DeploymentService:
 
     def _run_due(self, now, word_id=None):
         with self.store.transaction() as db:
-            rows = db.execute('SELECT p.* FROM publications p JOIN devices d ON d.id=p.device_id' +
-                              (' WHERE p.word_id=?' if word_id else '') +
+            rows = db.execute('SELECT p.* FROM publications p JOIN devices d ON d.id=p.device_id WHERE d.removed=0' +
+                              (' AND p.word_id=?' if word_id else '') +
                               " ORDER BY p.word_id, (d.role='follower'), p.device_id", (word_id,) if word_id else ()).fetchall()
         result = []
         for row in rows:

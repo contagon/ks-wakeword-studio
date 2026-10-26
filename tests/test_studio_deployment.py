@@ -699,6 +699,51 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(self.status()['follow'].refresh_state, 'pending')
         self.assertEqual(self.client.calls, [])
 
+    def test_deleted_kiosk_disappears_immediately_and_is_not_reenrolled_or_retried(self):
+        self.client.offline.add('solo')
+        version = self.train()
+        self.assertIn('solo', self.status())
+        with api_client(self.runtime) as api:
+            self.assertEqual(api.delete('/api/studio/devices/solo').status_code, 204)
+            response = api.get(f'/api/studio/wakewords/{self.word.id}/deployment/status')
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn('solo', {p['device_id'] for p in response.json()})
+        self.client.calls.clear()
+        self.service.retry_due(self.now + timedelta(days=1))
+        self.assertNotIn('solo', self.status())
+        self.assertFalse(any(device == 'solo' for device, _, _ in self.client.calls))
+        self.service.publish(version.id)
+        self.assertNotIn('solo', self.status())
+        with self.runtime.jobs.store.transaction() as db:
+            self.assertFalse(db.execute("SELECT 1 FROM publications WHERE device_id='solo'").fetchone())
+            self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(), [])
+
+    def test_deleted_leader_and_its_followers_are_excluded_from_deployment(self):
+        version = self.train()
+        self.runtime.devices.remove('leader')
+        self.assertEqual(set(self.status()), {'solo'})
+        self.client.calls.clear()
+        self.service.retry_due(self.now + timedelta(days=1))
+        self.service.publish(version.id)
+        self.assertEqual(set(self.status()), {'solo'})
+        self.assertTrue(all(device == 'solo' for device, _, _ in self.client.calls))
+
+    def test_deployment_never_enrolls_previously_deleted_kiosks_but_retains_staging_safety(self):
+        self.runtime.devices.remove('solo')
+        self.train()
+        self.assertNotIn('solo', self.status())
+        self.assertFalse(any(device == 'solo' for device, _, _ in self.client.calls))
+        with self.runtime.jobs.store.transaction() as db:
+            self.assertFalse(db.execute("SELECT 1 FROM publications WHERE device_id='solo'").fetchone())
+            db.execute('INSERT INTO deployment_staging VALUES (?,?,?,?)',
+                       ('solo', self.word.id, json.dumps(['hello_robot.json']), 1))
+            db.execute("INSERT INTO deployment_staging_blocks VALUES ('solo','staging_unowned')")
+        self.service.reconcile()
+        self.assertNotIn('solo', self.status())
+        with self.runtime.jobs.store.transaction() as db:
+            self.assertTrue(db.execute("SELECT 1 FROM deployment_staging WHERE device_id='solo'").fetchone())
+            self.assertTrue(db.execute("SELECT 1 FROM deployment_staging_blocks WHERE device_id='solo'").fetchone())
+
     def test_no_discard_workaround_for_owned_optional_file_absent_from_current_desired(self):
         version = self.train()
         with self.runtime.devices.store.transaction() as db:
