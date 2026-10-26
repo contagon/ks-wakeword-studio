@@ -1,0 +1,301 @@
+<script setup lang="ts">
+import PageHeader from "../components/PageHeader.vue";
+import { absoluteTime } from "../time";
+import { computed, onBeforeUnmount, ref, toRaw, watch } from "vue";
+import { studioApi } from "../api";
+import type { AutomationSettings, AutomationStatus } from "../types";
+import { useWorkspace } from "../workspace";
+import { useJobQueue } from "../jobs";
+import AutomationScheduleFields from "../components/AutomationScheduleFields.vue";
+import NotificationSettings from "../components/NotificationSettings.vue";
+
+const workspace = useWorkspace();
+const jobs = useJobQueue();
+const wordId = computed(() => workspace.selectedId.value);
+const settings = ref<AutomationSettings | null>(null);
+const status = ref<AutomationStatus | null>(null);
+const loading = ref(false),
+  saving = ref(false),
+  error = ref(""),
+  notice = ref("");
+let request: AbortController | undefined;
+let mutation: AbortController | undefined;
+let generation = 0;
+const classifying = ref(false);
+// Runs use the saved rules, so unsaved rule edits must be saved first.
+const classificationUnsaved = computed(
+  () => JSON.stringify(settings.value?.classification) !== JSON.stringify(status.value?.settings.classification),
+);
+async function classifyNow() {
+  const id = wordId.value;
+  if (!id || classifying.value) return;
+  classifying.value = true;
+  error.value = "";
+  notice.value = "";
+  try {
+    jobs.track(await studioApi.classify(id));
+    if (wordId.value === id) notice.value = "Classification queued. Follow it in the job queue.";
+  } catch (cause) {
+    if (wordId.value === id) error.value = cause instanceof Error ? cause.message : "Classification was not started.";
+  } finally {
+    classifying.value = false;
+  }
+}
+const RULE_ROWS = [
+  {
+    kind: "Activation",
+    cells: [
+      { key: "confirm_activations", heard: "the phrase", label: "Positive" },
+      { key: "auto_negatives", heard: "something else", label: "Negative" },
+    ],
+  },
+  {
+    kind: "Close miss",
+    cells: [
+      { key: "promote_close_misses", heard: "the phrase", label: "Positive" },
+      { key: "near_miss_negatives", heard: "something else", label: "Negative" },
+    ],
+  },
+] as const;
+const deploymentMode = computed(() =>
+  settings.value?.deployment.enabled
+    ? settings.value.deployment_policy.after_training
+      ? "Scheduled + after training"
+      : "Scheduled"
+    : settings.value?.deployment_policy.after_training
+      ? "After training"
+      : "Manual only",
+);
+function stageStatus(kind: "scrape" | "classify" | "train" | "deploy"): string {
+  const schedule = status.value?.schedules.find((s) => s.scope === `${kind}:${wordId.value}`);
+  const job = status.value?.last_jobs[kind];
+  const skipped = job && "skipped" in job.result && job.result.skipped;
+  const result = job
+    ? `Last run: ${skipped ? "skipped" : job.status}${job.finished_at ? ` · ${absoluteTime(job.finished_at)}` : ""}`
+    : "No runs yet";
+  return `${result} · ${schedule?.enabled ? `Next: ${absoluteTime(schedule.next_run_at)}` : "Not scheduled"}`;
+}
+async function load() {
+  request?.abort();
+  mutation?.abort();
+  const controller = new AbortController();
+  request = controller;
+  const token = ++generation,
+    id = wordId.value;
+  settings.value = null;
+  status.value = null;
+  saving.value = false;
+  error.value = "";
+  notice.value = "";
+  loading.value = Boolean(id);
+  if (!id) return;
+  try {
+    const result = await studioApi.automation(id, controller.signal);
+    if (generation !== token || controller.signal.aborted) return;
+    status.value = result;
+    settings.value = structuredClone(result.settings);
+  } catch (cause) {
+    if (generation === token && !controller.signal.aborted)
+      error.value = cause instanceof Error ? cause.message : "Unable to load automation.";
+  } finally {
+    if (generation === token) loading.value = false;
+  }
+}
+async function save() {
+  if (!settings.value || !wordId.value || saving.value || loading.value) return;
+  mutation?.abort();
+  const controller = new AbortController();
+  mutation = controller;
+  const id = wordId.value,
+    token = generation;
+  const snapshot = structuredClone(toRaw(settings.value));
+  saving.value = true;
+  error.value = "";
+  notice.value = "";
+  try {
+    const result = await studioApi.saveAutomation(id, snapshot, controller.signal);
+    if (generation !== token || controller.signal.aborted) return;
+    status.value = result;
+    settings.value = structuredClone(result.settings);
+    notice.value = "Automation settings saved.";
+    await workspace.refreshSelected();
+  } catch (cause) {
+    if (generation === token && !controller.signal.aborted)
+      error.value = cause instanceof Error ? cause.message : "Settings were not saved.";
+  } finally {
+    if (generation === token) saving.value = false;
+  }
+}
+watch(
+  wordId,
+  () => {
+    void load();
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => {
+  generation++;
+  request?.abort();
+  mutation?.abort();
+});
+</script>
+
+<template>
+  <section>
+    <PageHeader
+      title="Automate"
+      description="Collection, classification, training, and deployment for the selected workspace."
+    />
+    <p v-if="!wordId" class="studio-card">Choose a wakeword to configure automation.</p>
+    <p v-if="loading" role="status">Loading automation…</p>
+    <p v-if="error" class="studio-note" role="alert">
+      {{ error }} <button v-if="!settings" @click="load">Retry</button>
+    </p>
+    <p v-if="notice" class="studio-note" role="status">{{ notice }}</p>
+    <form v-if="settings" class="grid gap-4" @submit.prevent="save">
+      <section class="studio-card">
+        <div class="studio-section-header mb-2">
+          <h2>Automatic collection</h2>
+          <label class="studio-checkbox-label"
+            ><input v-model="settings.collection.enabled" name="collection-enabled" type="checkbox" />Enabled</label
+          >
+        </div>
+        <p class="studio-muted">
+          Collect recordings mapped to <strong>{{ workspace.selected.value?.phrase ?? "this workspace" }}</strong> from
+          registered kiosks. Existing recordings are preserved when disabled.
+        </p>
+        <AutomationScheduleFields v-model="settings.collection" prefix="collection" />
+        <p class="studio-muted text-xs mt-3">{{ stageStatus("scrape") }}</p>
+      </section>
+      <section class="studio-card">
+        <div class="studio-section-header mb-2">
+          <h2>Automatic classification</h2>
+          <label class="studio-checkbox-label"
+            ><input
+              v-model="settings.classification.enabled"
+              name="classification-enabled"
+              type="checkbox"
+            />Enabled</label
+          >
+        </div>
+        <p class="studio-muted">Review pending kiosk audio conservatively. Uncertain clips remain for manual review.</p>
+        <p data-classification-method class="studio-muted text-xs mt-2">
+          Each clip is checked in order. Clips with no speech (Silero VAD) are <em>something else</em>. If Whisper hears
+          the wake phrase, the clip <em>heard the phrase</em>. Otherwise Whisper listens again, told to expect the
+          phrase: if it still doesn't hear it, the clip is <em>something else</em>. If it only hears the phrase when
+          told to expect it, the clip is <em>unclear</em>, because Whisper also invents the phrase over noise when
+          primed this way.
+        </p>
+        <div class="grid gap-3 sm:grid-cols-2 mt-3">
+          <label
+            >Run<select v-model="settings.classification.trigger" name="classification-trigger">
+              <option value="after_collection">After collection</option>
+              <option value="schedule">On a schedule</option>
+            </select></label
+          >
+        </div>
+        <AutomationScheduleFields
+          v-if="settings.classification.trigger === 'schedule'"
+          v-model="settings.classification_schedule"
+          prefix="classification"
+        />
+        <div class="grid gap-2 mt-4">
+          <h3>Classification rules</h3>
+          <table data-classification-rules class="studio-rule-grid text-sm">
+            <thead>
+              <tr>
+                <th>Kiosk clip</th>
+                <th>Heard the phrase</th>
+                <th>Heard something else</th>
+                <th>Unclear</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in RULE_ROWS" :key="row.kind">
+                <th scope="row">{{ row.kind }}</th>
+                <td v-for="cell in row.cells" :key="cell.key">
+                  <label class="studio-checkbox-label"
+                    ><input
+                      v-model="settings.classification[cell.key]"
+                      :name="cell.key"
+                      :aria-label="`${row.kind}, heard ${cell.heard}: label ${cell.label}`"
+                      type="checkbox"
+                    />{{ cell.label }}</label
+                  >
+                </td>
+                <td class="studio-muted">Pending</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="studio-muted text-xs">
+            Checked cells apply their label automatically; unchecked cells stay pending for review. No audio is
+            automatically deleted.
+          </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 mt-3">
+          <button
+            type="button"
+            data-action="classify-now"
+            :disabled="classifying || classificationUnsaved"
+            @click="classifyNow"
+          >
+            {{ classifying ? "Starting…" : "Run classification now" }}
+          </button>
+          <span class="studio-muted text-xs">{{
+            classificationUnsaved ? "Save your rule changes to run with them." : stageStatus("classify")
+          }}</span>
+        </div>
+      </section>
+      <div class="grid gap-4 lg:grid-cols-2">
+        <section class="studio-card">
+          <div class="studio-section-header mb-2">
+            <h2>Automatic training</h2>
+            <label class="studio-checkbox-label"
+              ><input v-model="settings.training.enabled" name="training-enabled" type="checkbox" />Enabled</label
+            >
+          </div>
+          <p class="studio-muted">Create an archived model from reviewed and selected inputs.</p>
+          <AutomationScheduleFields v-model="settings.training" prefix="training" /><label
+            class="studio-checkbox-label my-3"
+            ><input v-model="settings.skip_unchanged" type="checkbox" />Skip when inputs are unchanged</label
+          >
+          <p class="studio-note text-xs">
+            Training and deployment are separate. Training alone does not publish a model.
+          </p>
+          <p class="studio-muted text-xs mt-3">{{ stageStatus("train") }}</p>
+        </section>
+        <section class="studio-card">
+          <div class="studio-section-header mb-2">
+            <h2>Automatic deployment</h2>
+            <span class="studio-status studio-status-muted">{{ deploymentMode }}</span>
+          </div>
+          <p class="studio-muted">Publish eligible archives to your registered fleet targets.</p>
+          <label class="studio-checkbox-label my-3"
+            ><input v-model="settings.deployment_policy.after_training" name="after-training" type="checkbox" />Deploy
+            after successful training</label
+          >
+          <p class="studio-muted text-xs">Optional. Failed, cancelled, or skipped runs do not trigger deployment.</p>
+          <label class="studio-checkbox-label my-3"
+            ><input v-model="settings.deployment.enabled" name="deployment-enabled" type="checkbox" />Enable scheduled
+            deployment</label
+          ><AutomationScheduleFields
+            v-if="settings.deployment.enabled"
+            v-model="settings.deployment"
+            prefix="deployment"
+          />
+          <p class="studio-muted text-xs mt-3">
+            Publish the latest new eligible archive; skip if there is nothing new. Manual rollbacks are retained until a
+            new archive is available.
+          </p>
+          <p class="studio-muted text-xs mt-3">{{ stageStatus("deploy") }}</p>
+        </section>
+      </div>
+      <div class="studio-form-footer">
+        <button type="submit" class="studio-primary" :aria-busy="saving" :disabled="saving || loading">
+          {{ saving ? "Saving…" : "Save automation settings" }}
+        </button>
+      </div>
+    </form>
+    <NotificationSettings :word-id="wordId" :phrase="workspace.selected.value?.phrase" />
+  </section>
+</template>

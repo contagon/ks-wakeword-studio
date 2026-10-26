@@ -1,0 +1,134 @@
+from dataclasses import asdict, replace
+
+import pytest
+
+from studio.automation import settings_from_dict
+from studio.models import NotFound, ValidationError
+from studio.runtime import StudioRuntime
+from studio_harness import api_client
+
+
+def test_new_workspace_automation_defaults(tmp_path):
+    runtime = StudioRuntime(tmp_path)
+    try:
+        word = runtime.workspaces.create('Hey Cedar', 'en')
+        assert hasattr(runtime, 'automation'), 'Workspace automation service is missing'
+        status = runtime.automation.get(word.id)
+        settings = status.settings
+        assert settings.collection.cron == '*/30 * * * *'
+        assert settings.training.cron == '0 2 * * *'
+        assert settings.deployment.cron == '0 4 * * *'
+        # Settings saved while Parakeet existed still load.
+        assert settings_from_dict({**asdict(settings), 'classification': {**asdict(settings.classification),
+                                                                         'engine': 'parakeet_onnx'}}) == settings
+        assert settings.classification.auto_negatives is True
+        assert settings.classification.promote_close_misses is False
+        assert not any(s.enabled for s in (settings.collection, settings.training, settings.deployment))
+        assert not settings.classification.enabled
+        assert not settings.deployment_policy.after_training
+        with pytest.raises(NotFound):
+            runtime.automation.get('missing')
+    finally:
+        runtime.shutdown()
+
+
+def test_settings_roundtrip_isolated_and_strict(tmp_path):
+    runtime = StudioRuntime(tmp_path)
+    try:
+        a = runtime.workspaces.create('Cedar', 'en')
+        b = runtime.workspaces.create('Maple', 'de')
+        assert hasattr(runtime, 'automation'), 'Workspace automation service is missing'
+        original = runtime.automation.get(a.id).settings
+        changed = replace(original, collection=replace(original.collection, enabled=True, timezone='Europe/Berlin'),
+                          classification=replace(original.classification, enabled=True, trigger='schedule'))
+        runtime.automation.save(a.id, changed)
+        assert runtime.automation.get(b.id).settings.collection.enabled is False
+        for invalid in (replace(changed, collection=replace(changed.collection, cron='invalid')),
+                        replace(changed, classification=replace(changed.classification, trigger='unknown')),
+                        replace(changed, collection=replace(changed.collection, enabled=1))):
+            with pytest.raises(ValidationError):
+                runtime.automation.save(a.id, invalid)
+        assert runtime.automation.get(a.id).settings == changed
+        runtime.shutdown()
+        runtime = StudioRuntime(tmp_path)
+        assert runtime.automation.get(a.id).settings == changed
+    finally:
+        runtime.shutdown()
+
+
+def test_upgrade_preserves_training_disables_global_scrape(tmp_path):
+    runtime = StudioRuntime(tmp_path)
+    word = runtime.workspaces.create('Cedar', 'en')
+    runtime.schedules.save('train:' + word.id, '0 3 * * *', 'UTC', True)
+    runtime.schedules.save('scrape', '*/15 * * * *', 'UTC', True)
+    queued = runtime.jobs.enqueue('scrape', None, {})
+    with runtime.jobs.store.transaction() as db:
+        db.execute("UPDATE studio_jobs SET schedule_scope='scrape' WHERE id=?", (queued.id,))
+        # Simulate the prior schema while retaining its existing tables.
+        db.execute('DROP TABLE studio_dataset_preferences')
+        db.execute('CREATE TABLE studio_dataset_selections (word_id TEXT NOT NULL REFERENCES wakewords(id), dataset_id TEXT NOT NULL, PRIMARY KEY(word_id, dataset_id))')
+        db.execute('DROP TABLE sample_capture_metadata')
+        db.execute('DROP TABLE IF EXISTS automation_events')
+        db.execute('DROP TABLE IF EXISTS automation_reviews')
+        db.execute('DROP TABLE IF EXISTS workspace_automation')
+        db.execute('DROP INDEX one_studio_leader')
+        db.execute('ALTER TABLE devices DROP COLUMN url_override')
+        db.execute('ALTER TABLE devices DROP COLUMN removed')
+        db.execute('ALTER TABLE devices DROP COLUMN name')
+        db.execute('DROP INDEX studio_jobs_run_number')
+        db.execute('ALTER TABLE studio_jobs DROP COLUMN run_number')
+        db.execute('ALTER TABLE publications DROP COLUMN published_at')
+        db.execute('ALTER TABLE sample_history DROP COLUMN actor')
+        db.execute("CREATE UNIQUE INDEX one_studio_leader ON devices(role) WHERE role='leader'")
+        db.execute('PRAGMA user_version=12')
+    runtime.shutdown()
+    runtime = StudioRuntime(tmp_path)
+    try:
+        assert hasattr(runtime, 'automation'), 'Workspace automation service is missing'
+        settings = runtime.automation.get(word.id).settings
+        assert settings.training.enabled
+        assert settings.training.cron == '0 3 * * *'
+        assert settings.collection.cron == '*/15 * * * *'
+        assert not settings.collection.enabled
+        assert not next(s for s in runtime.schedules.list() if s.scope == 'scrape').enabled
+        assert runtime.jobs.get(queued.id).status == 'cancelled'
+    finally:
+        runtime.shutdown()
+
+
+def test_delete_removes_only_target_automation(tmp_path):
+    runtime = StudioRuntime(tmp_path)
+    try:
+        a = runtime.workspaces.create('Cedar', 'en')
+        b = runtime.workspaces.create('Maple', 'en')
+        assert hasattr(runtime, 'automation'), 'Workspace automation service is missing'
+        runtime.automation.save(a.id, runtime.automation.get(a.id).settings)
+        runtime.automation.save(b.id, runtime.automation.get(b.id).settings)
+        runtime.workspaces.delete(a.id)
+        assert runtime.automation.get(b.id).settings.collection.enabled is False
+        with runtime.jobs.store.transaction() as db:
+            assert not db.execute('SELECT 1 FROM workspace_automation WHERE word_id=?', (a.id,)).fetchone()
+            assert not db.execute('SELECT 1 FROM studio_schedules WHERE scope LIKE ?', ('%:' + a.id,)).fetchone()
+    finally:
+        runtime.shutdown()
+
+
+def test_automation_api_roundtrip_and_strict_nested_validation(tmp_path):
+    runtime = StudioRuntime(tmp_path)
+    try:
+        word = runtime.workspaces.create('Cedar', 'en')
+        with api_client(runtime) as api:
+            path = f'/api/studio/wakewords/{word.id}/automation'
+            response = api.get(path)
+            assert response.status_code == 200
+            settings = response.json()['settings']
+            settings['collection']['enabled'] = True
+            assert api.put(path, json=settings).status_code == 200
+            settings['classification']['trigger'] = 'bogus-sensitive-input'
+            rejected = api.put(path, json=settings)
+            assert rejected.status_code == 422
+            assert 'bogus-sensitive-input' not in rejected.text
+            assert api.get(path).json()['settings']['classification']['trigger'] == 'after_collection'
+            assert api.get('/api/studio/wakewords/missing/automation').status_code == 404
+    finally:
+        runtime.shutdown()

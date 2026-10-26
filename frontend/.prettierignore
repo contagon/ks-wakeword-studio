@@ -1,0 +1,7 @@
+# Third-party code kept byte-for-byte with upstream.
+src/studio/testing/vendor/
+node_modules/
+test-results/
+playwright-report/
+.vitest/
+package-lock.json

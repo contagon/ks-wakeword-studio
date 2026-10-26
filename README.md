@@ -9,9 +9,33 @@
   </a>
 </p>
 
-Train paired microWakeWord and openWakeWord models in Docker with NVIDIA/CUDA acceleration, modern multilingual MWW TTS ensembles, device-captured samples, reviewed false-wake negatives, live training logs, and local wake-word links for Tater Native satellites.
+Kiosk Wakeword Studio manages independent wakeword workspaces, collects rolling kiosk diagnostics, supports manual review and synthetic batches, schedules NVIDIA/CUDA training, and publishes reversible archived microWakeWord models through one fleet leader plus standalone kiosks.
 
 Real samples come from device-captured wake audio, close misses, or manual uploads. Every saved sample is normalized to `16 kHz / mono / 16-bit PCM WAV` before training.
+
+### Record or upload samples
+
+Open **Data → Manual**, select a wakeword and choose **Positive** or **Negative**.
+Click **Start recording** / **Stop recording**, or press **Space** when focus is
+outside another control. Recording uses your browser's current microphone and
+does not stop on silence (a 10-minute safety limit applies).
+If a delayed browser timer overshoots that limit, the training preview is capped
+at ten minutes while saving still retains the complete original recording.
+
+After stopping, VAD suggests a trim around all detected speech, retaining interior
+pauses. Play the selection (**Space**), adjust its bounds, then **Save sample**
+(**K** or **Enter**), or **Retake** (**D**).
+If speech detection is unavailable or finds no speech, the full clip stays selected;
+negative background-noise recordings can still be saved. Originals are retained,
+and saved recordings appear alongside scraped data in **Samples**, with a
+**Recorded** source filter and capture metadata.
+
+The upload form is at the top of **Manual**, with its own positive/negative label. Uploads
+are not automatically trimmed and retain their **Import** provenance.
+
+Browser microphone access requires **HTTPS** or **localhost**. For remote use,
+use a trusted HTTPS connection or forward Studio to your local machine and open
+it through localhost; a plain HTTP VPN/LAN address will normally block recording.
 
 ---
 
@@ -24,7 +48,7 @@ docker pull ghcr.io/tatertotterson/microwakeword:latest
 Tagged releases also publish matching immutable image tags:
 
 ```bash
-docker pull ghcr.io/tatertotterson/microwakeword:v17
+docker pull ghcr.io/tatertotterson/microwakeword:v36
 ```
 
 The release tag must match `VERSION`. Update `WHATS_NEW.md` before tagging; the Docker workflow prepends it to GitHub's automatically generated release notes.
@@ -34,7 +58,7 @@ Python 3.13 TensorFlow build for `sm_120`:
 
 ```bash
 docker pull ghcr.io/tatertotterson/microwakeword:blackwell
-docker pull ghcr.io/tatertotterson/microwakeword:v17-blackwell
+docker pull ghcr.io/tatertotterson/microwakeword:v36-blackwell
 ```
 
 Use the Blackwell image only for RTX 50-series cards. It includes the
@@ -46,6 +70,40 @@ which is unofficial and licensed CC BY-NC 4.0.
 
 ## Run The Container
 
+### Local Compose workflow
+
+With Docker Compose v2.30+ and the NVIDIA Container Toolkit installed:
+
+```bash
+just build
+just start
+just stop
+```
+
+`just logs` follows logs and `just status` shows service status. The `justfile`
+uses `compose.yaml`, builds `ks-wakeword-studio:local`, and exposes the UI on
+port **8790** of every host interface (http://localhost:8790 locally) with GPU
+access and 8 GiB shared memory.
+
+Data lives in the host directory named by `DATA` in `.env` (for example
+`DATA=/mnt/datasets/wakeword_studio/`), bind-mounted at `/data`. Stopping or
+removing the Compose service does not delete it. Without `just`, use
+`docker compose build`, then `docker compose up -d` or `docker compose stop`.
+First startup installs dependencies into that directory.
+
+**One-time transition from the existing `docker run` container:** Compose cannot
+adopt a manually created container with the same name. When ready to switch,
+run the commands below; the data directory is retained. Adding these files does
+not stop or replace the currently running container automatically.
+
+```bash
+docker stop ks-wakeword-studio
+docker rm ks-wakeword-studio
+just start
+```
+
+### Published image workflow
+
 ```bash
 docker run -d \
   --gpus all \
@@ -56,16 +114,16 @@ docker run -d \
   ghcr.io/tatertotterson/microwakeword:latest
 ```
 
-Use a version tag such as `ghcr.io/tatertotterson/microwakeword:v17` when you want to pin a known release instead of tracking `latest`.
+Use a version tag such as `ghcr.io/tatertotterson/microwakeword:v36` when you want to pin a known release instead of tracking `latest`.
 For RTX 50-series cards, use `ghcr.io/tatertotterson/microwakeword:blackwell`
-or a pinned tag such as `ghcr.io/tatertotterson/microwakeword:v17-blackwell`
+or a pinned tag such as `ghcr.io/tatertotterson/microwakeword:v36-blackwell`
 in the same `docker run` command.
 
 The flags:
 
 - `--gpus all` enables GPU acceleration.
-- `--shm-size=8g` gives PyTorch DataLoader workers enough shared memory during openWakeWord training. This is separate from free disk space and requires recreating an existing container.
-- `--network host` exposes the trainer server directly so satellites can send captured audio and load trained wake-word files.
+- `--shm-size=8g` provides shared memory for audio processing workers. This is separate from free disk space and requires recreating an existing container.
+- `--network host` exposes the trainer server directly on your host. Studio initiates authenticated requests to kiosks; it does not require legacy satellite push uploads.
 - `-e REC_PORT=8789` sets the trainer web UI and captured-audio port. Change this value if `8789` is already in use.
 - `-v $(pwd):/data` persists models, downloaded voices, datasets, samples, and generated wake-word artifacts.
 
@@ -77,153 +135,426 @@ Open:
 http://localhost:8789
 ```
 
-If you change `REC_PORT`, open that port instead and use the same port in the satellite `Trainer App URL`.
+If you change `REC_PORT`, open that port instead. For a local-only service without host networking, publish `127.0.0.1:8789:8789` instead; use a secured reverse proxy for remote access.
 
 ---
+
+## Kiosk Studio setup and deployment safety
+
+**Security boundary: the trainer UI and `/api/studio` have no built-in user
+authentication. Anyone who can reach the trainer can review private recordings,
+change jobs, enroll targets, or trigger publication using its saved credentials.**
+Keep it on a trusted admin LAN or loopback, firewall the port, and use an
+authenticated HTTPS reverse proxy/VPN for other access. Never expose it directly
+to the Internet. Kiosk admin tokens authenticate the trainer *to each kiosk*, not
+users to this UI. Submit credentials only over a trusted transport (HTTPS outside
+loopback), both from your browser to Studio and from Studio to the kiosk;
+browser request inspection can see a submitted password.
+
+1. Create a workspace in **Wakewords** with a unique stable model ID. Editing its
+   phrase does not rename device files or change historical versions.
+2. In **Kiosks**, add one leader URL and its admin password, or
+   add independent standalone kiosks. Multiple fleets/leaders are not supported.
+   Refresh the leader roster to discover followers. Each follower initially shows
+   **Credentials required**: enter that kiosk's own admin password. Discovery never
+   harvests/copies fleet tokens and does not make followers direct upload targets.
+   The password is set in kiosk-satellite under **Settings → Device → Remote
+   Administration**; its default admin port is **2324**. Studio exchanges the
+   password server-side at `/api/login` for a **3650-day (10-year) token**, clears
+   the password field immediately, and saves only the token—not the password.
+   Existing saved tokens continue to work without re-entering passwords. Treat
+   these tokens like passwords: changing the kiosk's admin password does **not**
+   revoke tokens already issued. Failed logins require entering the password again.
+3. In **Classify → Unmapped**, configure exact device/engine/source-phrase mappings
+   to workspaces. **Collect** at the top right immediately queues collection for
+   the selected workspace, even when automatic collection is disabled. Recordings
+   mapped to other workspaces are skipped before download; unknown sources may
+   enter the shared Unmapped inbox but are never implicitly assigned. The Collect
+   tab shows fleet-wide collection history. Collect twice safely: source tombstones
+   deduplicate recordings, including discarded/deleted clips. Collection never
+   clears kiosk diagnostics. Kiosk history is rolling and finite; scrape often
+   enough for the device's configured retention. Missed/evicted audio cannot be
+   recovered, and Studio does not invent an exact count of previously lost clips.
+4. **Classify** with P/N (positive/negative), Space (play/pause), R (replay), S
+   (skip this session), Z (undo), and D (confirm discard). Shortcuts pause while
+   editing fields/buttons. Acknowledged labels, not mere playback, control training.
+5. Select installed negative datasets and completed artificial batches per word;
+   save training settings and run manually or configure schedules in **Automate**,
+   immediately below Deploy. New unsaved artificial recipes use 50,000 total
+   samples; batching remains internal and saved recipes are preserved. Preview
+   always uses one sample.
+   Piper stays visible with availability guidance when local voice files are missing;
+   viewing the catalog never downloads models.
+
+### Downloaded datasets and training prerequisites
+
+**Data → Downloaded** contains two separate resource types:
+
+- **Negative & evaluation datasets:** downloaded once and selected independently
+  for each wakeword. Evaluation-only inputs are not sampled during training.
+- **Augmentation datasets:** MIT room impulse responses, AudioSet, Free Music
+  Archive, and CHiME-Home. Download and prepare once, then select which backgrounds
+  and room echoes each wakeword uses.
+
+Both resource types default to all enabled. Use each section's **Save selection**
+button to save changes for the current wakeword, including disabling all datasets.
+Existing saved negative selections are preserved; legacy empty selections receive
+the new all-enabled default. Downloads remain shared across wakewords. Training
+requires every selected dataset to be installed: download them or deselect and save.
+Cards show source information, installed size in GB, and sample counts
+when available; unknown metadata is labeled rather than estimated.
+
+Augmentation downloads run in the global queue. Preparation initializes the shared
+training Python environment if needed, downloads the source audio, converts it to
+16 kHz mono PCM WAV, validates it, and publishes the completed corpus. Failed or
+cancelled downloads do not publish partial corpora. Existing CLI-installed corpora
+are recognized. Viewing the catalog never starts downloads.
+
+If an existing corpus folder contains corrupt/partial audio, Studio reports
+**repair required** before downloading anything. Move that specific folder out of
+`<data-dir>/training_datasets/`, retaining it for inspection, then retry. Studio
+does not delete or overwrite existing operator-managed corpora.
+
+Check free disk space first (Studio shows the exact free space when it is low):
+source archives, conversion, and
+retained augmentation snapshots need additional space beyond the final installed
+size. Source download sizes are not published. Review each source's licensing
+terms before using its recordings.
+
+**Train** shows missing selected augmentation prerequisites and links back to
+Downloaded. Disabled augmentation corpora are neither required nor used.
+Once ready, starting training automatically snapshots the selected inputs,
+augments your real/synthetic samples with noise and reverberation, extracts audio
+features, then trains and validates the model. Original samples stay unchanged;
+augmentation datasets are not deployed to kiosks.
+
+Real positives (recorded, scraped, or uploaded) and selected synthetic positives
+use separate training pools. When both have training examples, **60% of positive
+training draws come from real samples and 40% from synthetic samples**, regardless
+of pool size. If only one pool has training examples, all positive draws use that
+pool. Held-out validation/testing audio stays held out, and reviewed negatives
+retain their separate hard-negative weighting. These pools are per-run staging
+and feature artifacts; permanent audio storage is unchanged. The weighting applies
+to new training runs, not existing model archives.
+
+### Job errors and private diagnostics
+
+The job queue and training history show safe, actionable failure guidance. Raw
+child stdout/stderr and exception tracebacks are retained in
+`<data-dir>/studio/jobs/<job-id>/diagnostics.log` (a bounded 128 KiB tail, file mode
+`0600`). These diagnostics are **server-only**, not downloadable through the UI.
+They can contain private recordings' metadata, paths, provider output or secrets;
+inspect them locally and redact before sharing. Older failed jobs may not have a
+diagnostic file; retry once after upgrading to capture the original error.
+
+### Workspace automation and theme
+
+**Automate** edits automation rules for the workspace selected in the header. Collection,
+classification, training, and deployment have independent enable controls and
+five-field cron/timezone schedules. Switching workspaces does not enable or start
+anything. Automatic classification can run after collection or on a schedule,
+using Silero VAD and Faster Whisper (managed `small.en`/`small`). STT uses the same queue-owned GPU
+resource as training/generation, with CUDA/CPU fallback and lazy model caching in
+`/data/auto_train_models`. Model downloads happen only when inference is requested;
+fixture tests do not download or run these models.
+
+Each kiosk clip is sorted in order: no speech (VAD) is *something else*; Whisper
+hearing the wake phrase is *the phrase*; otherwise Whisper decodes again primed
+with the phrase, and still not hearing it is *something else*, while hearing it only
+when primed is *unclear* (primed Whisper invents the phrase over noise). Activations
+and close misses each have a positive and a negative toggle; only activation
+negatives are on by default, and unclear clips always stay pending. Manual labels/trims win revision conflicts; no
+automatic rule deletes audio. Disabling collection preserves existing recordings
+but cannot preserve future clips evicted from a kiosk's finite rolling buffer.
+
+Training creates archives without publishing by default. **Deploy after successful
+training** is a separate opt-in and applies to new successful manual or scheduled
+runs, not failed/skipped runs or imported legacy archives. Scheduled deployment is
+independent of training and publishes only a new eligible archive. Manual rollback
+is not silently undone by retries or a later tick without a newly trained archive.
+Existing publication staging/quarantine requirements below still apply.
+
+**Notifications** are configured on the same tab. Save one global
+[Apprise service URL](https://github.com/caronc/apprise#supported-notifications),
+then enable collection, classification, training, and deployment notifications
+separately for each wakeword. A global dataset-download toggle covers both training
+and augmentation datasets. Global settings remain available without a selected
+wakeword. The single **Wakeword notifications** card labels shared settings
+**(global)** and has one **Save notifications** button for both scopes, independent
+of the automation rules.
+Use **Send test notification** to check the saved destination.
+
+Enabled types notify on completion and failure for manual and automatic runs.
+Interrupted jobs and partial collection failures count as failures; skipped and
+cancelled runs, sample generation, and previews never notify. Deployment sends one
+notification per target for verified delivery or terminal failure, not each retry
+or publication request. Notifications default off, and upgrades do not replay job
+history. Background delivery persists across restarts and tries at most three
+times; a crash immediately after remote acceptance may produce a duplicate.
+Clearing the URL or disabling a type discards its pending deliveries.
+
+The URL may contain credentials. It is stored in the private Studio database but
+never returned to the browser or included in notification logs. Leave its field
+blank to retain it, replace it to change destinations, or explicitly clear it to
+disable delivery for all wakewords. Protect database backups as credentials.
+
+**Upgrade with the old Studio runtime stopped.** The additive schema upgrade
+preserves existing training schedules, archives, recordings, desired publications
+and authorized retries. It disables the old global scrape schedule and cancels its
+unclaimed scheduled jobs (history retained); each workspace inherits its timing
+disabled until explicitly enabled. New automation and deploy-after-training default
+off, and historical training archives are not replayed automatically. The legacy
+explicit fleet scrape API remains for compatibility but is not used by the new UI.
+
+The header theme toggle defaults to your system light/dark preference and remembers
+an explicit override in browser storage. It works without storage permission too.
+
+### Prepare immutable augmentation inputs before Studio training
+
+Classifier-negative feature datasets are separate from raw augmentation inputs.
+Studio requires all four real installed corpora before an execution snapshot can
+be committed. Prepare them explicitly (substitute your mounted `DATA_DIR`):
+
+```bash
+bash cli/setup_python_venv --data-dir=/data
+for corpus in mit_rirs_16k audioset_16k fma_16k chime_16k; do
+    /data/.venv/bin/python cli/prepare_corpus.py --corpus=$corpus --data-dir=/data
+done
+```
+
+If CHiME-Home's Internet Archive source is unavailable, setup retries failed or
+stalled transfers and automatically replaces corrupt cached archives on the next
+attempt. To use a trusted mirror of the **original** `chime_home.tar.gz`, set
+`CHIME_AUDIO_URL` in the setup command's environment. For Studio downloads, pass
+that variable into the server/container environment. An already downloaded archive
+can also be placed at `/data/training_datasets/downloads/chime_home.tar.gz`.
+Preprocessed datasets with different audio content are not interchangeable mirrors.
+
+These setup commands perform real, potentially large downloads/conversions. Run
+them to completion while training is stopped; Studio does not silently install
+corpora after taking a snapshot. Missing/empty/unsafe roots fail training with
+setup guidance. Studio hashes each installed file and retains independent copies
+under `studio/augmentation/<content-fingerprint>/`. microWakeWord uses
+only these pinned paths, never the mutable shared roots. Raw corpus copies are
+**not classifier-negative features**, nor are they labeled human negatives.
+
+Intentional cost: the first snapshot of each distinct corpus version needs an
+additional full corpus copy plus temporary staging space; changed versions remain
+retained for old manifests. Unchanged versions share retained storage across words
+and runs. Every snapshot scans/hashes the shared and retained bytes, and the engine
+boundary verifies retained checksums again.
+Expect substantial disk I/O and snapshot latency on large installations, even for
+an unchanged scheduled run. No automatic corpus pruning is performed; retain these
+directories with the database and archives. Do not edit retained copies manually.
+
+Studio publication uploads archived models only to the configured fleet leader and
+standalone kiosks. Followers receive models through existing fleet synchronization;
+eligible followers need their own admin credentials for hash verification and the
+authorized cache refresh. Publication does not change either selected slot, engine,
+thresholds, or fleet profiles, and does not delete custom models.
+
+**Before enrolling a publication target, arrange initially clean kiosk upload
+staging. Do not perform concurrent external/manual model uploads during
+trainer-owned publication**, including retries and rollback. This is a required
+operational boundary, not an automatic cleanliness check. The kiosk API exposes
+no remote staging-list, staging-discard, or staging-lock operation; installed-file
+hashes do not reveal staged files. Uncoordinated admin-client safety cannot be
+guaranteed. Coordinate other upload clients before enabling automatic publication.
+
+Trainer-owned interrupted uploads are journaled and restored to current desired
+versions before later commits. Unknown external staged files, however, may be
+committed **before** unexpected acceptance is detected. The trainer then quarantines
+the target (`staging_blocked`, cause `staging_unowned`) and stops further automatic
+commits/refreshes; quarantine does not undo those unknown changes. Stop external
+uploads and arrange separately authorized operator cleanup and review of any
+unexpectedly accepted models. There is no automatic cleanup/quarantine-release
+endpoint, and republishing does not bypass quarantine. A journaled optional file
+with no current desired replacement also blocks publication rather than deleting
+it or committing obsolete bytes.
+
+The user-authorized `clearWakeWordModels` operation runs only after verified
+publication/synchronization. Cache refresh restarts detection and
+clears all engines' downloaded-model caches. Other selected remote models may need
+to be downloaded again. Custom uploads and settings remain intact. File verification
+and refresh acknowledgement are **not** proof of the version used by inference;
+offline, uncredentialed, excluded, and lagging followers are not reported as success.
+Publication now requires the kiosk to report `restarted: true`. Acknowledgements
+with `restarted: false` stay `refresh_pending` with `restart_not_confirmed` and use
+the existing bounded retries, without re-uploading files that already match.
+Under **Deploy > Target delivery**, each kiosk shows its confirmed publication
+date/time (or sync time for followers) in your browser's local time. This is stored
+separately from retry/status timestamps; older records have no historical delivery
+time until republished. Existing historical statuses are not retroactively rechecked.
+Rolling back means publishing an older immutable archive as the new desired version and uploads
+it under the **same stable filenames**; it never edits enabled slots or thresholds.
+Retries follow the latest desired revision, not an obsolete queued version.
+`refresh_pending`, manifest-unverified, and runtime-unverified states are not proof
+of live inference; refresh may remain pending until a follower has synchronized and
+its own credentials permit verification. The existing leader/fleet remains the
+authority for any fleet-controlled selections.
+
+Deployment API:
+
+- `GET /api/studio/wakewords/{word_id}/deployment/status`: per-target publication,
+  manifest, refresh and unverified-runtime states.
+- `POST /api/studio/wakewords/{word_id}/deployment/publish` with
+  `{"version_id":"<archived-version-id>"}`: claim a new desired revision (publishing an
+  older version is a rollback) under the same staging prerequisites; this is a real
+  mutation endpoint, not a setup check.
 
 ## What The UI Does
 
-- The entire interface is reactive Vue 3 + TypeScript, following the same typed component pattern as Tater's newer UI surfaces.
-- `Trainer` starts a wake-word session, shows positive/negative sample counts, and launches an MWW + OWW build by default.
-- `Auto Training` transcribes real wake triggers, promotes phrase-misses to hard negatives, schedules retraining, and refreshes Tater Native satellites.
-- `Captured Audio` reviews clips sent by Tater Native or ESPHome sats, including wake hits, close misses, and false wakes.
-- `Samples` plays, removes, clears, and manually imports personal or negative samples.
-- `Wake Words` lists locally trained JSON/model links for live wake-word switching in Tater.
-- Popup consoles show colorized training logs while long-running jobs are active.
+- **Wakewords**: separate phrases, stable identities and summaries.
+- **Negative Datasets / Artificial**: searchable paginated catalog, actual per-word
+  selection, saved TTS recipes, immutable completed batches, queued job/log status.
+- **Scrape / Classify / Samples**: shared registry, global collection cron, keyboard
+  review, provenance, revision-safe labels, non-destructive trimming and audio import.
+- **Train / Deploy**: effective inputs, one shared GPU queue, per-word cron, retained
+  run manifests/checksums/logs, downloadable archives, and publish/rollback.
 
-The production bundle is committed under `static/ui`, so neither NVIDIA Docker image needs Node.js. To change the UI, edit `frontend/src` and rebuild it before building the image:
+### Storage and scheduling
+
+Persist the entire `/data` volume (`DATA_DIR` outside Docker). Studio stores
+`studio/studio.sqlite3` (with WAL/SHM), content-addressed `studio/blobs/`, isolated
+`studio/jobs/`, versioned `studio/datasets/versions/`, immutable
+`studio/models/<word-id>/<version-id>/`. Kiosk credentials
+are separate owner-only files in `studio/credentials/`; protect the volume and its
+backups as secrets. Credentials are omitted from public APIs and model exports,
+but a full-volume backup contains them. Do not manually delete retained blobs,
+dataset versions or archives referenced by old runs. Stop the server/workers for
+a consistent full-volume backup/restore; do not copy just a live SQLite main file.
+Shared downloaded tools/voices and training environments also occupy `/data`.
+
+**Legacy archive policy:** models imported by the retired legacy migration
+remain browsable/downloadable as `legacy` / `unvalidated` archives and never create
+automatic publication events or change the desired version by import order.
+In Deploy, explicitly choose **Validate and
+publish**. This invokes the existing
+`cli/validate_studio_model.py` using `/data/.venv/bin/python`: TensorFlow must load
+the TFLite model, allocate tensors, and expose input/output tensors. Prepare that
+environment with `cli/setup_python_venv` first. Checksums or a `TFL3` identifier alone
+are not engine validation. Missing runtime, incompatible metadata, or rejected bytes
+leave the archive available without publication or remote cache refresh. Successful
+explicit validation is recorded separately from immutable archive metadata, and
+only then may that explicit action set publication intent under the normal staging
+and cache-refresh constraints.
+
+Schedules use standard **five-field cron**, an explicit IANA timezone (UTC by
+default), and show the next UTC instant. DST gaps/folds follow pinned croniter
+6.0.0 + zoneinfo behavior, not a promise of one wall-clock execution every day:
+check the displayed next instant around transitions. Restart/delayed polling
+coalesces missed ticks to one pending occurrence rather than replaying every tick;
+in-flight scopes are not duplicated. Unchanged scheduled training skips a new
+build; global collection and each word's training schedule are independent.
+
+### TTS and dataset compatibility
+
+The Artificial page has generation settings above a list of generated datasets.
+Choose individual models (OmniVoice, Qwen3-TTS, MOSS-TTS, and installed Piper voices)
+using checkboxes. **Generate dataset** remembers the settings and creates a separate
+dataset for each provider. **Samples per provider** is not divided: selecting Qwen
+and OmniVoice at 20,000 requests two 20,000-sample datasets. Each completed dataset
+has an independent training checkbox; new datasets are not selected automatically.
+Each model's **Preview** generates one
+sample of the workspace phrase using the current language/accent, with playback
+controls; previews never enter the training datasets or change saved settings.
+Both generation and previews use the GPU queue and report real job progress.
+
+To recover a failed **OmniVoice-only** job with retained clips, a local administrator
+can run the following inside the updated Studio container:
 
 ```bash
-cd frontend
-npm install
-npm run build
+docker exec ks-wakeword-studio /data/.recorder-venv/bin/python \
+  /root/mww-scripts/cli/studio_recover_generation.py --data-dir=/data \
+  --word-id=WORKSPACE_ID --source-job-id=FAILED_JOB_ID
 ```
 
-`npm run build` type-checks every Vue component before writing the offline bundle copied into both the standard CUDA and Blackwell images.
+This makes an independent checksummed snapshot under `/data/studio/recovery/`,
+then queues a new job with the original recipe. Retained audio is rechecked under
+unchanged QA before fresh clips fill the shortage. Only a complete validated batch
+is published; neither the failed job's files nor training selection is changed.
+Keep the snapshot and original files until recovery is verified. Do not run the
+ordinary generator against the failed job's directory: it clears its build files.
 
----
+Fresh refills are sized from each provider's measured **normalized, unique** yield
+with a 20% margin, rather than a fixed multiplier. Each round is capped at
+20,000 candidates and, by default, the whole job at `max(1024, 12 × samples)`; a provider stops
+after three consecutive rounds without progress. Top-ups prefer direct providers
+(Qwen3 first), so a multi-provider mix can lean toward them. The generator CLI supports
+`--max-candidates` and `--max-generation-seconds` (default six hours). The time
+limit stops admission of new rounds; an in-flight round finishes normally, and
+Studio's normal cancellation still stops owned children. Incomplete jobs report
+retained/missing counts and the stopping reason without publishing a partial batch.
 
-## Captured Audio Workflow
+For reproducible duration diagnostics, a local administrator can run
+`cli/benchmark_omnivoice.py` with `--data-dir`, `--word-id`, and a **new**
+`--output-dir`. It compares seeded duration conditions at batch sizes 1 and 8,
+records the installed model/package revisions, applies existing QA and normalization,
+and writes `generation.json`, `results.json`, WAVs, and per-clip QA reports.
+`--wait-for-gpu-seconds=21600` queues behind active GPU work without interrupting it.
+These are normally owned `benchmark` jobs, not generated datasets; the web worker
+does not run them without the local benchmark process. No training selection changes.
 
-To collect samples from a sat, point its trainer feedback setting at this app. Tater Native satellites use the native settings popup in Tater. Older ESPHome satellites can still use their device entities.
+MOSS has its own sample count and requires direct-provider reference audio. Select
+multiple completed source datasets, or enable **Generate after current selection**
+to queue MOSS after this submission's direct providers with one click. This mode
+uses only those new datasets, not older jobs. If any producer fails or is cancelled,
+MOSS stops before inference; successful direct datasets remain available.
+MOSS needs at least as many distinct reference clips as requested outputs (clips
+duplicated across datasets count once). Choose more sources or lower its count
+if necessary. Reference selection is separate from training selection. MOSS output
+is another independent dataset and retains source family identities for train/eval
+splits. MOSS previews require completed sources; after-current mode cannot preview
+references that do not exist yet. Historical mixed-provider datasets remain intact
+and cannot serve as MOSS sources; completed direct-only historical datasets can.
+Piper availability depends on installed voices; English accent
+emphasis applies only where supported. Completed selected synthetic batches join
+explicitly reviewed real audio; generation is not silently rerun by training.
+Evaluation families remain stable across variants and historical runs.
 
-For Tater Native satellites, enable trainer feedback in Tater:
+The current negative catalog contains **MWW feature tensors only** (`mww_mmap`),
+not generic WAV backgrounds or other engines' embeddings. `dinner_party_eval` is evaluation-only
+and is never sampled as a training negative. Augmentation backgrounds are separate
+from classifier negatives. Raw-audio catalog conversion is not implemented. An incompatible
+selection fails with an actionable error—no silent stock-negative download or
+incompatible feature reuse. Real training also requires independent positive train,
+validation and testing families (and corresponding reviewed-negative splits when
+used); a tiny smoke-test corpus is not sufficient for actual ML training.
 
-- `Send Good Wakes To Trainer` toggles upload of confirmed wake-word triggers.
-- `Send Close Misses To Trainer` toggles upload of near misses.
-- `Trainer App URL` sets the trainer address, for example `http://trainer.local:8789` or `http://<trainer-ip>:8789`.
+The UI bundle in `static/ui` is build output and is not committed. The dockerfile builds it in a
+`node` stage (`npm ci && npm run build`) and copies only the result into the runtime image, so
+neither image variant ships Node.js. `docker build .` builds the default image and
+`docker build --build-arg VARIANT=blackwell .` builds the RTX 50 / Blackwell one. For local development run `just ui` (or
+`npm --prefix frontend run build`); the build type-checks every Vue component first.
 
-For older ESPHome firmware, the equivalent capture setup is exposed as device entities:
+### Offline integration verification (no CUDA or live kiosks)
 
-- `Capture Wake Audio` toggles upload of wake-word triggers.
-- `Capture Close Misses` toggles upload of near misses.
-- `Trainer App URL` sets the trainer address, for example `http://<trainer-ip>:8789`.
+Use an existing server/test Python environment, or create a lightweight venv; do
+not install the CUDA training requirements just to test the app. Python 3.12,
+`ffmpeg`, `openssl`, Bash, and Node/npm (development only) are used by the suite:
 
-Satellites send raw captured audio to:
-
-```text
-/api/upload_captured_audio_raw
+```bash
+just test   # creates .venv-test from requirements-dev.txt, type-checks and builds the UI, runs pytest and vitest
+just ui     # rebuilds static/ui
+just format # Prettier for frontend/ (CI fails on unformatted code)
+just e2e    # Playwright browser suite (install Chromium once: npx --prefix frontend playwright install chromium)
 ```
 
-Keep the training app running and reachable at the `Trainer App URL` while capture is enabled. The sats upload clips live; if the app is stopped or the URL is wrong, captured audio will not be saved.
+Without `just`: `python3 -m venv .venv-test && .venv-test/bin/pip install -r requirements-dev.txt`,
+then `.venv-test/bin/python -m pytest` (`tests/conftest.py` points `DATA_DIR` at a
+temporary directory unless you set it), `npm --prefix frontend run build` and
+`npm --prefix frontend test -- --run`.
 
-In the `Captured Audio` tab:
-
-- play each clip from the inbox
-- mark good wake-word clips as `This is good`
-- mark bad triggers as `False wake`
-- discard clips that should not be used
-
-Approved clips move into:
-
-```text
-/data/personal_samples/
-```
-
-False wakes move into:
-
-```text
-/data/negative_samples/
-```
-
-Captured audio is boosted for easier playback in the UI, then kept in the correct training format.
-
----
-
-## Samples
-
-The `Samples` tab is the sample library.
-
-- `Personal` samples are positive examples of the wake word.
-- `Negative` samples are reviewed false wakes or hard negatives.
-- Both can be played back and removed one at a time.
-- Manual upload is available here as an optional seed path.
-
-Accepted manual upload formats include:
-
-- WAV
-- MP3
-- M4A
-- FLAC
-- OGG
-- AAC
-- OPUS
-- WEBM
-
-Uploads are validated or converted with `ffmpeg` into:
-
-```text
-16 kHz / mono / 16-bit PCM WAV
-```
-
-Starting a new session does not clear samples. Use the clear buttons in `Samples` if you want to remove saved personal or negative clips.
-
----
-
-## Auto Training
-
-`Auto Training` is an opt-in sample-review and retraining loop. It is disabled until you enter the exact wake phrase and enable it.
-
-For each new wake-trigger clip sent to the trainer:
-
-1. The selected local STT engine transcribes the audio.
-2. If the transcript contains the configured wake phrase, the clip stays in `Captured Audio` for manual review by default.
-3. If speech was transcribed but the wake phrase is absent, the clip moves to `/data/negative_samples/` as an auto-reviewed hard negative.
-4. Empty transcripts, VAD-blocked captures, and captures for another wake word stay out of the automatic negative path.
-
-Two optional cleanup rules are available:
-
-- `Delete confirmed good wakes` removes normal wake-trigger clips after STT confirms the configured phrase.
-- `Promote confirmed close misses` checks close misses that passed VAD and moves them to the personal positive samples only when STT confirms the configured phrase.
-
-A close miss with an empty transcript or without the configured phrase stays in `Captured Audio`; it is never turned into a negative automatically. Saving Auto Training settings also scans existing eligible captures. Enabling close-miss promotion reviews previous unreviewed close misses, while enabling cleanup removes previously confirmed good wakes without transcribing them a second time.
-
-Auto Training exposes only an engine selector. Faster Whisper is the recommended default and uses CUDA with `float16` when CTranslate2 can see an NVIDIA GPU, with a CPU `int8` fallback. The trainer manages `small.en` for English and `small` for other languages. Parakeet ONNX uses the managed INT8 `nemo-parakeet-tdt-0.6b-v3` model with CUDA and CPU fallback. Downloaded STT models are cached in `/data/auto_train_models/`.
-
-Scheduled training runs only after the configured number of new automatic negatives has accumulated. A successful run securely publishes the trained wake-word name and JSON URL to the linked Tater instance. Tater saves it as the global satellite wake word and pushes the updated setting to every connected satellite, so no satellite firmware change is required.
-
-The `Trainer public URL` must be reachable from the satellites. With the documented `--network host` command, the trainer can normally use the LAN address from the browser request or host network. If you open the UI as `http://localhost:8789`, enter a value such as `http://192.168.1.50:8789`, or start the container with `REC_PUBLIC_BASE_URL` set to that value. When using Docker bridge networking, always set this URL to the published host address; a container bridge address is not satellite-reachable.
-
-The default Tater URL, `http://127.0.0.1:8501`, assumes the documented host networking. Change it to a container-reachable Tater address if you use another Docker network. Click `Link Tater` and enter the short-lived code shown in Tater Voice Settings; the resulting trainer-specific link credential is stored in `/data/auto_train_config.json` with owner-only permissions.
-
----
-
-## Training Flow
-
-1. Enter the wake phrase in `Trainer`.
-2. Choose the language and TTS source.
-3. Optionally check browser pronunciation with `System preview`.
-4. Review the positive and negative sample counts.
-5. Leave `Build the openWakeWord companion model` enabled for a dual-model bundle, or turn it off for an MWW-only run.
-6. Click `Start training` and watch the popup training console.
-
-Personal samples are optional. Training can run with zero personal samples after confirmation, using generated TTS samples and the stock negative datasets.
-
-Reviewed negative samples are converted into `/data/work/reviewed_negative_features/` and inserted into the training YAML as a hard-negative feature set when present.
-
-The first dual-model run downloads a pinned revision of Tater's openWakeWord trainer and creates a separate environment under `/data/openwakeword`. Those assets are cached for later runs. OWW training starts only after MWW succeeds, publishes through a staging directory, and cannot overwrite the existing MWW JSON/TFLite pair. Calibration automatically packages a stricter OWW-only threshold and a separate recall-preserving threshold for MWW + OWW confirmation; users do not enter these values manually. The upstream OWW custom-training path is strongest for English; validate other languages carefully or use the MWW-only checkbox.
-
-On RTX 50-series / Blackwell GPUs, the Blackwell Docker image keeps sample generation and augmentation in the normal Python 3.12 trainer environment, then runs only the TensorFlow training/export stage in `/data/.venv-blackwell` with Python 3.13 and the Blackwell-native TensorFlow wheel.
+Playwright rebuilds `static/ui`, then launches the real app with a tests-only,
+constructor-injected GPU command runner, fresh temporary data in the system temp directory,
+and deterministic loopback HTTP kiosks. There is no production environment variable
+that enables fake GPU success; test code is not copied into either Docker image.
+These tests verify orchestration, not CUDA inference, downloaded ML weights, a
+container build, or real-device behavior. Live-device checks are opt-in only; review
+the test's environment variables and required authorization before enabling them,
+especially cache clearing/publication. Do not point the integration fixtures at a
+real LAN device. Neither image requires Node at runtime; both ship the complete
+`studio/` package, SQL/JSON resources, CLI helpers and the built `static/ui` assets.
 
 ---
 
@@ -231,72 +562,29 @@ On RTX 50-series / Blackwell GPUs, the Blackwell Docker image keeps sample gener
 
 The language picker is built from OmniVoice's live catalog (currently more than 600 languages), with a bundled common-language fallback for offline startup. Languages covered by Qwen3-TTS and MOSS-TTS-Nano are automatically marked `Recommended`; OmniVoice-only languages are marked `Experimental` so lower-resource coverage is not presented as equal quality.
 
-The selected code is sent directly to the supporting model. Model downloads happen only when a language is used, and the Hugging Face cache is persisted under `/data/.cache/huggingface`. The fetched language catalog is cached under `/data/.cache/omnivoice_languages.json`.
-
-### TTS modes
-
-- `Four-provider ensemble` is the default. It uses OmniVoice for every catalog language, adds Qwen3-TTS and MOSS-TTS-Nano where supported, and adds Piper when a compatible model exists.
-- `Modern only` uses the multilingual providers without Piper.
-- `Piper only` preserves the previous generator as an explicit legacy fallback.
-
-Where a Piper voice is unavailable, the default route automatically continues with the modern providers.
+The selected code is sent directly to the supporting model. Model downloads happen only when a language is used, and the Hugging Face cache is persisted under `/data/.cache/huggingface`. A previously fetched language catalog is read from `/data/.cache/omnivoice_languages.json` when present.
 
 Qwen, OmniVoice, and Piper now generate final corpus candidates directly instead of cloning a 128-profile bank. Qwen provides 18,750 balanced voice conditions before an instruction repeats, and Piper uses every speaker in its installed model. MOSS Nano is clone-only, so each MOSS take uses a different already-accepted direct take as its carrier rather than cycling a small bank.
 
 Every generated file is normalized to `16 kHz / mono / 16-bit PCM WAV` and rejected if it contains static, broadband/high-frequency noise, silence, clipping, excessive duration/rambling, or an exact duplicate. A generation manifest records the planned and accepted provider counts and the applied safety limits.
 
+English direct OmniVoice takes use confidence-ordered mask selection with
+stochastic token sampling to reduce short-phrase decoder collapse without
+repeating a deterministic voice bank. Other languages and carrier/cloning paths
+retain upstream sampling defaults. QA limits are unchanged; see the
+[decoder investigation and measured yield](docs/omnivoice-decoder-investigation.md).
+
 ---
 
-## Dataset Behavior
-
-The first training run downloads and prepares missing training assets into `/data`, including:
-
-- isolated Python environments for each selected modern TTS engine
-- selected TTS model weights and the direct generated corpus
-- additional language-specific Piper voices only when hybrid or legacy Piper mode is selected
-- negative datasets and background data
-- the Python training environment
-- generated samples and augmented feature caches
+### TTS environments
 
 The three modern engines deliberately use separate environments under `/data/tts-envs/`; their required PyTorch and Transformers versions conflict with one another and with the trainer environment. Model weights can require many gigabytes, so allow extra disk space and time on the first run. After the assets are prepared, later runs reuse the local copies unless the mounted `/data` contents are deleted.
 
 ---
 
-## Trained Wake Words
+## Model files
 
-The `Wake Words` tab lists locally trained wake-word packages from `/data/trained_wake_words/`.
-
-- Copy the JSON URL into the Tater Native satellite settings to switch wake words live.
-- Links use the configured public trainer URL, a non-loopback browser host, or the detected LAN address instead of advertising `127.0.0.1` to satellites.
-- Open the JSON or model links directly for quick inspection.
-- The JSON includes the matching model path plus Tater tuning metadata.
-- No firmware flashing happens from this trainer app anymore.
-
-Use the main Tater app for satellite firmware updates and USB flashing.
-
----
-
-## Output Files
-
-Successful runs produce timestamped training output folders such as:
-
-```text
-/data/output/<timestamp>-<wake_word>-<samples>-<steps>/<wake_word>.tflite
-/data/output/<timestamp>-<wake_word>-<samples>-<steps>/<wake_word>.json
-```
-
-The trainer also syncs Tater-ready wake-word artifacts into:
-
-```text
-/data/trained_wake_words/<wake_word>.tflite
-/data/trained_wake_words/<wake_word>.json
-/data/trained_wake_words/<wake_word>.oww.onnx         # Echo openWakeWord classifier
-/data/trained_wake_words/<wake_word>.oww.json
-/data/trained_wake_words/<wake_word>.oww.verifier.pkl # when positive + negative clips exist
-/data/trained_wake_words/<wake_word>.wake-bundle.json
-```
-
-The original `<wake_word>.json` and `<wake_word>.tflite` names are unchanged for existing Tater and ESPHome clients. The additive bundle manifest links the MWW TFLite and OWW ONNX models, their SHA-256 hashes, and the calibrated OWW threshold/patience. The `Wake Words` tab exposes the MWW, OWW, and bundle links.
+Each archived model version contains `<model_id>.tflite` and `<model_id>.json`, compatible with existing Tater and ESPHome clients.
 
 The JSON keeps the standard microWakeWord fields for compatibility:
 
@@ -339,30 +627,14 @@ Calibration evaluates thresholds from `0.95` through `1.00` with sliding windows
 
 ## Resetting Everything
 
-If you want a clean slate, stop the container and remove the contents of the mounted `/data` directory.
-
-That removes:
-
-- personal samples
-- negative samples
-- captured inbox clips
-- downloaded Piper voices
-- modern TTS environments, model weights, and completed direct-generated corpora
-- cached datasets
-- training environments
-- trained models
-- Auto Training settings, state, transcripts, and cached Faster Whisper models
+If you want a clean slate, stop the container and remove the contents of the mounted `/data` directory. That removes every workspace, sample, dataset, training environment, model archive and kiosk credential.
 
 ---
 
 ## Important Notes
 
-- Personal samples are optional.
-- Negative samples are optional but useful for reducing false wakes.
-- Auto Training is disabled by default and only classifies actual wake triggers automatically.
 - The UI server is `trainer_server.py`.
 - The launcher is `run.sh`.
-- Trainer capture settings live in Tater for Tater Native satellites, and on device entities for older ESPHome satellites.
 
 ---
 

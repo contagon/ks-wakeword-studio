@@ -1,0 +1,3 @@
+# Mechanical reformats; use: git config blame.ignoreRevsFile .git-blame-ignore-revs
+# Reformat the frontend with Prettier
+95fce5c37202e5c5840f9a462a4410a78ce47d1c

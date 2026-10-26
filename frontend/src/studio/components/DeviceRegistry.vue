@@ -1,0 +1,251 @@
+<script setup lang="ts">
+import ConfirmDialog from "./ConfirmDialog.vue";
+import { onBeforeUnmount, onMounted, ref, type ComponentPublicInstance } from "vue";
+import { useDeviceRegistry } from "../devices";
+import type { Device } from "../types";
+
+const registry = useDeviceRegistry();
+const url = ref("");
+const role = ref<"leader" | "standalone">("standalone");
+const passwordInput = ref<HTMLInputElement>();
+const credentialInputs = new Map<string, HTMLInputElement>();
+const busy = ref("");
+const notice = ref("");
+const error = ref("");
+const editing = ref(""),
+  editUrl = ref("");
+const deleting = ref<Device | null>(null);
+function edit(device: Device): void {
+  editing.value = device.id;
+  editUrl.value = device.url;
+}
+async function saveAddress(device: Device): Promise<void> {
+  busy.value = `edit:${device.id}`;
+  error.value = "";
+  try {
+    await registry.update(device.id, editUrl.value);
+    editing.value = "";
+    notice.value = "Connection address saved.";
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Address was not saved.";
+  } finally {
+    busy.value = "";
+  }
+}
+function confirmDelete(device: Device): void {
+  deleting.value = device;
+}
+function closeDelete(): void {
+  deleting.value = null;
+}
+async function remove(): Promise<void> {
+  if (!deleting.value || busy.value) return;
+  busy.value = `delete:${deleting.value.id}`;
+  error.value = "";
+  try {
+    await registry.remove(deleting.value.id);
+    closeDelete();
+    notice.value = "Kiosk removed from Studio. Saved recordings and models are kept.";
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Kiosk was not removed.";
+  } finally {
+    busy.value = "";
+  }
+}
+
+function recordInput(id: string, element: Element | ComponentPublicInstance | null): void {
+  if (element instanceof HTMLInputElement) credentialInputs.set(id, element);
+  else credentialInputs.delete(id);
+}
+function roleLabel(role: string): string {
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
+function parent(device: Device): string {
+  return device.leader_id ? `Parent ${registry.deviceLabel(device.leader_id)}` : "Direct registry target";
+}
+async function add(): Promise<void> {
+  const password = passwordInput.value?.value ?? "";
+  // Clear the DOM field before awaiting so a slow network request never retains a submitted secret.
+  if (passwordInput.value) passwordInput.value.value = "";
+  busy.value = "add";
+  error.value = "";
+  notice.value = "";
+  try {
+    await registry.add(url.value, password, role.value);
+    url.value = "";
+    notice.value =
+      role.value === "leader" ? "Leader added; follower membership was refreshed." : "Standalone kiosk added.";
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Device could not be added.";
+  } finally {
+    busy.value = "";
+  }
+}
+async function refresh(device: Device): Promise<void> {
+  busy.value = `refresh:${device.id}`;
+  error.value = "";
+  try {
+    await registry.refresh(device.id);
+    notice.value = "Fleet membership refreshed.";
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Fleet refresh failed.";
+  } finally {
+    busy.value = "";
+  }
+}
+async function setCredentials(device: Device): Promise<void> {
+  const input = credentialInputs.get(device.id);
+  const password = input?.value ?? "";
+  // Clear the DOM field before awaiting so a slow network request never retains a submitted secret.
+  if (input) input.value = "";
+  busy.value = `credentials:${device.id}`;
+  error.value = "";
+  try {
+    await registry.credentials(device.id, password);
+    notice.value = "Kiosk authenticated; token saved server-side.";
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Credentials were not saved.";
+  } finally {
+    busy.value = "";
+  }
+}
+onMounted(async () => {
+  await registry.load();
+});
+onBeforeUnmount(() => registry.abort());
+</script>
+
+<template>
+  <section class="studio-card" data-device-registry>
+    <div>
+      <div class="studio-section-header">
+        <h2>Fleet setup</h2>
+        <button
+          type="button"
+          data-action="refresh-registry"
+          :disabled="registry.loading.value"
+          @click="registry.load(true)"
+        >
+          Refresh registry
+        </button>
+      </div>
+      <p v-if="notice" class="studio-note" role="status">{{ notice }}</p>
+      <p v-if="error || registry.error.value" class="studio-note" role="alert">{{ error || registry.error.value }}</p>
+      <div data-device-registration class="mt-3">
+        <form data-device-add class="studio-registration-row" @submit.prevent="add">
+          <label
+            >Address<input v-model="url" required name="url" autocomplete="url" placeholder="http://kiosk.local:2324"
+          /></label>
+          <label
+            >Role<select v-model="role" name="role">
+              <option value="standalone">Standalone</option>
+              <option value="leader">Fleet leader</option>
+            </select></label
+          >
+          <label
+            >Admin password<input ref="passwordInput" required name="password" type="password" autocomplete="off"
+          /></label>
+          <button type="submit" class="studio-primary" :disabled="busy === 'add'">Add device</button>
+        </form>
+        <p class="studio-muted text-xs mt-2">
+          Use the kiosk's Remote Administration password. Studio saves only the resulting 10-year token, not your
+          password. Submit only over a trusted connection.
+        </p>
+      </div>
+      <p v-if="registry.loading.value" class="studio-muted mt-3">Loading registered devices…</p>
+      <div v-else class="mt-4 grid gap-2">
+        <article
+          v-for="device in registry.devices.value"
+          :key="device.id"
+          class="studio-device-row"
+          :data-device-id="device.id"
+        >
+          <div class="studio-device-main">
+            <strong>{{ registry.deviceLabel(device.id) }}</strong>
+            <span
+              class="studio-status ml-2"
+              :class="device.role === 'follower' ? 'studio-status-muted' : 'studio-status-neutral'"
+              >{{ roleLabel(device.role) }}</span
+            >
+            <p class="studio-muted text-xs">
+              {{ parent(device) }} · {{ device.url }}{{ device.active ? "" : " · Inactive member" }}
+            </p>
+            <form
+              v-if="device.role === 'follower' && device.credentials_status !== 'ready'"
+              class="flex gap-2 mt-2"
+              @submit.prevent="setCredentials(device)"
+            >
+              <input
+                :ref="(element) => recordInput(device.id, element)"
+                :name="`credentials-${device.id}`"
+                required
+                type="password"
+                autocomplete="off"
+                aria-label="Follower admin password"
+              /><button type="submit" :disabled="busy === `credentials:${device.id}`">Authenticate</button>
+            </form>
+          </div>
+          <div class="studio-device-badges">
+            <span
+              class="studio-status"
+              :class="device.credentials_status === 'ready' ? 'studio-status-neutral' : 'studio-status-warning'"
+              >{{ device.credentials_status === "ready" ? "Credentials ready" : "Credentials required" }}</span
+            ><span
+              class="studio-status"
+              :class="device.model_eligible ? 'studio-status-neutral' : 'studio-status-warning'"
+              >{{ device.model_eligible ? "Profile covered" : "Not covered" }}</span
+            >
+          </div>
+          <div class="studio-device-actions">
+            <button
+              v-if="device.role === 'leader'"
+              type="button"
+              :disabled="busy === `refresh:${device.id}`"
+              @click="refresh(device)"
+            >
+              Refresh followers</button
+            ><button type="button" data-action="edit-device" :disabled="!!busy" @click="edit(device)">Edit</button
+            ><button type="button" data-action="delete-device" :disabled="!!busy" @click="confirmDelete(device)">
+              Delete
+            </button>
+          </div>
+          <form
+            v-if="editing === device.id"
+            data-device-edit
+            class="studio-card grid gap-3"
+            @submit.prevent="saveAddress(device)"
+          >
+            <label>Studio connection address<input v-model="editUrl" name="device-url" required type="url" /></label>
+            <p v-if="device.role === 'follower'" class="studio-muted text-xs">
+              Local override: this address is retained when followers refresh. Fleet membership stays leader-managed.
+            </p>
+            <div class="flex gap-2">
+              <button class="studio-primary" :disabled="!!busy" type="submit">Save address</button
+              ><button type="button" data-action="cancel-device-edit" :disabled="!!busy" @click="editing = ''">
+                Cancel
+              </button>
+            </div>
+          </form>
+        </article>
+        <p v-if="!registry.devices.value.length" class="studio-muted">No kiosks registered yet.</p>
+      </div>
+    </div>
+    <ConfirmDialog
+      :open="!!deleting"
+      :title="`Remove ${deleting ? registry.deviceLabel(deleting.id) : 'kiosk'} from Studio?`"
+      label="Remove kiosk from Studio?"
+      confirm-label="Remove from Studio"
+      cancel-label="Keep kiosk"
+      :busy="!!busy"
+      confirm-action="confirm-device-delete"
+      cancel-action="cancel-device-delete"
+      @confirm="remove"
+      @cancel="closeDelete"
+    >
+      <p v-if="deleting?.role === 'leader'">This also removes its discovered followers from the Studio registry.</p>
+      <p v-else-if="deleting?.role === 'follower'">This follower can be rediscovered on the next fleet refresh.</p>
+      <p>Saved recordings and models are kept. This does not change the kiosk itself.</p>
+      <p v-if="error" role="alert" class="studio-note">{{ error }}</p>
+    </ConfirmDialog>
+  </section>
+</template>

@@ -9,50 +9,24 @@ if [ ! -v DATA_DIR ] ; then
 fi
 
 DEFAULT_SAMPLES=50000
-DEFAULT_BATCH_SIZE=100
 DEFAULT_TRAINING_STEPS=40000
 DEFAULT_LANGUAGE=en
-DEFAULT_ENGLISH_ACCENT=mixed
-DEFAULT_TTS_MODE=hybrid
-DEFAULT_TTS_VOICE_COUNT=128
 
 [ -f "${DATA_DIR}/.defaults.env" ] && source "${DATA_DIR}/.defaults.env" || :
 
 : "${SAMPLES:=${DEFAULT_SAMPLES}}"
-: "${BATCH_SIZE:=${DEFAULT_BATCH_SIZE}}"
 : "${TRAINING_STEPS:=${DEFAULT_TRAINING_STEPS}}"
 : "${LANGUAGE:=${DEFAULT_LANGUAGE}}"
-: "${ENGLISH_ACCENT:=${DEFAULT_ENGLISH_ACCENT}}"
-: "${TTS_MODE:=${DEFAULT_TTS_MODE}}"
-: "${TTS_VOICE_COUNT:=${DEFAULT_TTS_VOICE_COUNT}}"
-: "${CLEANUP_WORK_DIR:=false}"
-: "${CLEANUP_ARCHIVES:=false}"
-: "${CLEANUP_INTERMEDIATE_FILES:=false}"
-: "${QUIET:=false}"
 : "${VERBOSE:=false}"
 
 HELP=false
 
 if [ -v KNOWN_ARGS ] ; then
-    KNOWN_ARGS+=( help verbose quiet h v q )
+    KNOWN_ARGS+=( help verbose h v )
 fi
-declare -gi OPTION_COUNT=0
 declare -ga POSITIONAL_ARGS=()
-declare -ga EXTRA_ARGS=()
 declare -ga UNKNOWN_ARGS=()
-declare -i __stop_parsing=0
 for a in "$@"; do
-    if [ "$a" == "--" ] ; then
-        __stop_parsing=1
-        shift
-        continue
-    fi
-    if [ $__stop_parsing == 1 ] ; then
-        EXTRA_ARGS+=( "$a" )
-        shift
-        continue
-    fi
-
     if [ -v KNOWN_ARGS ] && [[ "${a}" =~ ^--?([^=]+)=?.* ]] ; then
         _arg=${BASH_REMATCH[1]}
         known=false
@@ -61,19 +35,13 @@ for a in "$@"; do
         done
         $known || UNKNOWN_ARGS+=( "${a}" )
     fi
-    OPTION_COUNT+=1
     case "$a" in
         -h | --help)
             HELP=true
             break
             ;;
-        -q | --quiet)
-            QUIET=true
-            break
-            ;;
         -v | --verbose)
             VERBOSE=true
-            break
             ;;
         --*=*)
             [[ $a =~ --([^=]+)=(.*) ]]
@@ -122,37 +90,54 @@ if ${print_seps}:
 EOF
 }
 
-justify_text() {
-    msg="${1:?Need a string}"
-    len="${2:?Need a length}"
-    printf "%*s\n" $(( (${#msg}+len)/2)) "${msg}"
-}
-
-get_filecounts() {
-    declare -ln fca=${1}
-    local af=${2}
-    if [ -f "${af}" ] ; then
-        mapfile -t fc < <(cat "${af}")
-        for ds in "${fc[@]}" ; do
-            [[ "${ds}" =~ ^([^:]+):([0-9-]+)$ ]] && fca[${BASH_REMATCH[1]}]=${BASH_REMATCH[2]} || :
-        done
+# pip install, reduced to a progress dot per output line unless --verbose.
+pip_install() {
+    if $VERBOSE ; then
+        pip install "$@" || return 1
+    else
+        { pip install "$@" || return 1 ; } | stdbuf -i0 -o0 tr -d '[:print:]' | stdbuf -i0 -o0 tr '\n' '.'
     fi
+    echo
 }
 
-get_total_filecount() {
-    declare -ln fca=${1}
-    declare -li total=0
-    for ds in "${fca[@]}" ; do
-        total+=${ds}
-    done
-    echo $total
+# Sets GPU_COMPUTE_CAPABILITY and IS_BLACKWELL (compute capability 12.x, or
+# MWW_BLACKWELL_IMAGE when nvidia-smi cannot report a capability).
+detect_blackwell() {
+    GPU_COMPUTE_CAPABILITY=""
+    if command -v nvidia-smi >/dev/null 2>&1 ; then
+        GPU_COMPUTE_CAPABILITY="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null \
+            | head -n 1 | tr -d '[:space:]')" || :
+    fi
+    IS_BLACKWELL=false
+    case "${GPU_COMPUTE_CAPABILITY}" in
+        12.*) IS_BLACKWELL=true ;;
+        "")
+            case "${MWW_BLACKWELL_IMAGE:-}" in
+                1|true|TRUE|True|yes|YES|on|ON) IS_BLACKWELL=true ;;
+            esac
+            ;;
+    esac
 }
 
-write_filecounts() {
-    declare -ln fca=${1}
-    local af=${2}
-    rm -rf "${af}" || :
-    for ds in "${!fca[@]}" ; do
-        echo "${ds}:${fca[${ds}]}" >> "${af}"
-    done
+# Pinned tool checkouts. Bump a commit here to move every install to it.
+MWW_URL="https://github.com/TaterTotterson/micro-wake-word"
+MWW_COMMIT="97a4053537e749ba7eb4d32711adcbe1d9f9a653"
+PSG_URL="https://github.com/TaterTotterson/piper-sample-generator"
+PSG_COMMIT="d4fa7af249c7c65c7d625614f348e7ee54cc5830"
+
+# checkout_tool <dir> <url> <commit>: check out the pinned commit, re-cloning a
+# missing, modified or foreign checkout.
+checkout_tool() {
+    local dir="$1" url="$2" commit="$3" origin
+    origin="$(git -C "${dir}" remote get-url origin 2>/dev/null || :)"
+    if [ "${origin%.git}" != "${url}" ] || [ -n "$(git -C "${dir}" status --porcelain 2>/dev/null)" ] ; then
+        rm -rf "${dir}"
+        mkdir -p "$(dirname "${dir}")"
+        echo "   Cloning ${url} to ${dir}"
+        git clone -q "${url}" "${dir}"
+    fi
+    if [ "$(git -C "${dir}" rev-parse HEAD)" != "${commit}" ] ; then
+        git -C "${dir}" fetch -q origin "${commit}"
+        git -C "${dir}" checkout -q "${commit}"
+    fi
 }

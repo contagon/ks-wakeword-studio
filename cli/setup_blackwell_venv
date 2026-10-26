@@ -61,15 +61,6 @@ export PIP_PROGRESS_BAR=off
 export PIP_NO_COLOR=1
 export PIP_QUIET=0
 
-pip_install() {
-    if $VERBOSE ; then
-        pip install "$@" || return 1
-    else
-        { pip install "$@" || return 1 ; } | stdbuf -i0 -o0 tr -d '[:print:]' | stdbuf -i0 -o0 tr '\n' '.'
-    fi
-    echo
-}
-
 echo "   ===== Installing Blackwell TensorFlow wheel ====="
 pip_install --upgrade pip setuptools wheel
 pip_install "${TF_WHEEL_URL}"
@@ -95,12 +86,7 @@ pip_install \
 
 echo "   ===== Checking microwakeword ====="
 MWW="${DATA_DIR}/tools/microWakeWord"
-if [ ! -d "${MWW}" ] || [ -n "$(git -C "${MWW}" status --porcelain 2>/dev/null || true)" ] ; then
-    rm -rf "${MWW}" || :
-    mkdir -p "${DATA_DIR}/tools"
-    echo "   Cloning micro-wake-word to ${DATA_DIR}/tools"
-    git clone https://github.com/TaterTotterson/micro-wake-word "${MWW}" &>/dev/null
-fi
+checkout_tool "${MWW}" "${MWW_URL}" "${MWW_COMMIT}"
 echo "   Installing microwakeword into Blackwell venv"
 pip_install --no-deps -e "${MWW}"
 

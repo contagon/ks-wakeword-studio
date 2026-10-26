@@ -1,0 +1,460 @@
+"""Durable desired-version publication, never direct uploads to followers.
+
+Network work is serialized with filesystem flocks (also across runtimes). The
+intent gate spans mutation, so a completed rollback cannot be followed by bytes
+or a follower refresh from a stale revision. Per-target locks also serialize
+different wakewords sharing the kiosk's single staging directory. No SQL write
+transaction is held across HTTP or credential lookup.
+"""
+import hashlib
+import io
+import json
+import subprocess
+from dataclasses import asdict, replace
+from datetime import timedelta
+from pathlib import Path
+from tempfile import TemporaryDirectory, TemporaryFile
+from zipfile import ZipFile, ZIP_DEFLATED
+
+from studio import REPO
+from studio.automation import AutomationService
+from studio.models import (Conflict, CredentialsRequired, IdentityMismatch, ModelVersion, NotFound,
+                           Publication, RemoteRejected, RemoteUnavailable, ValidationError, aware_utc,
+                           iso_now, utc_now)
+from studio.mww_training import checked_file, sha256, training_environment
+from studio.storage import publication_lock
+from studio.workspaces import require_word
+from studio.notifications import publication_finished_in
+
+class StagingFailure(Exception):
+    """Fixed local codes only; never expose raw remote responses."""
+
+
+class DeploymentService:
+    max_attempts = 6
+
+    def __init__(self, store, devices, training, *, clock=utc_now):
+        self.store, self.devices, self.training, self.clock = store, devices, training, clock
+
+    def version(self, version_id, word_id=None):
+        with self.store.transaction() as db:
+            row = db.execute('SELECT v.version,j.status,EXISTS(SELECT 1 FROM legacy_model_validations a WHERE a.version_id=v.id) validated,EXISTS(SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id) legacy FROM model_versions v JOIN studio_jobs j ON j.id=v.run_id '
+                             'WHERE v.id=?', (version_id,)).fetchone()
+        if row is None:
+            raise NotFound('Model version not found')
+        if row['status'] != 'complete':
+            raise Conflict('Model version is not complete')
+        version = ModelVersion(**json.loads(row['version']))
+        if row['legacy']:
+            version = replace(version, origin='legacy', validation_state='validated' if row['validated'] else 'unvalidated')
+        if word_id is not None and version.word_id != word_id:
+            raise Conflict('Model version belongs to another workspace')
+        return version
+
+    def artifacts(self, version):
+        """Validate the entire archive; upload only the microWakeWord pair."""
+        root = self.store.root / 'models' / version.word_id / version.id
+        if Path(version.path) != root or root.is_symlink():
+            raise ValidationError('Invalid archive path')
+        try:
+            for name, expected in version.checksums.items():
+                if sha256(checked_file(root / name, root)) != expected:
+                    raise ValidationError('Archive checksum mismatch')
+            slug = version.model_id
+            names = [slug + '.json', slug + '.tflite']
+            if not all(n in version.checksums for n in names):
+                raise ValidationError('Missing publication artifact')
+            content = {n: checked_file(root / n, root).read_bytes() for n in names}
+            # Hash the actual buffers that will be sent (not just earlier reads).
+            if any(hashlib.sha256(b).hexdigest() != version.checksums[n] for n, b in content.items()):
+                raise ValidationError('Archive changed during read')
+            manifest = json.loads(content[slug + '.json'])
+            if (manifest.get('model') != slug + '.tflite' or
+                    not (manifest.get('type') == 'micro' or isinstance(manifest.get('micro'), dict))):
+                raise ValidationError('Invalid stable manifest')
+            if any(not b or len(b) > self.devices.client.max_upload for b in content.values()):
+                raise ValidationError('Invalid publication size')
+            return content
+        except (OSError, ValueError, TypeError, AttributeError):
+            raise ValidationError('Invalid model archive') from None
+
+    @staticmethod
+    def _expected(content):
+        return {'microwakeword/' + n:
+                hashlib.sha256(b).hexdigest() for n, b in content.items()}
+
+    def archive(self, version_id, word_id):
+        """Validated complete archive stream, with bounded memory and cleanup."""
+        version = self.version(version_id, word_id)
+        if version.origin != 'legacy':
+            self.artifacts(version)
+        else:
+            root = self.store.root / 'models' / version.word_id / version.id
+            if Path(version.path) != root:
+                raise ValidationError('Invalid archive path')
+            for name, expected in version.checksums.items():
+                if sha256(checked_file(root / name, root)) != expected:
+                    raise ValidationError('Archive checksum mismatch')
+        handle = TemporaryFile(dir=self.store.root)
+        try:
+            with ZipFile(handle, 'w', compression=ZIP_DEFLATED) as bundle:
+                root = Path(version.path)
+                for name in version.checksums:
+                    bundle.write(checked_file(root / name, root), name)
+                bundle.writestr('archive.json', json.dumps(asdict(version), sort_keys=True))
+            handle.seek(0)
+        except BaseException:
+            handle.close()
+            raise
+        def chunks():
+            try:
+                while block := handle.read(65536):
+                    yield block
+            finally:
+                handle.close()
+        return chunks()
+
+    def _intent(self, db, version):
+        row = db.execute('SELECT revision FROM deployment_intents WHERE word_id=?', (version.word_id,)).fetchone()
+        revision = row[0] + 1 if row else 1
+        db.execute('INSERT INTO deployment_intents VALUES (?,?,?) ON CONFLICT(word_id) DO UPDATE SET '
+                   'version_id=excluded.version_id, revision=excluded.revision', (version.word_id, version.id, revision))
+        # Atomic intent for *all* registered targets, including indirect and
+        # missing-credential targets. No network before this transaction commits.
+        db.execute('DELETE FROM publications WHERE word_id=?', (version.word_id,))
+        self._enroll(db, version.word_id, version.id, revision)
+
+    def _enroll(self, db, word_id, version_id, revision):
+        for row in db.execute('SELECT id FROM devices WHERE removed=0').fetchall():
+            db.execute("INSERT OR IGNORE INTO publications(word_id,device_id,desired_version,revision,state,updated_at) "
+                       "VALUES (?,?,?,?,'pending',?)", (word_id, row[0], version_id, revision, iso_now(self.clock)))
+        # Terminal observations must not outlive current registry coverage.
+        # This is local reconciliation only: never probe/refresh excluded or
+        # removed followers just to discover that they are no longer eligible.
+        rows = db.execute('SELECT p.*,d.active,d.role,d.model_eligible,b.reason staging_reason FROM publications p '
+                          'JOIN devices d ON d.id=p.device_id LEFT JOIN deployment_staging_blocks b ON b.device_id=p.device_id '
+                          'WHERE p.word_id=? AND d.removed=0', (word_id,)).fetchall()
+        for row in rows:
+            # Quarantine belongs to the stable device identity, not its current
+            # fleet role. Neither profile edits nor membership changes release it.
+            blocked = ('staging_blocked' if row['staging_reason'] else
+                       'inactive' if not row['active'] else
+                       'not_covered' if row['role'] == 'follower' and not row['model_eligible'] else None)
+            if blocked and row['state'] != blocked:
+                db.execute("UPDATE publications SET state=?,next_retry=NULL,manifest_state='unverified',"
+                           "refresh_state='pending',runtime_state='unverified',error_code=?,updated_at=? "
+                           'WHERE word_id=? AND device_id=?',
+                            (blocked, row['staging_reason'] if blocked == 'staging_blocked' else blocked,
+                             iso_now(self.clock), word_id, row['device_id']))
+                # Preexisting quarantine becomes terminal during enrollment,
+                # before _attempt/_save can observe this revision. Capture only
+                # the transition: existing terminal history is never replayed.
+                updated = db.execute('SELECT * FROM publications WHERE word_id=? AND device_id=?',
+                                     (word_id, row['device_id'])).fetchone()
+                publication_finished_in(db, Publication(**dict(updated)))
+        # Membership/profile edits can make a previously blocked target eligible
+        # without a new trained version. Only explicit registry eligibility
+        # changes reopen these states; exhausted remote retries stay bounded.
+        db.execute("UPDATE publications SET state='pending',attempts=0,next_retry=NULL WHERE word_id=? AND "
+                   "state IN ('not_covered','inactive') AND device_id IN "
+                   "(SELECT id FROM devices WHERE removed=0 AND active=1 AND (role!='follower' OR model_eligible=1))", (word_id,))
+
+    def _reconcile(self):
+        # Successful versions are discovered in archive insertion order, not
+        # wall-clock order. Every version gets a durable event; only the newest
+        # newly completed version becomes desired. Consumed events never undo a
+        # manual rollback. This also recovers the finish->callback crash window.
+        with self.store.transaction() as db:
+            db.execute("INSERT OR IGNORE INTO deployment_events(version_id) SELECT v.id FROM model_versions v "
+                       "JOIN studio_jobs j ON j.id=v.run_id WHERE j.status='complete' AND j.kind='train' AND NOT EXISTS "
+                       "(SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id)")
+            rows = db.execute("SELECT v.version,v.rowid AS archive_order FROM deployment_events e JOIN model_versions v ON v.id=e.version_id "
+                              "JOIN studio_jobs j ON j.id=v.run_id WHERE e.consumed=0 AND j.status='complete' AND NOT EXISTS "
+                              "(SELECT 1 FROM migration_model_provenance p WHERE p.version_id=v.id) ORDER BY v.rowid").fetchall()
+            for row in rows:
+                version = ModelVersion(**json.loads(row[0]))
+                policy = db.execute('SELECT settings,archive_cursor FROM workspace_automation WHERE word_id=?', (version.word_id,)).fetchone()
+                enabled = policy and json.loads(policy['settings'])['deployment_policy']['after_training']
+                if enabled and row['archive_order'] > policy['archive_cursor']:
+                    current = db.execute('SELECT version_id FROM deployment_intents WHERE word_id=?', (version.word_id,)).fetchone()
+                    if not current or current[0] != version.id:
+                        self._intent(db, version)
+                    db.execute('UPDATE workspace_automation SET deployment_cursor=MAX(deployment_cursor,?) WHERE word_id=?', (row['archive_order'], version.word_id))
+                if policy:
+                    db.execute('UPDATE workspace_automation SET archive_cursor=MAX(archive_cursor,?) WHERE word_id=?', (row['archive_order'], version.word_id))
+                db.execute('UPDATE deployment_events SET consumed=1 WHERE version_id=?', (version.id,))
+            for intent in db.execute('SELECT * FROM deployment_intents').fetchall():
+                self._enroll(db, intent['word_id'], intent['version_id'], intent['revision'])
+
+    def reconcile(self):
+        """No network: safe on startup, after completion, or on recovery."""
+        with publication_lock(self.store, 'intent'):
+            self._reconcile()
+
+    def publish(self, version_id, *, automatic=False):
+        with publication_lock(self.store, 'intent'):
+            # Validation reads/writes archives too; deletion must wait for the
+            # entire publication, not just the subsequent network mutation.
+            version = self.version(version_id)
+            self.artifacts(version)  # reject tampering before changing desired intent
+            if version.origin == 'legacy':
+                version = self._validate_legacy(version)
+            self._reconcile()
+            with self.store.transaction() as db:
+                order = db.execute('SELECT rowid FROM model_versions WHERE id=?', (version.id,)).fetchone()[0]
+                current = db.execute('SELECT version_id FROM deployment_intents WHERE word_id=?', (version.word_id,)).fetchone()
+                policy = db.execute('SELECT settings,deployment_cursor FROM workspace_automation WHERE word_id=?', (version.word_id,)).fetchone()
+                eligible = not automatic or (policy and json.loads(policy['settings'])['deployment']['enabled'] and order > policy['deployment_cursor'])
+                if eligible and (not automatic or not current or current[0] != version.id):
+                    self._intent(db, version)
+                if not automatic:
+                    effective_settings = AutomationService.settings_in(db, version.word_id)
+                    watermark = db.execute('SELECT COALESCE(MAX(rowid),0) FROM model_versions WHERE word_id=?', (version.word_id,)).fetchone()[0]
+                    db.execute('INSERT INTO workspace_automation(word_id,settings,archive_cursor,deployment_cursor) VALUES (?,?,?,?) '
+                        'ON CONFLICT(word_id) DO UPDATE SET archive_cursor=MAX(archive_cursor,excluded.archive_cursor),deployment_cursor=MAX(deployment_cursor,excluded.deployment_cursor)',
+                        (version.word_id, json.dumps(asdict(effective_settings)), watermark, watermark))
+                elif eligible:
+                    db.execute('UPDATE workspace_automation SET deployment_cursor=MAX(deployment_cursor,?) WHERE word_id=?', (order, version.word_id))
+            self._run_due(aware_utc(self.clock()), word_id=version.word_id)
+            return self.status(version.word_id)
+
+    def _validate_legacy(self, version):
+        """Explicit publication only: real engine acceptance, never a magic-byte gate.
+
+        Import and reconciliation never run this or initiate remote operations.
+        Validate every explicit publication, even a previously validated archive.
+        """
+        shared = self.store.data_dir
+        python = shared / '.venv/bin/python'
+        if not python.is_file():
+            raise ValidationError('Legacy validation requires the training environment; run bash cli/setup_python_venv --data-dir=' + str(shared))
+        env, _ = training_environment(shared)
+        with TemporaryDirectory(prefix='legacy-validation-', dir=self.store.root) as temporary:
+            command = [str(python), str(REPO / 'cli/validate_studio_model.py'), '--engine=mww',
+                       '--data-dir=' + temporary, '--model-id=' + version.model_id,
+                       '--model-file=' + str(Path(version.path) / (version.model_id + '.tflite'))]
+            try:
+                subprocess.run(command, env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+                accepted = json.loads((Path(temporary) / 'validation.json').read_text()).get('microWakeWord') is True
+            except (OSError, ValueError, subprocess.SubprocessError):
+                accepted = False
+        if not accepted:
+            raise ValidationError('Legacy structural engine validation failed; prepare the TensorFlow training environment and inspect the original model; no publication requested')
+        self.artifacts(version)
+        validated = replace(version, validation_state='validated')
+        with self.store.transaction() as db:
+            db.execute('INSERT INTO legacy_model_validations VALUES (?,?) ON CONFLICT(version_id) DO UPDATE SET validated_at=excluded.validated_at', (version.id, iso_now(self.clock)))
+        return validated
+
+    def retry_due(self, now):
+        now = aware_utc(now)
+        with publication_lock(self.store, 'intent'):
+            self._reconcile()
+            return self._run_due(now)
+
+    def status(self, word_id):
+        with self.store.transaction() as db:
+            require_word(db, word_id)
+            return [Publication(**dict(row)) for row in db.execute(
+                'SELECT p.*,j.run_number FROM publications p '
+                'JOIN devices d ON d.id=p.device_id AND d.removed=0 '
+                'LEFT JOIN model_versions v ON v.id=p.desired_version AND v.word_id=p.word_id '
+                'LEFT JOIN studio_jobs j ON j.id=v.run_id '
+                'WHERE p.word_id=? ORDER BY p.device_id', (word_id,))]
+
+    def _current(self, p):
+        with self.store.transaction() as db:
+            row = db.execute('SELECT version_id,revision FROM deployment_intents WHERE word_id=?', (p.word_id,)).fetchone()
+            return row and tuple(row) == (p.desired_version, p.revision)
+
+    def _save(self, p, **changes):
+        data = {**asdict(p), **changes, 'updated_at': iso_now(self.clock)}
+        data.pop('cache_effect', None)
+        updated = Publication(**data)
+        with self.store.transaction() as db:
+            fields = [k for k in data if k not in ('word_id', 'device_id', 'revision', 'desired_version', 'run_number')]
+            cursor = db.execute('UPDATE publications SET ' + ','.join(k + '=?' for k in fields) +
+                       ' WHERE word_id=? AND device_id=? AND revision=? AND desired_version=?',
+                        (*[data[k] for k in fields], p.word_id, p.device_id, p.revision, p.desired_version))
+            if cursor.rowcount:
+                publication_finished_in(db, updated)
+        return updated
+
+    def _device(self, p, *, indirect):
+        if not self._current(p):
+            raise Conflict('Superseded publication')
+        device = self.devices.get(p.device_id)
+        if not device.active or (device.role == 'follower') != indirect:
+            raise IdentityMismatch('Kiosk publication role changed')
+        identity = self.devices.client.identity(device)
+        if (identity.follows != indirect or (not indirect and identity.leader != (device.role == 'leader'))):
+            raise IdentityMismatch('Kiosk publication role changed')
+        return device
+
+    def _staging_rows(self, device_id):
+        with self.store.transaction() as db:
+            return db.execute('SELECT * FROM deployment_staging WHERE device_id=? ORDER BY word_id', (device_id,)).fetchall()
+
+    def _commit_current(self, p, content, now):
+        """Repair *all* owned persistent staging before any target-wide commit.
+
+        Caller holds the intent gate and target lock. Resolve dirty ownership to
+        CURRENT intents, not the version/revision that crashed. Validate every
+        affected archive before sending anything. Journal the full filename union
+        before uploads, and clear only after exact acceptance + all hashes.
+        """
+        affected = {p.word_id: (p, content)}
+        dirty = self._staging_rows(p.device_id)
+        for row in dirty:
+            if row['word_id'] not in affected:
+                with self.store.transaction() as db:
+                    publication = db.execute('SELECT * FROM publications WHERE word_id=? AND device_id=?',
+                                             (row['word_id'], p.device_id)).fetchone()
+                if publication is None:
+                    raise StagingFailure('staging_desired_missing')
+                current = Publication(**dict(publication))
+                if not self._current(current):
+                    raise StagingFailure('staging_desired_missing')
+                version = self.version(current.desired_version, current.word_id)
+                if version.validation_state != 'validated':
+                    raise StagingFailure('staging_archive_unvalidated')
+                affected[current.word_id] = (current, self.artifacts(version))
+            desired_names = set(affected[row['word_id']][1])
+            if not set(json.loads(row['filenames'])) <= desired_names:
+                # No discard API exists. Never restore a no-longer-desired OWW
+                # companion just to drain staging, or delete a custom model.
+                raise StagingFailure('staging_artifact_not_desired')
+        with self.store.transaction() as db:
+            for current, files in affected.values():
+                db.execute('INSERT INTO deployment_staging VALUES (?,?,?,?) ON CONFLICT(device_id,word_id) '
+                           'DO UPDATE SET filenames=excluded.filenames,claimed_revision=excluded.claimed_revision',
+                           (p.device_id, current.word_id, json.dumps(sorted(files)), current.revision))
+        expected, required = {}, set()
+        for current, files in affected.values():
+            expected.update(self._expected(files))
+            required.update(('microwakeword', n.rsplit('.', 1)[0]) for n in files)
+            for name, data in files.items():
+                device = self._device(current, indirect=False)
+                self.devices.client.stage_model(device, name, io.BytesIO(data))
+        device = self._device(p, indirect=False)
+        result = self.devices.client.commit_models(device)
+        accepted = {(x['engine'], x['id']) for x in result.added}
+        if accepted - required:
+            # Unknown external staging cannot be undone or reconstructed safely.
+            # Quarantine this target across words/revisions; never claim success
+            # or issue another commit/refresh under an invented cleanup policy.
+            with self.store.transaction() as db:
+                db.execute('INSERT OR REPLACE INTO deployment_staging_blocks VALUES (?,?)',
+                           (p.device_id, 'staging_unowned'))
+            raise StagingFailure('staging_unowned')
+        if result.rejected or accepted != required or len(result.added) != len(required):
+            raise StagingFailure('rejected')
+        remote = self.devices.client.model_manifest(device)
+        if not all(remote.get(k) == v for k, v in expected.items()):
+            raise StagingFailure('hash_mismatch')
+        for current, _ in affected.values():
+            if current.word_id != p.word_id:
+                self._save(current, manifest_state='verified', refresh_state='pending', state='refresh_pending',
+                           next_retry=now.isoformat(), error_code=None)
+        # Keep the journal through refresh scheduling. A crash before all
+        # affected rows are due must replay recovery, not strand another word.
+        with self.store.transaction() as db:
+            db.execute('DELETE FROM deployment_staging WHERE device_id=?', (p.device_id,))
+
+    def _attempt(self, p, now):
+        # Check before role/eligibility, credentials, budgets or any remote work.
+        # Becoming a follower must not turn a quarantined uploader into a
+        # refresh-only success. Only explicit operator remediation can release it.
+        with self.store.transaction() as db:
+            blocked = db.execute('SELECT reason FROM deployment_staging_blocks WHERE device_id=?', (p.device_id,)).fetchone()
+        if blocked:
+            return self._save(p, state='staging_blocked', error_code=blocked[0], manifest_state='unverified',
+                              refresh_state='pending', runtime_state='unverified', next_retry=None)
+        if p.attempts >= self.max_attempts:
+            return self._save(p, state='exhausted', error_code='interrupted_attempt', next_retry=None)
+        device = self.devices.get(p.device_id)
+        indirect = device.role == 'follower'
+        if not device.active:
+            return self._save(p, state='inactive', next_retry=None)
+        if indirect and not device.model_eligible:
+            return self._save(p, state='not_covered', next_retry=None)
+        if device.credentials_status != 'ready':
+            return self._save(p, state='credentials_required', next_retry=(now + timedelta(minutes=5)).isoformat())
+        # A claimed attempt must remain recoverable even if the process dies
+        # before it can persist a result/backoff. `pending` is always eligible.
+        p = self._save(p, state='pending', attempts=p.attempts + 1, next_retry=None)
+        try:
+            version = self.version(p.desired_version, p.word_id)
+            if version.validation_state != 'validated':
+                raise ValidationError('Legacy structural validation required')
+            content = self.artifacts(version)
+            expected = self._expected(content)
+            device = self._device(p, indirect=indirect)
+            remote = self.devices.client.model_manifest(device)
+            matches = all(remote.get(k) == v for k, v in expected.items())
+            if not matches:
+                p = self._save(p, manifest_state='unverified', refresh_state='pending')
+            if indirect:
+                if not device.leader_id:
+                    return self._pending(p, now, 'leader_unverified')
+                leader = next((x for x in self.status(p.word_id) if x.device_id == device.leader_id), None)
+                if not leader or leader.desired_version != p.desired_version or leader.manifest_state != 'verified':
+                    return self._pending(p, now, 'leader_unverified')
+                if not matches:
+                    return self._pending(p, now, 'sync_pending')
+            elif not matches or self._staging_rows(p.device_id):
+                self._commit_current(p, content, now)
+            # Persist a due refresh, not a terminal publication: a crash between
+            # hash observation and refresh acknowledgement must be replayable.
+            p = self._save(p, manifest_state='verified', state='refresh_pending', refresh_state='pending',
+                           next_retry=now.isoformat())
+            # Re-read manifest immediately before refresh; never refresh a lagging
+            # follower (or a changed direct file) based on an old observation.
+            device = self._device(p, indirect=indirect)
+            remote = self.devices.client.model_manifest(device)
+            if not all(remote.get(k) == v for k, v in expected.items()):
+                return self._pending(p, now, 'sync_pending' if indirect else 'hash_mismatch', manifest_state='unverified')
+            refresh = self.devices.client.refresh_models(device)
+            if not refresh['restarted']:
+                return self._pending(p, now, 'refresh_pending', error_code='restart_not_confirmed')
+            return self._save(p, state='synced' if indirect else 'published', refresh_state='acknowledged',
+                               published_at=iso_now(self.clock), error_code=None, next_retry=None)
+        except StagingFailure as error:
+            code = str(error)
+            if code in ('rejected', 'hash_mismatch'):
+                return self._pending(p, now, code)
+            return self._save(p, state='staging_blocked', error_code=code, manifest_state='unverified',
+                              refresh_state='pending', next_retry=None)
+        except CredentialsRequired:
+            return self._pending(p, now, 'credentials_required')
+        except IdentityMismatch:
+            return self._save(p, state='role_changed', error_code='identity_or_role_changed', next_retry=None)
+        except RemoteUnavailable:
+            return self._pending(p, now, 'refresh_pending' if p.manifest_state == 'verified' else 'offline')
+        except RemoteRejected:
+            return self._pending(p, now, 'refresh_pending' if p.manifest_state == 'verified' else 'rejected')
+        except (ValidationError, Conflict, NotFound):
+            return self._save(p, state='archive_invalid', error_code='archive_not_publishable', next_retry=None)
+
+    def _pending(self, p, now, state, **changes):
+        exhausted = p.attempts >= self.max_attempts
+        error_code = changes.pop('error_code', state)
+        return self._save(p, state='exhausted' if exhausted else state, error_code=error_code,
+                          next_retry=None if exhausted else (now + timedelta(seconds=min(3600, 30 * 2 ** (p.attempts - 1)))).isoformat(),
+                          **changes)
+
+    def _run_due(self, now, word_id=None):
+        with self.store.transaction() as db:
+            rows = db.execute('SELECT p.* FROM publications p JOIN devices d ON d.id=p.device_id WHERE d.removed=0' +
+                              (' AND p.word_id=?' if word_id else '') +
+                              " ORDER BY p.word_id, (d.role='follower'), p.device_id", (word_id,) if word_id else ()).fetchall()
+        result = []
+        for row in rows:
+            p = Publication(**dict(row))
+            # Terminal success/blocked states are not an unbounded polling loop.
+            if p.state != 'pending' and (p.next_retry is None or p.next_retry > now.isoformat()):
+                continue
+            with publication_lock(self.store, 'target:' + p.device_id):
+                if self._current(p):
+                    result.append(self._attempt(p, now))
+        return result

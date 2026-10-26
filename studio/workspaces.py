@@ -1,0 +1,123 @@
+"""Wakeword identity and display settings, independent of legacy global paths."""
+
+import re
+import sqlite3
+import unicodedata
+from collections.abc import Callable
+from datetime import datetime
+from uuid import uuid4
+
+from studio.db import Store
+from studio.deletion import delete_workspace
+from studio.models import (Conflict, NotFound, Page, SourceMapping, ValidationError, Wakeword,
+                           WakewordUpdate, check_page, iso_now, utc_now)
+
+
+def require_word(db, word_id):
+    row = db.execute("SELECT * FROM wakewords WHERE id=?", (word_id,)).fetchone()
+    if row is None:
+        raise NotFound("Wakeword not found")
+    return row
+
+
+def source_word(db, device_id: str, engine: str, source_phrase: str) -> str | None:
+    explicit = db.execute("SELECT word_id FROM source_mappings WHERE device_id=? AND engine=? AND source_phrase=?",
+                          (device_id, engine, source_phrase)).fetchone()
+    if explicit:
+        return explicit[0]
+    if not isinstance(source_phrase, str) or not source_phrase.strip():
+        return None
+
+    def normalize(phrase):
+        return ' '.join(unicodedata.normalize('NFKC', phrase).casefold().split())
+
+    phrase = normalize(source_phrase)
+    candidates = {row['id'] for row in db.execute('SELECT id,phrase,model_id FROM wakewords')
+                  if normalize(row['phrase']) == phrase or row['model_id'] == source_phrase}
+    return next(iter(candidates)) if len(candidates) == 1 else None
+
+
+def clean_text(value: str, maximum: int) -> str:
+    if not isinstance(value, str) or not 1 <= len(value.strip()) <= maximum:
+        raise ValidationError("Invalid workspace text")
+    if any(ord(char) < 32 for char in value):
+        raise ValidationError("Invalid workspace text")
+    return value.strip()
+
+
+class WorkspaceService:
+    def __init__(self, store: Store, clock: Callable[[], datetime] = utc_now, *, blobs=None):
+        self.store = store
+        self.clock = clock
+        self.blobs = blobs
+
+    def set_source_mapping(self, device_id: str, engine: str, source_phrase: str, word_id: str) -> None:
+        # Exact per-device/engine names only. Display phrases are not identities.
+        for value, bound in ((engine, 100), (source_phrase, 200)):
+            if clean_text(value, bound) != value:
+                raise ValidationError("Source mappings require exact names")
+        with self.store.transaction() as db:
+            if db.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone() is None:
+                raise NotFound("Device not found")
+            if db.execute("SELECT 1 FROM wakewords WHERE id=?", (word_id,)).fetchone() is None:
+                raise NotFound("Wakeword not found")
+            db.execute("""INSERT INTO source_mappings VALUES (?,?,?,?)
+                          ON CONFLICT(device_id,engine,source_phrase) DO UPDATE SET word_id=excluded.word_id""",
+                       (device_id, engine, source_phrase, word_id))
+
+    def source_mappings(self, device_id: str) -> list[SourceMapping]:
+        with self.store.transaction() as db:
+            if db.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone() is None:
+                raise NotFound("Device not found")
+            return [SourceMapping(**dict(row)) for row in db.execute(
+                "SELECT * FROM source_mappings WHERE device_id=? ORDER BY engine,source_phrase", (device_id,))]
+
+    def resolve_source(self, device_id: str, engine: str, source_phrase: str) -> str | None:
+        with self.store.transaction() as db:
+            return source_word(db, device_id, engine, source_phrase)
+
+    def create(self, phrase: str, language: str, model_id: str | None = None) -> Wakeword:
+        phrase = clean_text(phrase, 200)
+        language = clean_text(language, 35)
+        if model_id is None:
+            ascii_phrase = unicodedata.normalize('NFKD', phrase).encode('ascii', 'ignore').decode().lower()
+            slug = re.sub(r'[^a-z0-9]+', '_', ascii_phrase).strip('_')[:31].rstrip('_') or 'wakeword'
+            model_id = slug + '_' + uuid4().hex
+        if not isinstance(model_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", model_id):
+            raise ValidationError("Invalid model identifier")
+        now = iso_now(self.clock)
+        word = Wakeword(uuid4().hex, phrase, language, model_id, now, now)
+        try:
+            with self.store.transaction() as db:
+                db.execute("INSERT INTO wakewords VALUES (?, ?, ?, ?, ?, ?)",
+                           (word.id, phrase, language, model_id, now, now))
+        except sqlite3.IntegrityError as exc:
+            raise Conflict("Model identifier already exists") from exc
+        return word
+
+    def delete(self, word_id: str) -> None:
+        delete_workspace(self.store, word_id, self.blobs)
+
+    def get(self, word_id: str) -> Wakeword:
+        with self.store.transaction() as db:
+            return Wakeword(**dict(require_word(db, word_id)))
+
+    def list(self, offset: int = 0, limit: int = 50) -> Page[Wakeword]:
+        check_page(offset, limit)
+        with self.store.transaction() as db:
+            total = db.execute("SELECT COUNT(*) FROM wakewords").fetchone()[0]
+            rows = db.execute("SELECT * FROM wakewords ORDER BY created_at, id LIMIT ? OFFSET ?",
+                              (limit, offset)).fetchall()
+            return Page([Wakeword(**dict(row)) for row in rows], total, offset, limit)
+
+    def update(self, word_id: str, changes: WakewordUpdate) -> Wakeword:
+        phrase = clean_text(changes.phrase, 200) if changes.phrase is not None else None
+        language = clean_text(changes.language, 35) if changes.language is not None else None
+        with self.store.transaction() as db:
+            row = db.execute("SELECT * FROM wakewords WHERE id = ?", (word_id,)).fetchone()
+            if row is None:
+                raise NotFound("Wakeword not found")
+            db.execute("UPDATE wakewords SET phrase = ?, language = ?, updated_at = ? WHERE id = ?",
+                       (phrase if phrase is not None else row["phrase"],
+                        language if language is not None else row["language"], iso_now(self.clock), word_id))
+            return Wakeword(**dict(db.execute("SELECT * FROM wakewords WHERE id = ?", (word_id,)).fetchone()))

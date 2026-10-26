@@ -1,0 +1,54 @@
+[
+  {
+    "id": "speech",
+    "name": "Speech",
+    "description": "Precomputed microWakeWord speech classifier negatives (not augmentation audio).",
+    "source": "https://huggingface.co/datasets/kahrendt/microwakeword",
+    "url": "https://huggingface.co/datasets/kahrendt/microwakeword/resolve/main/speech.zip",
+    "license": "See upstream dataset card and constituent corpus licenses",
+    "representation": "features",
+    "split": "train",
+    "adapter": "mww_mmap",
+    "purpose": "classifier_negative",
+    "download_bytes": null
+  },
+  {
+    "id": "dinner_party",
+    "name": "Dinner party",
+    "description": "Precomputed microWakeWord dinner-party classifier negatives.",
+    "source": "https://huggingface.co/datasets/kahrendt/microwakeword",
+    "url": "https://huggingface.co/datasets/kahrendt/microwakeword/resolve/main/dinner_party.zip",
+    "license": "See upstream dataset card and constituent corpus licenses",
+    "representation": "features",
+    "split": "train",
+    "adapter": "mww_mmap",
+    "purpose": "classifier_negative",
+    "download_bytes": null
+  },
+  {
+    "id": "no_speech",
+    "name": "No speech",
+    "description": "Precomputed microWakeWord non-speech classifier negatives.",
+    "source": "https://huggingface.co/datasets/kahrendt/microwakeword",
+    "url": "https://huggingface.co/datasets/kahrendt/microwakeword/resolve/main/no_speech.zip",
+    "license": "See upstream dataset card and constituent corpus licenses",
+    "representation": "features",
+    "split": "train",
+    "adapter": "mww_mmap",
+    "purpose": "classifier_negative",
+    "download_bytes": null
+  },
+  {
+    "id": "dinner_party_eval",
+    "name": "Dinner party evaluation",
+    "description": "Held-out microWakeWord evaluation features; never sampled for training.",
+    "source": "https://huggingface.co/datasets/kahrendt/microwakeword",
+    "url": "https://huggingface.co/datasets/kahrendt/microwakeword/resolve/main/dinner_party_eval.zip",
+    "license": "See upstream dataset card and constituent corpus licenses",
+    "representation": "features",
+    "split": "evaluation",
+    "adapter": "mww_mmap",
+    "purpose": "classifier_negative",
+    "download_bytes": null
+  }
+]

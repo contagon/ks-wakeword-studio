@@ -14,18 +14,46 @@ RUN_SH = REPO_ROOT / "run.sh"
 
 
 def _cuda_path_probe() -> str:
-    source = RUN_SH.read_text(encoding="utf-8")
-    match = re.search(
-        r'WHISPER_CUDA_LIBRARY_PATH="\$\("\$\{PY\}" - <<\'PY\'\n(?P<probe>.*?)\nPY\n\)"',
-        source,
-        flags=re.DOTALL,
-    )
-    if match is None:
-        raise AssertionError("Could not locate the CUDA library path probe in run.sh")
-    return match.group("probe")
+    return (REPO_ROOT / "cli/cuda_library_path.py").read_text(encoding="utf-8")
 
 
 class RunShCudaLibraryPathTests(unittest.TestCase):
+    def test_production_launcher_keeps_real_app_and_port_without_test_harness(self):
+        source = RUN_SH.read_text(encoding='utf-8')
+        self.assertIn('"${PY}" "${ROOTDIR}/cli/cuda_library_path.py"', source)
+        self.assertIn('PORT="${REC_PORT:-8789}"', source)
+        self.assertIn('--factory trainer_server:create_app --host "${HOST}" --port "${PORT}"', source)
+        self.assertNotIn('studio_browser_server', source)
+        self.assertNotIn('StubGpuRunner', source)
+        self.assertNotIn('TRAINER_LEGACY_MODE=1', source)
+
+    def test_croniter_is_exactly_pinned_and_validated_on_reuse(self):
+        source = RUN_SH.read_text(encoding="utf-8")
+        self.assertIn('CRONITER_VERSION="6.0.0"', source)
+        self.assertIn('"croniter==${CRONITER_VERSION}"', source)
+        probe = re.search(r"import importlib.metadata as md\n(?P<probe>.*?)\nPY", source, re.DOTALL).group(0)[:-3]
+        import types
+        versions = {'fastapi': '0.115.6', 'uvicorn': '0.30.6', 'python-multipart': '0.0.9',
+                    'croniter': '6.0.0', 'apprise': '2.1.0', 'silero-vad': '5.0.0', 'numpy': '1.24.0',
+                    'faster-whisper': '1.0.0', 'nvidia-cudnn-cu12': '9.0.0'}
+        from unittest.mock import patch
+        for version in ('6.0.0', '5.0.1', None):
+            def installed(package):
+                if package == 'croniter':
+                    if version is None:
+                        import importlib.metadata
+                        raise importlib.metadata.PackageNotFoundError(package)
+                    return version
+                return versions.get(package, '1.0.0')
+            with self.subTest(version=version), patch('importlib.metadata.version', side_effect=installed), \
+                 patch.object(sys, 'argv', ['-', '0.115.6', '0.30.6', '0.0.9', '6.0.0', '2.1.0']), \
+                 patch.dict(sys.modules, {'onnxruntime': types.SimpleNamespace(get_available_providers=lambda: ['CUDAExecutionProvider'])}):
+                if version == '6.0.0':
+                    exec(probe, {})
+                else:
+                    with self.assertRaises((SystemExit, __import__('importlib.metadata', fromlist=['PackageNotFoundError']).PackageNotFoundError)):
+                        exec(probe, {})
+
     def _run_probe(self, python_path: Path) -> subprocess.CompletedProcess[str]:
         env = dict(os.environ)
         env["PYTHONPATH"] = str(python_path)
@@ -61,10 +89,10 @@ class RunShCudaLibraryPathTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "")
 
-    def test_parakeet_uses_cuda_onnxruntime_package(self) -> None:
+    def test_silero_onnx_runtime_is_installed_without_parakeet(self) -> None:
         source = RUN_SH.read_text(encoding="utf-8")
 
-        self.assertIn('"onnx-asr[hub]>=0.12.0"', source)
+        self.assertNotIn("onnx-asr", source)
         self.assertIn('"onnxruntime-gpu[cuda,cudnn]<1.27"', source)
         self.assertIn('"CUDAExecutionProvider"', source)
 

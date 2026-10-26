@@ -14,7 +14,7 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 import yaml
 
-DEFAULT_WINDOW_SIZES = [5, 6, 7]
+DEFAULT_WINDOW_SIZES = os.environ.get("MWW_CALIBRATION_WINDOW_SIZES", "5,6,7")
 DEFAULT_TARGET_FAPH = float(os.environ.get("MWW_CALIBRATION_TARGET_FAPH", "0.25"))
 DEFAULT_COOLDOWN_SLICES = int(os.environ.get("MWW_CALIBRATION_COOLDOWN_SLICES", "25"))
 DEFAULT_POSITIVE_SKIP_SLICES = int(
@@ -54,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--window-sizes",
-        default=",".join(str(value) for value in DEFAULT_WINDOW_SIZES),
+        default=DEFAULT_WINDOW_SIZES,
         help="Comma-separated sliding window sizes to evaluate.",
     )
     parser.add_argument(
