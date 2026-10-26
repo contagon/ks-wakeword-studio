@@ -320,9 +320,24 @@ test("all pages have compact controls and no narrow-screen overflow", async ({ p
       if (route === "samples" && width === 390) {
         // Phones stack each sample as a card instead of a horizontally scrolling table.
         expect((await page.locator("table").boundingBox())!.width).toBeLessThanOrEqual(390);
-        await expect(page.locator('[data-action="relabel"]').first().locator("option:checked")).toHaveText(
-          "Set label…",
+        const row = page.locator("tr[data-row-id]").first();
+        const relabel = row.getByRole("group", { name: "Relabel", exact: true });
+        await expect(relabel.getByRole("button")).toHaveCount(3);
+        const negative = relabel.getByRole("button", { name: "Negative", exact: true });
+        const nextLabel = (await negative.getAttribute("aria-pressed")) === "true" ? "Positive" : "Negative";
+        await relabel.getByRole("button", { name: nextLabel, exact: true }).click();
+        await expect(relabel.getByRole("button", { name: nextLabel, exact: true })).toHaveAttribute(
+          "aria-pressed",
+          "true",
         );
+        await page.reload();
+        await expect(
+          page
+            .locator("tr[data-row-id]")
+            .first()
+            .getByRole("group", { name: "Relabel", exact: true })
+            .getByRole("button", { name: nextLabel, exact: true }),
+        ).toHaveAttribute("aria-pressed", "true");
       }
       await page.screenshot({ path: test.info().outputPath(`polish-${route}-${width}.png`), fullPage: true });
     }
@@ -419,6 +434,8 @@ test("workspace Automate controls scoped collection and explicitly opted-in publ
   await expect(page.getByRole("dialog", { name: "Global job queue" })).toHaveCount(0);
   expect((await (await request.post("/__test/drain-collection")).json()).ran).toBe(true);
   expect((await (await request.post("/__test/drain-gpu")).json()).ran).toBe(true);
+  const automation = await (await request.get(`/api/studio/wakewords/${a.id}/automation`)).json();
+  expect(automation.last_jobs.classify.status).toBe("complete");
   const samples = await (await request.get(`/api/studio/wakewords/${a.id}/samples`)).json();
   expect(samples.items.every((sample: { label: string }) => sample.label === "negative")).toBe(true);
   expect(samples.total).toBe(2);

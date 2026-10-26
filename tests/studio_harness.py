@@ -78,8 +78,8 @@ class StubGpuRunner:
         if any(str(item).endswith('studio_classify.py') for item in argv):
             manifest = json.loads(Path(values['--input-manifest']).read_text())
             Path(values['--output-json']).write_text(json.dumps([
-                {'id': sample['id'], 'transcript': 'turn the lights off',
-                 'engine': manifest['engine'], 'model': 'fixture'} for sample in manifest['samples']]))
+                {'id': sample['id'], 'speech': True, 'transcript': 'turn the lights off',
+                 'guided_transcript': 'turn the lights off', 'model': 'fixture'} for sample in manifest['samples']]))
             return 0
         if any(str(item).endswith("tts_generate_samples.py") for item in argv):
             output = Path(values["--output-dir"])
