@@ -182,7 +182,7 @@ class Batch:
 
 @dataclass(frozen=True)
 class TrainingSettings:
-    training_steps: int = 40000
+    training_steps: int = 80000
 
 
 @dataclass(frozen=True)

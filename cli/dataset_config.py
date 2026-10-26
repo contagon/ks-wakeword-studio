@@ -69,6 +69,16 @@ def negative_features(args):
 
 
 def training_config(args):
+    if args.training_steps < 1:
+        raise ValidationError('Training steps must be at least 1')
+    # Match upstream's 75% primary / 25% low-rate finish without changing
+    # the requested total. Preserve support for one-step smoke tests.
+    finetune_steps = max(1, args.training_steps // 4) if args.training_steps > 1 else 0
+    steps = [args.training_steps - finetune_steps]
+    rates = [0.001]
+    if finetune_steps:
+        steps.append(finetune_steps)
+        rates.append(0.00025)
     features = []
     # Real recordings get 3/5 of positive draws when both positive pools exist.
     if args.generated_dir:
@@ -85,7 +95,7 @@ def training_config(args):
         'negative_sampling': sampling,
         'freq_mask_count': [0],
         'freq_mask_max_size': [0],
-        'learning_rates': [0.001],
+        'learning_rates': rates,
         'maximization_metric': 'average_viable_recall',
         'minimization_metric': None,
         'negative_class_weight': [20],
@@ -94,7 +104,7 @@ def training_config(args):
         'time_mask_count': [0],
         'time_mask_max_size': [0],
         'train_dir': str(args.work_dir / 'trained_models/wakeword'),
-        'training_steps': [args.training_steps],
+        'training_steps': steps,
         'window_step_ms': 10,
     }
 

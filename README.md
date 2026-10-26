@@ -186,6 +186,13 @@ browser request inspection can see a submitted password.
    Piper stays visible with availability guidance when local voice files are missing;
    viewing the catalog never downloads models.
 
+New training settings default to **80,000 steps**: 60,000 at learning rate 0.001,
+then 20,000 at 0.00025, with training batch size 16. Custom budgets use the same
+split, reserving the final quarter (rounded down, at least one step) for the lower
+rate. A one-step smoke run uses only the initial rate. Existing saved step budgets
+and explicit CLI overrides are preserved; they also use the staged schedule.
+This does not enable upstream's positive-batch floor or corrective training pass.
+
 ### Downloaded datasets and training prerequisites
 
 **Data → Downloaded** contains two separate resource types:

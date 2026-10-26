@@ -69,7 +69,8 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_RECALL_MARGIN,
         help=(
             "Maximum recall loss allowed when preferring a candidate with fewer "
-            "ambient false accepts (0.005 means 0.5 percentage points)."
+            "negative-track false accepts, then ambient false accepts "
+            "(0.005 means 0.5 percentage points)."
         ),
     )
     parser.add_argument(
@@ -164,10 +165,10 @@ def _compute_false_accepts_per_hour(
 
 
 def _select_best_candidate(
-    candidates: list[dict[str, float]],
+    candidates: list[dict[str, Any]],
     target_faph: float,
     recall_margin: float = DEFAULT_RECALL_MARGIN,
-) -> tuple[dict[str, float], float]:
+) -> tuple[dict[str, Any], float]:
     if not candidates:
         raise ValueError("at least one calibration candidate is required")
     if recall_margin < 0:
@@ -187,7 +188,7 @@ def _select_best_candidate(
 
     # Stay in the strictest false-accept tier that has a viable candidate. Within
     # that tier, keep candidates close to the best recall, then spend the allowed
-    # recall margin on the lowest measured false-accept rate.
+    # recall margin on rejecting captured negatives, then ambient false accepts.
     best_tier = min(tier(candidate) for candidate in candidates)
     tier_candidates = [
         candidate for candidate in candidates if tier(candidate) == best_tier
@@ -203,6 +204,7 @@ def _select_best_candidate(
     best = min(
         viable_candidates,
         key=lambda candidate: (
+            -(candidate.get("negative_rejection_rate") or 0.0),
             candidate["false_accepts_per_hour"],
             -candidate["recall"],
             abs(candidate["sliding_window_size"] - PREFERRED_WINDOW_SIZE),
@@ -224,34 +226,48 @@ def _load_config(config_path: Path) -> dict:
 def _load_eval_sets(
     handler: Any,
     config: dict,
-) -> tuple[str, str, list[np.ndarray], list[np.ndarray]]:
-    for positive_mode, ambient_mode in (
-        ("validation", "validation_ambient"),
-        ("testing", "testing_ambient"),
-    ):
-        positive_tracks, labels, _ = handler.get_data(
-            positive_mode,
-            batch_size=config["batch_size"],
-            features_length=config["spectrogram_length"],
-            truncation_strategy="none",
-        )
-        ambient_tracks, _, _ = handler.get_data(
-            ambient_mode,
-            batch_size=config["batch_size"],
-            features_length=config["spectrogram_length"],
-            truncation_strategy="none",
-        )
-        positives = [
-            np.asarray(track)
-            for track, label in zip(positive_tracks, labels)
-            if bool(label)
-        ]
-        ambient = [np.asarray(track) for track in ambient_tracks]
-        if positives and ambient:
-            return positive_mode, ambient_mode, positives, ambient
-    raise RuntimeError(
-        "No suitable validation/testing data was found for detector calibration."
+) -> tuple[str, str, list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
+    tracks, labels, _ = handler.get_data(
+        "validation",
+        batch_size=config["batch_size"],
+        features_length=config["spectrogram_length"],
+        truncation_strategy="none",
     )
+    ambient_tracks, _, _ = handler.get_data(
+        "validation_ambient",
+        batch_size=config["batch_size"],
+        features_length=config["spectrogram_length"],
+        truncation_strategy="none",
+    )
+    positives = [np.asarray(track) for track, label in zip(tracks, labels) if bool(label)]
+    negatives = [np.asarray(track) for track, label in zip(tracks, labels) if not bool(label)]
+    ambient = [np.asarray(track) for track in ambient_tracks]
+    if not positives or not ambient:
+        raise RuntimeError(
+            "Detector calibration requires validation positives and validation_ambient "
+            "tracks; testing data is never used to select thresholds."
+        )
+    return "validation", "validation_ambient", positives, negatives, ambient
+
+
+def _track_maxima(
+    predictions: Sequence[np.ndarray], window_size: int, skip_slices: int = 0,
+) -> np.ndarray:
+    maxima = []
+    for track in predictions:
+        search = track[skip_slices:] if track.size > skip_slices else track
+        averaged = _moving_average(search, window_size)
+        maxima.append(float(np.max(averaged)) if averaged.size else 0.0)
+    return np.asarray(maxima, dtype=np.float32)
+
+
+def _score_negative_tracks(
+    maxima: np.ndarray, cutoffs: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """Count at most one false-accepted event per feature track, not per hour."""
+    accepts = np.sum(maxima[None, :] > cutoffs[:, None], axis=1)
+    rejection = 1.0 - accepts / maxima.size if maxima.size else None
+    return accepts, rejection
 
 
 def _predict_tracks(
@@ -309,7 +325,7 @@ def main() -> int:
         f"{args.target_faph:.2f} false accepts/hour"
     )
     print(
-        f"→ Favoring lower false accepts within "
+        f"→ Favoring captured-negative rejection, then lower ambient false accepts within "
         f"{args.recall_margin:.2%} of the best recall"
     )
 
@@ -317,40 +333,38 @@ def main() -> int:
     config["flags"] = config.get("flags", {})
     handler = FeatureHandler(config)
 
-    positive_mode, ambient_mode, positive_tracks, ambient_tracks = _load_eval_sets(
-        handler, config
+    positive_mode, ambient_mode, positive_tracks, negative_tracks, ambient_tracks = (
+        _load_eval_sets(handler, config)
     )
 
     print(
         f"→ Using {positive_mode} positives ({len(positive_tracks)}) and "
+        f"negatives ({len(negative_tracks)}), and "
         f"{ambient_mode} ambient tracks ({len(ambient_tracks)})"
     )
+    print("→ Negative rejection is per feature track; shifts are not independent recordings.")
+    if not negative_tracks:
+        print("⚠️  No ordinary validation negatives; selecting using ambient data only.")
 
     model = Model(str(model_path), stride=config["stride"])
     positive_predictions = _predict_tracks(model, positive_tracks, "positive")
+    negative_predictions = _predict_tracks(model, negative_tracks, "negative")
     ambient_predictions = _predict_tracks(model, ambient_tracks, "ambient")
 
-    candidates: list[dict[str, float]] = []
-    best_by_window: list[dict[str, float]] = []
+    candidates: list[dict[str, Any]] = []
+    best_by_window: list[dict[str, Any]] = []
     step_seconds = config["window_step_ms"] / 1000.0
 
     for window_size in window_sizes:
         ambient_averages = [
             _moving_average(track, window_size) for track in ambient_predictions
         ]
-        positive_maxima = []
-        for track in positive_predictions:
-            search = (
-                track[args.positive_skip_slices :]
-                if track.size > args.positive_skip_slices
-                else track
-            )
-            averaged = _moving_average(search, window_size)
-            if averaged.size == 0:
-                averaged = _moving_average(track, window_size)
-            positive_maxima.append(float(np.max(averaged)) if averaged.size else 0.0)
-
-        positive_maxima_array = np.asarray(positive_maxima, dtype=np.float32)
+        positive_maxima_array = _track_maxima(
+            positive_predictions, window_size, args.positive_skip_slices
+        )
+        negative_accepts, negative_rejection = _score_negative_tracks(
+            _track_maxima(negative_predictions, window_size), cutoffs
+        )
         recall_by_cutoff = np.mean(
             positive_maxima_array[None, :] > cutoffs[:, None], axis=1
         )
@@ -363,13 +377,19 @@ def main() -> int:
         )
 
         window_candidates = []
-        for cutoff, recall, faph in zip(cutoffs, recall_by_cutoff, faph_by_cutoff):
+        for index, (cutoff, recall, faph) in enumerate(
+            zip(cutoffs, recall_by_cutoff, faph_by_cutoff)
+        ):
             candidate = {
                 "probability_cutoff": float(round(float(cutoff), 2)),
                 "sliding_window_size": int(window_size),
                 "recall": float(recall),
                 "false_accepts_per_hour": float(faph),
                 "ambient_hours": float(ambient_hours),
+                "negative_false_accepts": int(negative_accepts[index]),
+                "negative_rejection_rate": (
+                    float(negative_rejection[index]) if negative_rejection is not None else None
+                ),
             }
             candidates.append(candidate)
             window_candidates.append(candidate)
@@ -382,11 +402,13 @@ def main() -> int:
         best_by_window.append(best_window)
         print(
             "   window={window}: cutoff={cutoff:.2f}; recall={recall:.2%}; "
-            "ambient_faph={faph:.3f}".format(
+            "ambient_faph={faph:.3f}; negative_tracks_accepted={negative_accepts}/{negative_total}".format(
                 window=window_size,
                 cutoff=best_window["probability_cutoff"],
                 recall=best_window["recall"],
                 faph=best_window["false_accepts_per_hour"],
+                negative_accepts=best_window["negative_false_accepts"],
+                negative_total=len(negative_tracks),
             )
         )
 
@@ -403,11 +425,13 @@ def main() -> int:
 
     print(
         "✓ Selected cutoff={cutoff:.2f}, window={window}, recall={recall:.2%}, "
-        "ambient_faph={faph:.3f}".format(
+        "ambient_faph={faph:.3f}; negative_tracks_accepted={negative_accepts}/{negative_total}".format(
             cutoff=best["probability_cutoff"],
             window=best["sliding_window_size"],
             recall=best["recall"],
             faph=best["false_accepts_per_hour"],
+            negative_accepts=best["negative_false_accepts"],
+            negative_total=len(negative_tracks),
         )
     )
 
@@ -422,12 +446,24 @@ def main() -> int:
             "recall": round(best["recall"], 6),
             "false_accepts_per_hour": round(best["false_accepts_per_hour"], 6),
             "ambient_hours": round(best["ambient_hours"], 6),
+            "negative_false_accepts": best["negative_false_accepts"],
+            "negative_rejection_rate": (
+                round(best["negative_rejection_rate"], 6)
+                if best["negative_rejection_rate"] is not None else None
+            ),
         },
         "evaluation": {
             "positive_dataset": positive_mode,
             "ambient_dataset": ambient_mode,
+            "negative_dataset": positive_mode,
             "positive_tracks": len(positive_tracks),
             "ambient_tracks": len(ambient_tracks),
+            "negative_tracks": len(negative_tracks),
+            "negative_metric_unit": "feature_track",
+            "negative_metric_note": (
+                "One event per feature track; augmented/time-shifted tracks are not "
+                "independent recordings. Ordinary negatives do not contribute ambient hours."
+            ),
             "cooldown_slices": int(args.cooldown_slices),
             "positive_skip_slices": int(args.positive_skip_slices),
             "window_sizes": window_sizes,

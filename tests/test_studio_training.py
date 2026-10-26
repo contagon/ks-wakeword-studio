@@ -121,6 +121,20 @@ class TrainingTests(unittest.TestCase):
         later = self.service.snapshot(self.word.id, 'c' * 32)
         self.assertEqual(next(x.split for x in later.audio if x.audio_id == original.audio_id), b.audio[0].split)
 
+    def test_staged_learning_rate_invalidates_constant_rate_fingerprint(self):
+        import hashlib
+        from studio.models import TrainingSettings
+        from studio.training import encode
+        self.audio()
+        # Explicit saved budgets must also retrain under the new schedule.
+        self.service.save_settings(self.word.id, TrainingSettings(training_steps=123))
+        manifest = self.service.snapshot(self.word.id, 'c' * 32)
+        old_inputs = dict(model_id=manifest.model_id, phrase=manifest.phrase, language=manifest.language,
+            config=asdict(manifest.config), seed=manifest.seed, audio=[asdict(a) for a in manifest.audio],
+            datasets=[asdict(d) for d in manifest.datasets], augmentation=[asdict(a) for a in manifest.augmentation],
+            selected_batches=manifest.selected_batches, adapter_version=4)
+        self.assertNotEqual(manifest.fingerprint, hashlib.sha256(encode(old_inputs).encode()).hexdigest())
+
     def test_missing_failed_cancelled_interrupted_never_publishable(self):
         self.audio()
         self.assertEqual(self.run_job().status, 'complete')
@@ -150,6 +164,7 @@ class TrainingTests(unittest.TestCase):
     def test_settings_history_http_counts(self):
         with api_client(self.runtime) as client:
             base = f'/api/studio/wakewords/{self.word.id}/training'
+            self.assertEqual(client.get(base + '/settings').json(), {'training_steps': 80000})
             self.assertEqual(client.put(base + '/settings', json={'training_steps': 123}).status_code, 200)
             self.assertEqual(client.get(base + '/settings').json(), {'training_steps': 123})
             self.assertEqual(client.put(base + '/settings', json={'training_steps': 123, 'train_openwakeword': True}).status_code, 422)

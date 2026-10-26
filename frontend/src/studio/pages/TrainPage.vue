@@ -56,7 +56,7 @@ function runTime(run: Job): string {
   return run.started_at ?? run.created_at;
 }
 const counts = ref<TrainingCounts | null>(null);
-const settings = ref<TrainingSettings>({ training_steps: 40000 });
+const settings = ref<TrainingSettings>({ training_steps: 80000 });
 const runs = ref<Job[]>([]);
 const selectedDatasets = ref<Dataset[]>([]);
 const loading = ref(false);

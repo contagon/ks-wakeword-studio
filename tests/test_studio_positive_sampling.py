@@ -18,7 +18,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class PositiveSamplingTests(unittest.TestCase):
-    def configure(self, root, generated=(), personal=(), manifest=True, reviewed=('training',), families='200'):
+    def configure(self, root, generated=(), personal=(), manifest=True, reviewed=('training',), families='200', steps=40):
         work = root / 'work'
         work.mkdir()
         for pool, splits in (('wake_word_samples_augmented', generated),
@@ -44,12 +44,53 @@ class PositiveSamplingTests(unittest.TestCase):
         section = script[script.index('check_directories()'):script.index('echo "   Wrote training_parameters.yaml"')]
         result = subprocess.run(['bash', '-ec', section], capture_output=True, text=True, env={
             **os.environ, 'WORK_DIR': str(work), 'TRAINING_DS': str(datasets),
-             'DATASET_MANIFEST': str(inputs) if manifest else '', 'TRAINING_STEPS': '40',
+             'DATASET_MANIFEST': str(inputs) if manifest else '', 'TRAINING_STEPS': str(steps),
             'REVIEWED_NEGATIVE_FAMILIES': families,
             'PROGDIR': str(REPO / 'cli'), 'PATH': str(Path(sys.executable).parent) + os.pathsep + os.environ['PATH'],
         })
         path = work / 'trained_models/training_parameters.yaml'
         return result, yaml.safe_load(path.read_text()) if path.exists() else None
+
+    def test_training_budget_uses_lower_rate_for_final_quarter(self):
+        for steps, stages, rates in (
+            (80000, [60000, 20000], [0.001, 0.00025]),
+            (40000, [30000, 10000], [0.001, 0.00025]),
+            (101, [76, 25], [0.001, 0.00025]),
+            (3, [2, 1], [0.001, 0.00025]),
+            (2, [1, 1], [0.001, 0.00025]),
+            (1, [1], [0.001]),
+        ):
+            with self.subTest(steps=steps), tempfile.TemporaryDirectory() as directory:
+                result, config = self.configure(Path(directory), ('training',), steps=steps)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(config['training_steps'], stages)
+                self.assertEqual(config['learning_rates'], rates)
+                self.assertEqual(sum(config['training_steps']), steps)
+                self.assertEqual(config['batch_size'], 16)
+                self.assertNotIn('minimum_positive_samples_per_batch', config)
+
+    def test_nonpositive_budget_fails_without_writing_config(self):
+        for steps in (0, -1):
+            with self.subTest(steps=steps), tempfile.TemporaryDirectory() as directory:
+                result, config = self.configure(Path(directory), ('training',), steps=steps)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('training steps', result.stderr.lower())
+                self.assertIsNone(config)
+
+    def test_cli_defaults_to_eighty_thousand_steps_and_preserves_overrides(self):
+        for override, expected in ((None, '80000'), ('123', '123')):
+            with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
+                env = dict(os.environ, DATA_DIR=directory)
+                env.pop('TRAINING_STEPS', None)
+                if override is not None:
+                    env['TRAINING_STEPS'] = override
+                result = subprocess.run(
+                    ['bash', '-ec', 'source "$1"; echo "$TRAINING_STEPS"',
+                     'test-defaults', str(REPO / 'cli/shell.functions')],
+                    env=env, capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
 
     def test_real_and_synthetic_positives_have_sixty_forty_sampling(self):
         for manifest in (True, False):

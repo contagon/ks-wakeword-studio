@@ -2,7 +2,7 @@
 
 Date: 2026-10-26
 
-Both **Hey Doof** and **Janet** are producing frequent real-world false positives. This document preserves the initial investigation, proposed improvements, and subsequent agreement on adaptive negative sampling. Adaptive sampling is now implemented on `false-positives`; the other recommendations remain pending. No real-world improvement has yet been validated through retraining or replay of the offending audio.
+Both **Hey Doof** and **Janet** are producing frequent real-world false positives. This document preserves the initial investigation, proposed improvements, and subsequent agreement on adaptive negative sampling. Adaptive sampling and the calibration inclusion fix below are now implemented on `false-positives`; the other recommendations remain pending. No real-world improvement has yet been validated through retraining or replay of the offending audio.
 
 ## Negative-data mix at the initial investigation
 
@@ -48,6 +48,16 @@ The latest inspected Hey Doof calibration reported approximately **0.207 false a
 - Also evaluate held-out captured false positives, reporting an event-level rejection rate.
 - Preserve a separate untouched test set; do not tune thresholds on it. The existing calibration fallback to testing should not replace a proper validation set.
 - Do not treat trigger-centered captures as representative hours of normal listening: they are deliberately enriched for difficult events.
+
+### Calibration inclusion fix implemented
+
+Calibration now retains ordinary `validation` negatives alongside validation positives and `validation_ambient` audio. It never falls back to `testing` or `testing_ambient`: missing validation positives or ambient data produces a clear failure. The trainer's existing packaging fallback still uses default detector settings if calibration fails, with a warning; it does not tune on test data.
+
+Selection keeps the existing ambient false-accept budget tiers and recall allowance (default 0.5 percentage points). Within the strictest available tier and that allowance, it first maximizes ordinary-negative rejection, then minimizes ambient false accepts, then prefers higher recall. Without ordinary validation negatives it warns and retains ambient-only selection.
+
+The calibration JSON and packaged model metadata retain `negative_false_accepts`, `negative_rejection_rate`, `negative_tracks`, and the validation dataset identity. At most one false acceptance is counted per negative feature track, regardless of repeated triggers. Ordinary negatives never contribute to the ambient-hours denominator. With no ordinary negatives, rejection is `null`, not a claim of 100% rejection.
+
+**Measurement limits:** these are feature-track event metrics, not independent recording/family metrics: existing validation includes augmented/time-shifted tracks. Augmentation is unchanged by this fix. Source-separated personal-positive recall, clean capture replay, representative local continuous-audio collection, and post-selection test-set evaluation remain follow-up work. The untouched test split remains available for that independent assessment; it is not evaluated automatically here. This change has not yet been validated against real deployment audio.
 
 ## 2. Preserve clean hard negatives
 
