@@ -455,6 +455,35 @@ test("workspace Automate controls scoped collection and explicitly opted-in publ
   await expect(page.locator('[name="after-training"]')).not.toBeChecked();
 });
 
+test("notification preferences isolate wakewords and share a secret global destination", async ({ page, request }) => {
+  const a = await createWord(request, "notify_a");
+  const b = await createWord(request, "notify_b");
+  await page.goto(`/#/automate?word=${a.id}`);
+  const card = page.locator("[data-notifications]");
+  await expect(card.getByRole("heading")).toHaveText("Wakeword notifications");
+  await expect(card.getByRole("button", { name: "Send test notification", exact: true })).toHaveCount(1);
+  await card.getByLabel("Apprise URL (global)", { exact: true }).fill("json://127.0.0.1:1/browser-secret-token");
+  await card.getByLabel("Dataset downloads (global)", { exact: true }).check();
+  await card.locator('[name="notify-train"]').check();
+  await card.getByRole("button", { name: "Save notifications", exact: true }).click();
+  await expect(card.getByRole("status")).toHaveText("Notification settings saved.");
+  await expect(card.locator('[name="apprise-url"]')).toHaveValue("");
+  const saved = await request.get("/api/studio/notifications");
+  expect(await saved.json()).toEqual({ configured: true, download: true });
+  await page.locator("#studio-word").selectOption(b.id);
+  await expect(card.locator('[name="notify-train"]')).not.toBeChecked();
+  await expect(card.locator('[name="notify-download"]')).toBeChecked();
+  await page.locator("#studio-word").selectOption(a.id);
+  await expect(card.locator('[name="notify-train"]')).toBeChecked();
+  await card.getByRole("button", { name: "Send test notification", exact: true }).click();
+  await expect(card.getByRole("alert")).toContainText("Test notification failed");
+  await expect(page.locator("body")).not.toContainText("browser-secret-token");
+  await card.locator('[name="clear-apprise-url"]').check();
+  await card.getByRole("button", { name: "Save notifications", exact: true }).click();
+  await expect(card.getByRole("status")).toHaveText("Notification settings saved.");
+  await expect(card.getByRole("button", { name: "Send test notification", exact: true })).toBeDisabled();
+});
+
 test("kiosk addresses survive refresh and the global queue follows jobs across wakewords", async ({
   page,
   request,

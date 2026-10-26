@@ -7,6 +7,7 @@ import type { AutomationSettings, AutomationStatus } from "../types";
 import { useWorkspace } from "../workspace";
 import { useJobQueue } from "../jobs";
 import AutomationScheduleFields from "../components/AutomationScheduleFields.vue";
+import NotificationSettings from "../components/NotificationSettings.vue";
 
 const workspace = useWorkspace();
 const jobs = useJobQueue();
@@ -295,5 +296,6 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </form>
+    <NotificationSettings :word-id="wordId" :phrase="workspace.selected.value?.phrase" />
   </section>
 </template>

@@ -44,6 +44,16 @@ export interface AutomationStatus {
   schedules: Schedule[];
   last_jobs: Partial<Record<"scrape" | "classify" | "train" | "deploy", Job | null>>;
 }
+export interface NotificationSettings {
+  configured: boolean;
+  download: boolean;
+}
+export interface WorkspaceNotifications {
+  scrape: boolean;
+  classify: boolean;
+  train: boolean;
+  deploy: boolean;
+}
 export type JobStatus = "queued" | "running" | "cancelling" | "complete" | "failed" | "cancelled" | "interrupted";
 export type JobResource = "gpu" | "collection" | "download";
 /** Cancelled/interrupted jobs may finish with no result; handler crashes record only a code. */

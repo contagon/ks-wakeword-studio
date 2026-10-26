@@ -138,6 +138,18 @@ class DatasetSelectionBody(StrictBody):
     dataset_ids: list[str]
 
 
+class NotificationBody(StrictBody):
+    apprise_url: SecretStr | None = None
+    download: bool
+
+
+class WorkspaceNotificationBody(StrictBody):
+    scrape: bool
+    classify: bool
+    train: bool
+    deploy: bool
+
+
 class GenerationRecipeBody(StrictBody):
     language: str
     english_accent: str
@@ -172,6 +184,31 @@ def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=1
 
 def create_router(runtime: StudioRuntime) -> APIRouter:
     router = APIRouter(prefix="/api/studio", route_class=StudioRoute)
+
+    @router.get('/notifications')
+    def notification_settings():
+        return runtime.notifications.settings()
+
+    @router.put('/notifications')
+    def save_notifications(body: NotificationBody):
+        return runtime.notifications.save(download=body.download,
+            apprise_url=body.apprise_url.get_secret_value() if body.apprise_url is not None else None)
+
+    @router.post('/notifications/test')
+    def test_notifications():
+        return runtime.notifications.test()
+
+    @router.get('/wakewords/{word_id}/notifications')
+    def workspace_notifications(word_id: str):
+        return runtime.notifications.workspace_settings(word_id)
+
+    @router.put('/wakewords/{word_id}/notifications')
+    def save_workspace_notifications(word_id: str, body: WorkspaceNotificationBody):
+        return runtime.notifications.save_workspace(word_id, body.model_dump())
+
+    @router.post('/wakewords/{word_id}/notifications/test')
+    def test_workspace_notifications(word_id: str):
+        return runtime.notifications.test(word_id)
 
     @router.get('/generation/defaults')
     def generation_defaults():

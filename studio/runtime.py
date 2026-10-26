@@ -20,10 +20,11 @@ from studio.augmentation_datasets import AugmentationDatasetService
 from studio.generation import GenerationService
 from studio.training import TrainingService
 from studio.deployment import DeploymentService
+from studio.notifications import NotificationService
 
 
 SERVICES = ('workspaces', 'blobs', 'samples', 'devices', 'collection', 'jobs', 'schedules', 'automation',
-            'classification', 'workers', 'datasets', 'augmentation', 'generation', 'training', 'deployment')
+            'classification', 'workers', 'datasets', 'augmentation', 'generation', 'training', 'deployment', 'notifications')
 
 
 def _service(name):
@@ -50,6 +51,7 @@ class StudioRuntime:
     generation = _service('generation')
     training = _service('training')
     deployment = _service('deployment')
+    notifications = _service('notifications')
 
     def __init__(self, data_dir: Path, *, clock=utc_now, runner=None, groups=None):
         self.data_dir = Path(data_dir)
@@ -77,6 +79,7 @@ class StudioRuntime:
                 self._devices = DeviceService(store)
                 self._collection = CollectionService(store, self._samples, self._devices, clock=self.clock)
                 self._jobs = JobQueue(store, clock=self.clock, groups=self.groups)
+                self._notifications = NotificationService(store, clock=self.clock)
                 self._datasets = DatasetService(store, self._jobs)
                 self._augmentation = AugmentationDatasetService(store, self._jobs)
                 self._generation = GenerationService(store, blobs, self._jobs, clock=self.clock)
@@ -140,6 +143,7 @@ class StudioRuntime:
 
     def start_workers(self) -> None:
         self.workers.start()
+        self.notifications.start()
 
     def health(self) -> WorkerHealth:
         # Do not initialize/query SQLite to report a worker's SQL outage.
@@ -148,6 +152,8 @@ class StudioRuntime:
 
     def shutdown(self) -> None:
         # Join outside the runtime lock: a handler may need a runtime property.
+        if self._notifications is not None:
+            self._notifications.stop()
         if self._workers is not None:
             self._workers.stop()
         with self._lock:

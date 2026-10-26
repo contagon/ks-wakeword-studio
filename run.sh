@@ -18,6 +18,7 @@ FASTAPI_VERSION="${REC_FASTAPI_VERSION:-0.115.6}"
 UVICORN_VERSION="${REC_UVICORN_VERSION:-0.30.6}"
 PY_MULTIPART_VERSION="${REC_PY_MULTIPART_VERSION:-0.0.9}"
 CRONITER_VERSION="6.0.0"
+APPRISE_VERSION="2.1.0"
 
 echo "microWakeWord Trainer UI (Docker)"
 echo "-> ROOTDIR:  ${ROOTDIR}"
@@ -32,6 +33,7 @@ install_ui_deps() {
     "uvicorn[standard]==${UVICORN_VERSION}" \
     "python-multipart==${PY_MULTIPART_VERSION}" \
     "croniter==${CRONITER_VERSION}" \
+    "apprise==${APPRISE_VERSION}" \
     "silero-vad>=5.0.0" \
     "numpy>=1.24.0" \
     "faster-whisper>=1.0.0" \
@@ -59,12 +61,13 @@ if [[ ! -f "${PIN_FILE}" ]]; then
   touch "${PIN_FILE}"
 else
   echo "Reusing existing trainer UI venv (no upgrades)"
-  if ! "${PY}" - "${FASTAPI_VERSION}" "${UVICORN_VERSION}" "${PY_MULTIPART_VERSION}" "${CRONITER_VERSION}" <<'PY' >/dev/null 2>&1
+  if ! "${PY}" - "${FASTAPI_VERSION}" "${UVICORN_VERSION}" "${PY_MULTIPART_VERSION}" "${CRONITER_VERSION}" "${APPRISE_VERSION}" <<'PY' >/dev/null 2>&1
 import importlib.metadata as md
 import sys
 
 fastapi_version, uvicorn_version, multipart_version = sys.argv[1:4]
 croniter_version = sys.argv[4]
+apprise_version = sys.argv[5]
 
 def version_tuple(value):
     parts = []
@@ -83,6 +86,7 @@ exact = {
     "uvicorn": uvicorn_version,
     "python-multipart": multipart_version,
     "croniter": croniter_version,
+    "apprise": apprise_version,
 }
 minimum = {
     "silero-vad": "5.0.0",

@@ -126,6 +126,57 @@ class DeploymentTests(unittest.TestCase):
     def status(self):
         return {p.device_id: p for p in self.service.status(self.word.id)}
 
+    def test_notifications_follow_verified_target_delivery_not_publication_request(self):
+        from unittest.mock import patch
+        notifications = self.runtime.notifications
+        notifications.save(apprise_url='json://127.0.0.1:9999/test', download=False)
+        notifications.save_workspace(self.word.id, {'scrape': False, 'classify': False, 'train': False, 'deploy': True})
+        self.client.offline.add('solo')
+        version = self.train()  # Automatic publication: leader succeeds, solo retries.
+        calls = []
+        with patch('studio.notifications.send', side_effect=lambda *args: calls.append(args) or True):
+            notifications.dispatch_once()
+            self.assertEqual(len(calls), 1)
+            self.assertIn('leader', calls[0][2])
+            self.assertFalse(calls[0][3])
+            for _ in range(6):
+                self.now += timedelta(hours=1)
+                self.service.retry_due(self.now)
+                while notifications.dispatch_once():
+                    pass
+            solo = [c for c in calls if 'Target: solo' in c[2]]
+            self.assertEqual(len(solo), 1)
+            self.assertTrue(solo[0][3])
+            self.client.offline.clear()
+            self.service.publish(version.id)  # Manual publication starts a new revision.
+            while notifications.dispatch_once():
+                pass
+            self.assertTrue(any('Target: solo' in c[2] and not c[3] for c in calls))
+
+    def test_preexisting_quarantine_notifies_for_automatic_and_manual_publication(self):
+        from unittest.mock import patch
+        notifications = self.runtime.notifications
+        notifications.save(apprise_url='json://127.0.0.1:9999/test', download=False)
+        notifications.save_workspace(self.word.id, {'scrape': False, 'classify': False, 'train': False, 'deploy': True})
+        with self.runtime.jobs.store.transaction() as db:
+            db.execute("INSERT INTO deployment_staging_blocks(device_id,reason) VALUES ('solo','staging_unowned')")
+        calls = []
+        with patch('studio.notifications.send', side_effect=lambda *args: calls.append(args) or True):
+            version = self.train()
+            while notifications.dispatch_once():
+                pass
+            blocked = [c for c in calls if 'Target: solo' in c[2]]
+            self.assertEqual(len(blocked), 1)
+            self.assertTrue(blocked[0][3])
+            self.service.reconcile()
+            self.assertFalse(notifications.dispatch_once())
+            self.service.publish(version.id)
+            while notifications.dispatch_once():
+                pass
+            blocked = [c for c in calls if 'Target: solo' in c[2]]
+            self.assertEqual(len(blocked), 2)
+            self.assertTrue(all(c[3] for c in blocked))
+
     def test_archive_and_delivery_run_numbers_follow_the_training_job(self):
         old = self.train()
         new = self.train()
@@ -492,7 +543,7 @@ class DeploymentTests(unittest.TestCase):
             store = Store.open(root)
             try:
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 21)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 22)
                     self.assertEqual(db.execute('SELECT phrase FROM wakewords').fetchone()[0], 'Retained')
                     self.assertEqual(db.execute('SELECT count(*) FROM publications').fetchone()[0], 0)
             finally:
@@ -730,7 +781,7 @@ class DeploymentTests(unittest.TestCase):
         with self.runtime.devices.store.transaction() as db:
             names = db.execute("SELECT filenames FROM deployment_staging WHERE device_id='leader' AND word_id=?", (self.word.id,)).fetchone()
             self.assertEqual(set(json.loads(names[0])), {'hello_robot.json', 'hello_robot.tflite'})
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 21)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 22)
         other = self.other_version()
         self.service.publish(other.id)
         self.assertEqual(self.client.files['leader']['microwakeword/hello_robot.tflite'],

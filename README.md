@@ -249,7 +249,7 @@ diagnostic file; retry once after upgrading to capture the original error.
 
 ### Workspace automation and theme
 
-**Automate** edits only the workspace selected in the header. Collection,
+**Automate** edits automation rules for the workspace selected in the header. Collection,
 classification, training, and deployment have independent enable controls and
 five-field cron/timezone schedules. Switching workspaces does not enable or start
 anything. Automatic classification can run after collection or on a schedule,
@@ -273,6 +273,30 @@ runs, not failed/skipped runs or imported legacy archives. Scheduled deployment 
 independent of training and publishes only a new eligible archive. Manual rollback
 is not silently undone by retries or a later tick without a newly trained archive.
 Existing publication staging/quarantine requirements below still apply.
+
+**Notifications** are configured on the same tab. Save one global
+[Apprise service URL](https://github.com/caronc/apprise#supported-notifications),
+then enable collection, classification, training, and deployment notifications
+separately for each wakeword. A global dataset-download toggle covers both training
+and augmentation datasets. Global settings remain available without a selected
+wakeword. The single **Wakeword notifications** card labels shared settings
+**(global)** and has one **Save notifications** button for both scopes, independent
+of the automation rules.
+Use **Send test notification** to check the saved destination.
+
+Enabled types notify on completion and failure for manual and automatic runs.
+Interrupted jobs and partial collection failures count as failures; skipped and
+cancelled runs, sample generation, and previews never notify. Deployment sends one
+notification per target for verified delivery or terminal failure, not each retry
+or publication request. Notifications default off, and upgrades do not replay job
+history. Background delivery persists across restarts and tries at most three
+times; a crash immediately after remote acceptance may produce a duplicate.
+Clearing the URL or disabling a type discards its pending deliveries.
+
+The URL may contain credentials. It is stored in the private Studio database but
+never returned to the browser or included in notification logs. Leave its field
+blank to retain it, replace it to change destinations, or explicitly clear it to
+disable delivery for all wakewords. Protect database backups as credentials.
 
 **Upgrade with the old Studio runtime stopped.** The additive schema upgrade
 preserves existing training schedules, archives, recordings, desired publications

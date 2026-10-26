@@ -24,6 +24,7 @@ from studio.models import (Conflict, CredentialsRequired, IdentityMismatch, Mode
 from studio.mww_training import checked_file, sha256, training_environment
 from studio.storage import publication_lock
 from studio.workspaces import require_word
+from studio.notifications import publication_finished_in
 
 class StagingFailure(Exception):
     """Fixed local codes only; never expose raw remote responses."""
@@ -143,8 +144,14 @@ class DeploymentService:
                 db.execute("UPDATE publications SET state=?,next_retry=NULL,manifest_state='unverified',"
                            "refresh_state='pending',runtime_state='unverified',error_code=?,updated_at=? "
                            'WHERE word_id=? AND device_id=?',
-                           (blocked, row['staging_reason'] if blocked == 'staging_blocked' else blocked,
-                            iso_now(self.clock), word_id, row['device_id']))
+                            (blocked, row['staging_reason'] if blocked == 'staging_blocked' else blocked,
+                             iso_now(self.clock), word_id, row['device_id']))
+                # Preexisting quarantine becomes terminal during enrollment,
+                # before _attempt/_save can observe this revision. Capture only
+                # the transition: existing terminal history is never replayed.
+                updated = db.execute('SELECT * FROM publications WHERE word_id=? AND device_id=?',
+                                     (word_id, row['device_id'])).fetchone()
+                publication_finished_in(db, Publication(**dict(updated)))
         # Membership/profile edits can make a previously blocked target eligible
         # without a new trained version. Only explicit registry eligibility
         # changes reopen these states; exhausted remote retries stay bounded.
@@ -265,9 +272,11 @@ class DeploymentService:
         updated = Publication(**data)
         with self.store.transaction() as db:
             fields = [k for k in data if k not in ('word_id', 'device_id', 'revision', 'desired_version', 'run_number')]
-            db.execute('UPDATE publications SET ' + ','.join(k + '=?' for k in fields) +
+            cursor = db.execute('UPDATE publications SET ' + ','.join(k + '=?' for k in fields) +
                        ' WHERE word_id=? AND device_id=? AND revision=? AND desired_version=?',
-                       (*[data[k] for k in fields], p.word_id, p.device_id, p.revision, p.desired_version))
+                        (*[data[k] for k in fields], p.word_id, p.device_id, p.revision, p.desired_version))
+            if cursor.rowcount:
+                publication_finished_in(db, updated)
         return updated
 
     def _device(self, p, *, indirect):

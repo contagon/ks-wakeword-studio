@@ -35,6 +35,7 @@ MIGRATIONS = (
     "schema_drop_unused.sql",
     "schema_publication_time.sql",
     "schema_label_actor.sql",
+    "schema_notifications.sql",
 )
 
 

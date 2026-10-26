@@ -25,6 +25,7 @@ import type {
 
 import type { GenerationSubmission, GenerationSource } from "./types";
 import type { AutomationSettings, AutomationStatus } from "./types";
+import type { NotificationSettings, WorkspaceNotifications } from "./types";
 import type { CapturePreview, CaptureSelection } from "./types";
 import type { AugmentationCatalog } from "./types";
 import { publicError } from "./errors";
@@ -206,6 +207,15 @@ export const studioApi = {
   schedules: (signal?: AbortSignal) => get<Schedule[]>("/schedules", undefined, signal),
   automation: (word: string, signal?: AbortSignal) =>
     get<AutomationStatus>(`${wordPath(word)}/automation`, undefined, signal),
+  notifications: (signal?: AbortSignal) => get<NotificationSettings>("/notifications", undefined, signal),
+  saveNotifications: (settings: { download: boolean; apprise_url?: string }, signal?: AbortSignal) =>
+    put<NotificationSettings>("/notifications", settings, signal),
+  workspaceNotifications: (word: string, signal?: AbortSignal) =>
+    get<WorkspaceNotifications>(`${wordPath(word)}/notifications`, undefined, signal),
+  saveWorkspaceNotifications: (word: string, settings: WorkspaceNotifications, signal?: AbortSignal) =>
+    put<WorkspaceNotifications>(`${wordPath(word)}/notifications`, settings, signal),
+  testNotification: (word?: string, signal?: AbortSignal) =>
+    post<{ sent: boolean }>(word ? `${wordPath(word)}/notifications/test` : "/notifications/test", undefined, signal),
   saveAutomation: (word: string, settings: AutomationSettings, signal?: AbortSignal) =>
     put<AutomationStatus>(`${wordPath(word)}/automation`, settings, signal),
   collect: (word: string, device_ids?: string[], signal?: AbortSignal) =>

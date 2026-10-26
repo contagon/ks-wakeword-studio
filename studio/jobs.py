@@ -26,6 +26,7 @@ from studio.models import (Conflict, Job, LoopHealth, NotFound, Page, Validation
 from studio.storage import open_directory
 from studio.errors import MESSAGES, child_error, failure_code
 from studio.diagnostics import ChildDiagnostics, retain
+from studio.notifications import job_finished_in
 
 logger = logging.getLogger(__name__)
 # Automation reconcile and deployment retries; their backoffs are 30 s or longer.
@@ -290,6 +291,7 @@ class JobQueue:
                     db.execute('INSERT OR IGNORE INTO deployment_events(version_id) '
                                'SELECT id FROM model_versions WHERE run_id=?', (job_id,))
                 job = self.record(self.fetch(db, job_id))
+                job_finished_in(db, job)
             self._release(job_id)
             return job
 
@@ -321,7 +323,8 @@ class JobQueue:
                         if row['status'] in ACTIVE and self._child_gone(row):
                             status = 'cancelled' if row['status'] == 'cancelling' else 'interrupted'
                             db.execute('UPDATE studio_jobs SET status=?,finished_at=? WHERE id=?',
-                                       (status, iso_now(self.clock), job_id))
+                                        (status, iso_now(self.clock), job_id))
+                            job_finished_in(db, self.record(self.fetch(db, job_id)))
                 finally:
                     os.close(fd)
 
