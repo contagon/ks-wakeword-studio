@@ -60,6 +60,11 @@ def validate_inputs(manifest, *, require_splits=True):
         raise ValidationError('Select classifier negative datasets or label negative training families; defaults are disabled')
 
 
+def negative_training_family_count(manifest: dict) -> int:
+    return len({audio['family_id'] for audio in manifest['audio']
+                if audio['label'] == 'negative' and audio['split'] == 'training'})
+
+
 def training_environment(data_dir, environ=None):
     """Remove recorder-only CUDA libraries using an explicit tool-data root."""
     env = dict(os.environ if environ is None else environ)
@@ -247,6 +252,7 @@ def main(argv=None):
           f'--artifact-slug={manifest["model_id"]}', f'--language={manifest["language"]}',
           f'--stable-model-id={manifest["model_id"]}',
           f'--training-steps={manifest["config"]["training_steps"]}',
+          f'--reviewed-negative-families={negative_training_family_count(manifest)}',
           f'--samples={sum(a["label"] == "positive" for a in manifest["audio"])}',
           'studio-input', manifest['phrase']], cwd=root, env=env)
     validation_args = [f'--data-dir={root}', f'--model-id={manifest["model_id"]}']

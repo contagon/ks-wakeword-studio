@@ -4,7 +4,7 @@ set -e
 PROGPATH=$(realpath "$0")
 PROGDIR=$(dirname "${PROGPATH}")
 
-KNOWN_ARGS=( training-steps samples data-dir tool-data-dir language artifact-slug dataset-manifest stable-model-id )
+KNOWN_ARGS=( training-steps samples data-dir tool-data-dir language artifact-slug dataset-manifest stable-model-id reviewed-negative-families )
 source "${PROGDIR}/shell.functions"
 WAKE_WORD="${POSITIONAL_ARGS[0]}"
 
@@ -141,11 +141,11 @@ fi
 # Reviewed false-positive features are optional hard negatives.
 REVIEWED_NEGATIVE_FEATURES_DIR="${WORK_DIR}/reviewed_negative_features"
 HAS_REVIEWED_NEGATIVE="false"
-if [ -d "${REVIEWED_NEGATIVE_FEATURES_DIR}/training" ] ; then
+if has_features "${REVIEWED_NEGATIVE_FEATURES_DIR}" ; then
   HAS_REVIEWED_NEGATIVE="true"
-  echo "✅ Found reviewed negative features: ${REVIEWED_NEGATIVE_FEATURES_DIR}/training (will weight as hard negatives)"
+  echo "✅ Found reviewed negative features: ${REVIEWED_NEGATIVE_FEATURES_DIR} (adaptive hard-negative weighting)"
 else
-  echo "ℹ️  No reviewed negative features found at ${REVIEWED_NEGATIVE_FEATURES_DIR}/training (continuing with stock negatives)"
+  echo "ℹ️  No reviewed negative features found at ${REVIEWED_NEGATIVE_FEATURES_DIR} (using selected downloaded negatives)"
 fi
 
 cd "${WORK_DIR}"
@@ -168,6 +168,9 @@ if [ "${HAS_PERSONAL}" = "true" ]; then
 fi
 if [ "${HAS_REVIEWED_NEGATIVE}" = "true" ]; then
   config_args+=( --reviewed-negative-dir "${REVIEWED_NEGATIVE_FEATURES_DIR}" )
+fi
+if [ -n "${REVIEWED_NEGATIVE_FAMILIES:-}" ]; then
+  config_args+=( --reviewed-negative-families "${REVIEWED_NEGATIVE_FAMILIES}" )
 fi
 if [ -n "${DATASET_MANIFEST:-}" ]; then
   config_args+=( --dataset-manifest "${DATASET_MANIFEST}" )

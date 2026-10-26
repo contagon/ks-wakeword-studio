@@ -13,6 +13,39 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class TrainingCLITests(unittest.TestCase):
+    def test_negative_training_family_count_excludes_duplicates_and_holdouts(self):
+        from studio.mww_training import negative_training_family_count
+        manifest = {'audio': [
+            dict(label='negative', split='training', family_id='one'),
+            dict(label='negative', split='training', family_id='one'),
+            dict(label='negative', split='training', family_id='two'),
+            dict(label='negative', split='validation', family_id='three'),
+            dict(label='negative', split='testing', family_id='four'),
+            dict(label='positive', split='training', family_id='five')]}
+        self.assertEqual(negative_training_family_count(manifest), 2)
+        self.assertEqual(negative_training_family_count({'audio': []}), 0)
+
+    def test_cli_passes_independent_negative_family_count_to_trainer(self):
+        from studio import mww_training as training
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'audio.wav'
+            source.write_bytes(b'audio')
+            audio = [dict(label=label, split=split, family_id=f'{label}-{split}', batch_id=None,
+                          path=str(source), normalized_hash=hashlib.sha256(b'audio').hexdigest())
+                     for label in ('positive', 'negative') for split in ('training', 'validation', 'testing')]
+            audio.append(dict(audio[3]))  # Another clip from the same training-negative family.
+            manifest = root / 'manifest.json'
+            manifest.write_text(json.dumps(dict(schema_version=1, audio=audio, datasets=[], augmentation=[],
+                seed=10, model_id='robot', language='en', phrase='Hey robot', config={'training_steps': 10})))
+            with patch.object(training, '_run') as command:
+                training.main([f'--input-manifest={manifest}', f'--data-dir={root / "run"}',
+                               f'--tool-data-dir={root / "tools"}'])
+            trainer = next(call.args[0] for call in command.call_args_list
+                           if str(call.args[0][0]).endswith('wake_word_sample_trainer'))
+            self.assertIn('--reviewed-negative-families=1', trainer)
+
     def test_pinned_augmentation_accepts_explicit_subsets_not_missing_or_duplicate_ids(self):
         from studio.augmentation import pinned_paths
         from studio.models import ValidationError
@@ -230,7 +263,8 @@ lite.Interpreter = Interpreter
                 for label in ('positive', 'negative'):
                     source = base / f'{index}-{label}.wav'
                     source.write_bytes(b'fixture')
-                    audio.append({'audio_id': f'{index}-{label}', 'label': label, 'path': str(source),
+                    audio.append({'audio_id': f'{index}-{label}', 'family_id': f'{index}-{label}',
+                                  'label': label, 'path': str(source),
                                   'normalized_hash': hashlib.sha256(b'fixture').hexdigest(), 'split': split})
             manifest = {'schema_version': 1, 'model_id': 'stable_robot', 'phrase': 'こんにちは', 'language': 'ja',
                         'audio': audio, 'datasets': [], 'config': {'training_steps': 123}, 'seed': 10, 'augmentation': augmentation}

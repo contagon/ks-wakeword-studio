@@ -97,7 +97,18 @@ class TrainingTests(unittest.TestCase):
             selected_batches=manifest.selected_batches, adapter_version=2)
         previous_fingerprint = hashlib.sha256(encode(previous_inputs).encode()).hexdigest()
         self.assertNotEqual(manifest.fingerprint, previous_fingerprint,
-                            'Scheduled training must not skip the new weighting when input audio is unchanged')
+                             'Scheduled training must not skip the new weighting when input audio is unchanged')
+
+    def test_adaptive_negative_sampling_invalidates_fixed_weight_fingerprint(self):
+        import hashlib
+        from studio.training import encode
+        self.audio()
+        manifest = self.service.snapshot(self.word.id, 'b' * 32)
+        old_inputs = dict(model_id=manifest.model_id, phrase=manifest.phrase, language=manifest.language,
+            config=asdict(manifest.config), seed=manifest.seed, audio=[asdict(a) for a in manifest.audio],
+            datasets=[asdict(d) for d in manifest.datasets], augmentation=[asdict(a) for a in manifest.augmentation],
+            selected_batches=manifest.selected_batches, adapter_version=3)
+        self.assertNotEqual(manifest.fingerprint, hashlib.sha256(encode(old_inputs).encode()).hexdigest())
 
     def test_identical_imports_stable_family_splits(self):
         original = self.audio()

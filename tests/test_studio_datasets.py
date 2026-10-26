@@ -230,11 +230,14 @@ class DatasetTests(unittest.TestCase):
         script_path = Path('cli/wake_word_sample_trainer').resolve()
         script = script_path.read_text().split('echo "   Wrote training_parameters.yaml"')[0]
         env = dict(os.environ, DATA_DIR=str(self.root), PATH=str(stub.parent) + ':' + os.environ['PATH'])
-        result = subprocess.run(['bash', '-c', script, str(script_path), 'hello', '--dataset-manifest=' + str(manifest)], env=env, capture_output=True, text=True)
+        result = subprocess.run(['bash', '-c', script, str(script_path), 'hello', '--dataset-manifest=' + str(manifest),
+                                 '--reviewed-negative-families=0'], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         config = yaml.safe_load((self.root / 'work/trained_models/training_parameters.yaml').read_text())
         negatives = [row for row in config['features'] if row['truth'] is False]
-        self.assertEqual(negatives, mww_dataset_features(self.service.snapshot(self.a)))
+        expected = mww_dataset_features(self.service.snapshot(self.a))
+        expected[0]['sampling_weight'] = 37.0
+        self.assertEqual(negatives, expected)
 
     def test_api_selection_and_download_routes(self):
         from studio.runtime import StudioRuntime

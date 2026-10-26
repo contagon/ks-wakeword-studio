@@ -2,11 +2,11 @@
 
 Date: 2026-10-26
 
-Both **Hey Doof** and **Janet** are producing frequent real-world false positives. This document preserves the initial investigation, proposed improvements, and subsequent agreement on adaptive negative sampling. These recommendations have not yet been implemented or validated through replay of the offending audio.
+Both **Hey Doof** and **Janet** are producing frequent real-world false positives. This document preserves the initial investigation, proposed improvements, and subsequent agreement on adaptive negative sampling. Adaptive sampling is now implemented on `false-positives`; the other recommendations remain pending. No real-world improvement has yet been validated through retraining or replay of the offending audio.
 
-## Current negative-data mix
+## Negative-data mix at the initial investigation
 
-With all three downloaded training datasets selected, the configured sampling weights are:
+Before adaptive sampling, with all three downloaded training datasets selected, the configured sampling weights were:
 
 | Negative source | Sampling weight | Share of negative draws |
 | --- | ---: | ---: |
@@ -17,7 +17,7 @@ With all three downloaded training datasets selected, the configured sampling we
 
 Downloaded dinner-party evaluation has weight zero and is not sampled for training. Source: `cli/dataset_config.py` and `studio/datasets.py`.
 
-The ratio is fixed by provider sampling weights, not dataset sizes. Collecting more personal negatives increases diversity within their allocation but does not increase their share of draws.
+That ratio was fixed by provider sampling weights, not dataset sizes. Collecting more personal negatives increased diversity within their allocation but did not increase their share of draws. The adaptive implementation below replaces these fixed weights.
 
 Other existing settings:
 
@@ -77,6 +77,8 @@ Janet has relatively few personal training negatives and is particularly vulnera
 
 ### Agreed refinement: hardcoded adaptive ratio
 
+**Implementation status:** implemented on `false-positives`, with automated configuration, family-counting, shell-forwarding and fingerprint regression tests. This is not yet evidence of fewer deployment false positives.
+
 Use a smooth bounded curve based on the number of **independent personal-negative training families**, not augmented feature counts:
 
 ```text
@@ -114,9 +116,9 @@ personal_weight = 37 * personal_share
 downloaded_total_weight = 37 * (1 - personal_share)
 ```
 
-Allocate the downloaded total using the existing **12:12:5** proportions for speech, dinner party, and non-speech. Keep loss penalties unchanged initially. Behavior for subsets of selected downloaded datasets or personal-only training must be specified during implementation rather than assuming every run has all pools.
+Allocate the downloaded total using the existing **12:12:5** proportions for speech, dinner party, and non-speech. Loss penalties remain unchanged. With a subset selected, renormalize only those downloaded training providers in their original proportions. With no personal training negatives, downloaded providers receive all 37 weight; with only personal training negatives, they receive all 37 (100% effective personal share). Evaluation-only providers remain at zero. No selected negative training pools means no invented fallback providers.
 
-Record the effective ratio and independent training-family count in each run's retained configuration/logs so comparisons remain explainable.
+The `negative_sampling` section of each new run's retained `config/training_parameters.yaml` records the independent training-family count, target personal share, effective personal share and total negative weight. The command log reports the same allocation. A missing family count for personal training features, or a positive count without those features, fails clearly. The adapter fingerprint version is incremented so unchanged scheduled inputs can retrain under the new policy.
 
 ## 4. Increase genuine augmentation diversity
 

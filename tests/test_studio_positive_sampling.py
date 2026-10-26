@@ -18,12 +18,12 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 class PositiveSamplingTests(unittest.TestCase):
-    def configure(self, root, generated=(), personal=(), manifest=True):
+    def configure(self, root, generated=(), personal=(), manifest=True, reviewed=('training',), families='200'):
         work = root / 'work'
         work.mkdir()
         for pool, splits in (('wake_word_samples_augmented', generated),
                              ('personal_augmented_features', personal),
-                             ('reviewed_negative_features', ('training',))):
+                             ('reviewed_negative_features', reviewed)):
             for split in splits:
                 mmap = work / pool / split / 'wakeword_mmap'
                 mmap.mkdir(parents=True)
@@ -44,7 +44,8 @@ class PositiveSamplingTests(unittest.TestCase):
         section = script[script.index('check_directories()'):script.index('echo "   Wrote training_parameters.yaml"')]
         result = subprocess.run(['bash', '-ec', section], capture_output=True, text=True, env={
             **os.environ, 'WORK_DIR': str(work), 'TRAINING_DS': str(datasets),
-            'DATASET_MANIFEST': str(inputs) if manifest else '', 'TRAINING_STEPS': '40',
+             'DATASET_MANIFEST': str(inputs) if manifest else '', 'TRAINING_STEPS': '40',
+            'REVIEWED_NEGATIVE_FAMILIES': families,
             'PROGDIR': str(REPO / 'cli'), 'PATH': str(Path(sys.executable).parent) + os.pathsep + os.environ['PATH'],
         })
         path = work / 'trained_models/training_parameters.yaml'
@@ -62,9 +63,13 @@ class PositiveSamplingTests(unittest.TestCase):
                 self.assertTrue(all(row['penalty_weight'] == 1.0 for row in positive.values()))
                 negative = {Path(row['features_dir']).name: (row['sampling_weight'], row['penalty_weight'])
                             for row in config['features'] if not row['truth']}
-                self.assertEqual(negative, {'reviewed_negative_features': (8.0, 1.25),
-                    'speech': (12.0, 1.0), 'dinner_party': (12.0, 1.0),
-                    'no_speech': (5.0, 1.0), 'dinner_party_eval': (0.0, 1.0)})
+                self.assertAlmostEqual(negative['reviewed_negative_features'][0], 9.25)
+                self.assertEqual(negative['reviewed_negative_features'][1], 1.25)
+                self.assertAlmostEqual(negative['speech'][0], 27.75 * 12 / 29)
+                self.assertAlmostEqual(negative['dinner_party'][0], 27.75 * 12 / 29)
+                self.assertAlmostEqual(negative['no_speech'][0], 27.75 * 5 / 29)
+                self.assertEqual(negative['dinner_party_eval'], (0.0, 1.0))
+                self.assertIn('200 training families', result.stdout)
 
     def test_single_positive_pool_and_evaluation_only_pools_are_supported(self):
         for generated, personal, expected in (
@@ -77,6 +82,15 @@ class PositiveSamplingTests(unittest.TestCase):
                 result, config = self.configure(Path(directory), generated, personal)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual({Path(row['features_dir']).name for row in config['features'] if row['truth']}, expected)
+
+    def test_evaluation_only_negatives_are_kept_but_never_sampled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result, config = self.configure(Path(directory), ('training',), reviewed=('validation', 'testing'), families='0')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            reviewed = next(row for row in config['features']
+                            if Path(row['features_dir']).name == 'reviewed_negative_features')
+            self.assertEqual(reviewed['sampling_weight'], 0)
+            self.assertAlmostEqual(sum(row['sampling_weight'] for row in config['features'] if not row['truth']), 37)
 
     def test_empty_or_evaluation_only_positive_pools_cannot_start_training(self):
         for generated, personal in (((), ()), (('validation',), ('testing',))):
