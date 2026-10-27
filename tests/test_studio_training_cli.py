@@ -45,6 +45,10 @@ class TrainingCLITests(unittest.TestCase):
             trainer = next(call.args[0] for call in command.call_args_list
                            if str(call.args[0][0]).endswith('wake_word_sample_trainer'))
             self.assertIn('--reviewed-negative-families=1', trainer)
+            augmenter = next(call.args[0] for call in command.call_args_list
+                             if any(str(arg).endswith('wake_word_sample_augmenter') for arg in call.args[0]))
+            self.assertIn(f'--tool-data-dir={root / "tools"}', augmenter)
+            self.assertIn(f'--input-manifest={manifest}', augmenter)
 
     def test_pinned_augmentation_accepts_explicit_subsets_not_missing_or_duplicate_ids(self):
         from studio.augmentation import pinned_paths
@@ -60,31 +64,19 @@ class TrainingCLITests(unittest.TestCase):
                     pinned_paths(manifest)
 
     def test_augmenter_uses_only_explicitly_selected_paths_and_disables_empty_transforms(self):
-        import ast
-        from types import SimpleNamespace
-        source = ast.parse((REPO / 'cli/wake_word_sample_augmenter').read_text())
-        # Execute real argument/configuration code; ML imports are intentionally excluded.
-        body = source.body[:next(i for i, node in enumerate(source.body)
-                                if isinstance(node, ast.Import) and any(a.name == 'tensorflow' for a in node.names))]
-        config = source.body[next(i for i, node in enumerate(source.body)
-                                  if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'impulse_paths' for t in node.targets)):]
-        config = config[:next(i for i, node in enumerate(config)
-                             if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'split_cfg' for t in node.targets))]
-        from unittest.mock import patch
+        from studio.mww_augmentation import augmentation_policy, parse_args
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'work/wake_word_samples').mkdir(parents=True)
             (root / 'training_datasets/chime_16k').mkdir(parents=True)
             for selection, backgrounds in [('chime_16k', [str(root / 'training_datasets/chime_16k')]), ('', [])]:
-                with self.subTest(selection=selection), patch.object(sys, 'argv', ['augmenter', f'--data-dir={root}', f'--augmentation-ids={selection}']):
-                    namespace = {'Augmentation': lambda **kwargs: SimpleNamespace(**kwargs)}
-                    exec(compile(ast.Module(body=body, type_ignores=[]), 'augmenter-arguments', 'exec'), namespace)
-                    exec(compile(ast.Module(body=config, type_ignores=[]), 'augmenter-config', 'exec'), namespace)
-                    augmenter = namespace['augmenter']
-                    self.assertEqual(augmenter.impulse_paths, [])
-                    self.assertEqual(augmenter.background_paths, backgrounds)
-                    self.assertEqual(augmenter.augmentation_probabilities['RIR'], 0)
-                    self.assertEqual(augmenter.augmentation_probabilities['AddBackgroundNoise'], .7 if backgrounds else 0)
+                with self.subTest(selection=selection):
+                    args = parse_args([f'--data-dir={root}', f'--augmentation-ids={selection}'])
+                    policy = augmentation_policy({name: getattr(args, name + '_dir') for name in args.selected}, args.selected)
+                    self.assertEqual(policy['impulse_paths'], [])
+                    self.assertEqual(policy['background_paths'], backgrounds)
+                    self.assertEqual(policy['augmentation_probabilities']['RIR'], 0)
+                    self.assertEqual(policy['augmentation_probabilities']['AddBackgroundNoise'], .7 if backgrounds else 0)
 
     def test_staging_separates_real_and_synthetic_positives_without_changing_splits(self):
         from studio.mww_training import stage_inputs
@@ -217,28 +209,16 @@ lite.Interpreter = Interpreter
             self.assertFalse((root / 'shared').exists())
 
     def test_real_augmenter_generator_consumes_explicit_assignments_without_reshuffle(self):
-        import ast
-        import glob
-        import types
-        from types import SimpleNamespace
-        source = ast.parse((REPO / 'cli/wake_word_sample_augmenter').read_text())
-        binding = next(node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == 'bind_wav_generator')
+        from studio.augmentation_features import split_files
         with tempfile.TemporaryDirectory() as directory:
             paths = [Path(directory) / f'{i}.wav' for i in range(3)]
             for path in paths:
                 path.touch()
             assignments = dict(zip(map(str, paths), ('testing', 'training', 'validation')))
-            class Audio:
-                def __init__(self, path): self.path = path
-                def astype(self, *args, **kwargs): return self.path
-            namespace = {'Clips': object, 'glob': glob, 'os': os, 'types': types, 'stable_splits': assignments,
-                         'librosa': SimpleNamespace(load=lambda path, **kwargs: (Audio(path), 16000)), 'np': SimpleNamespace(float32=None)}
-            exec(compile(ast.Module(body=[binding], type_ignores=[]), 'actual-augmenter', 'exec'), namespace)
-            clips = SimpleNamespace()
-            namespace['bind_wav_generator'](clips, directory)
-            self.assertEqual(list(clips.audio_generator(split='train', repeat=2)), [str(paths[1]), str(paths[1])])
-            self.assertEqual(list(clips.audio_generator(split='validation')), [str(paths[2])])
-            self.assertEqual(list(clips.audio_generator(split='test')), [str(paths[0])])
+            splits = split_files(paths, assignments)
+            self.assertEqual(splits['training'], [paths[1]])
+            self.assertEqual(splits['validation'], [paths[2]])
+            self.assertEqual(splits['testing'], [paths[0]])
 
     def test_actual_manifest_cli_bypasses_generation_explicit_splits_and_datasets(self):
         with tempfile.TemporaryDirectory() as directory:

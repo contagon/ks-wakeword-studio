@@ -39,7 +39,7 @@ pages are reclaimable; resident mmap pages are not equivalent to a Python leak.
 - This is **not** an end-to-end GPU speedup measurement. Full-data GPU timing is
   deferred while official training is active. This change is not yet deployed.
 
-## 1. Cache and parallelize augmentation — next
+## 1. Cache and parallelize augmentation — implemented, not deployed
 
 Target the measured 33-minute stage, without changing augmentation probabilities,
 recording splits, repeat counts, feature extraction, training sampling or loss.
@@ -49,7 +49,8 @@ recording splits, repeat counts, feature extraction, training sampling or loss.
 - Cache generated, personal and reviewed-negative pools/splits independently:
   adding a reviewed negative must not rebuild unchanged generated positives.
 - Use bounded CPU workers for independent recordings and a bounded number of
-  in-flight results; keep TensorFlow/GPU contexts out of augmentation workers.
+  in-flight results; keep GPU contexts out of augmentation workers (TensorFlow
+  remains a CPU-side dependency of the existing microfrontend import).
 - Preserve deterministic output ordering and make results independent of worker
   scheduling/count. Stable per-recording/repetition seeds require a versioned
   policy; exact waveforms will differ from the old global-random-stream policy.
@@ -58,6 +59,21 @@ recording splits, repeat counts, feature extraction, training sampling or loss.
   data, weaken retained-input checks or make cancellation leave a usable partial entry.
 - Log stage timings, cache hits/misses and worker count. Benchmark cold builds,
   warm reuse, and a small negative-only update separately.
+
+Implementation: versioned split-level cache with full file checksums, per-key
+locks, atomic publication, read-only hardlink/copy materialization, and up to four
+spawn workers with one numerical-library thread each. Submission is capped at
+twice the worker count. The approved per-recording seed policy produces identical
+one/two-worker feature bytes and changes exact waveforms relative to the old
+global RNG stream. The scheduled training fingerprint is incremented accordingly.
+
+An isolated 15-recording fixture using the real augmentation, background-noise
+mixing, C frontend and mmap writer measured 9.90 s (one worker), 3.14 s (two),
+0.12 s (all cached), and 2.81 s (one new training negative). The last case rebuilt
+only the negative-training split; generated and held-out split features were hits.
+These small-fixture times include interpreter/library/cache warming effects and
+are **not** a prediction of the full 33-minute corpus speedup. No production run
+or deployment has been performed for this optimization.
 
 ## 2. Store time shifts virtually — deferred
 

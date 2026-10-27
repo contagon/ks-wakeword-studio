@@ -1,16 +1,12 @@
 """Exercise training pool configuration without starting GPU training."""
 
-import ast
-import glob
 import json
 import os
 import subprocess
 import sys
 import tempfile
-import types
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
 import yaml
 
@@ -141,46 +137,24 @@ class PositiveSamplingTests(unittest.TestCase):
                 self.assertIn('positive training features', result.stderr.lower())
 
     def test_augmenter_skips_empty_source_splits_and_keeps_explicit_assignments(self):
-        # ML dependencies are replaced at their boundary; execute the real routing
-        # and split generator, and fail like RaggedMmap does for empty generators.
-        source = ast.parse((REPO / 'cli/wake_word_sample_augmenter').read_text())
-        nodes = [node for node in source.body if isinstance(node, ast.FunctionDef)
-                 and node.name in ('bind_wav_generator', 'generate_feature_set')]
+        from studio.mww_augmentation import generate_pool
         for split in ('training', 'validation', 'testing'):
             with self.subTest(split=split), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 path = root / 'input/real.wav'
                 path.parent.mkdir()
                 path.touch()
-                class Audio:
-                    def astype(self, *args, **kwargs):
-                        return str(path)
-                class Spectrograms:
-                    def __init__(self, clips, **kwargs):
-                        self.clips = clips
-                    def spectrogram_generator(self, split, repeat):
-                        return self.clips.audio_generator(split=split, repeat=repeat)
-                class Mmap:
-                    @staticmethod
-                    def from_generator(out_dir, sample_generator, **kwargs):
-                        frames = list(sample_generator)
-                        if not frames:
-                            raise ValueError('Cannot write an empty mmap')
-                        target = Path(out_dir)
+                class Builder:
+                    def write(self, target, records, *, config, **kwargs):
                         target.mkdir(parents=True)
+                        frames = [r['path'] for _ in range(config['repeat']) for r in records]
                         (target / 'data.ninja').write_text(json.dumps(frames))
-                namespace = dict(Path=Path, glob=glob, os=os, types=types, stable_splits={str(path): split},
-                    Clips=lambda **kwargs: SimpleNamespace(), augmenter=object(),
-                    SpectrogramGeneration=Spectrograms, RaggedMmap=Mmap,
-                    librosa=SimpleNamespace(load=lambda *args, **kwargs: (Audio(), 16000)),
-                    np=SimpleNamespace(float32=None), split_cfg={
-                        'training': dict(name='train', repetition=2, slide_frames=10),
-                        'validation': dict(name='validation', repetition=1, slide_frames=10),
-                        'testing': dict(name='test', repetition=1, slide_frames=1)})
-                exec(compile(ast.Module(body=nodes, type_ignores=[]), 'actual-augmenter', 'exec'), namespace)
-                self.assertTrue(namespace['generate_feature_set'](str(path.parent), str(root / 'features'), 'personal'))
+                        return len(records) * config['repeat'] * config['slide_frames']
+                kwargs = dict(cache_root=None, assignments={str(path): split}, seed=10,
+                              policy={}, corpora={}, versions={}, builder=Builder(), report=[])
+                self.assertTrue(generate_pool(path.parent, root / 'features', 'personal', **kwargs))
                 outputs = list((root / 'features').glob('*/wakeword_mmap/data.ninja'))
                 self.assertEqual([p.relative_to(root / 'features').parts[0] for p in outputs], [split])
                 self.assertEqual(json.loads(outputs[0].read_text()), [str(path)] * (2 if split == 'training' else 1))
-                self.assertFalse(namespace['generate_feature_set'](str(root / 'absent'), str(root / 'empty'), 'generated'))
+                self.assertFalse(generate_pool(root / 'absent', root / 'empty', 'generated', **kwargs))
                 self.assertFalse((root / 'empty').exists())

@@ -1,6 +1,6 @@
 # Augmentation caching and bounded parallelism
 
-Status: proposed design for the user's requested next optimization; not implemented.
+Status: approved in conversation, including the versioned per-recording RNG change; implementation in progress.
 
 ## Intent
 
@@ -49,7 +49,7 @@ recording/repetition produces its existing shifted variants; virtual shift stora
 is explicitly deferred. Preserve two acoustic training repetitions, one validation
 and testing repetition, ten training/validation shifts and one testing shift.
 
-### Randomness policy requiring confirmation
+### Approved randomness policy
 
 Stable per-recording/repetition seeds make cached output independent of worker
 count and scheduling. Base these on the run seed, audio content, pool/split,

@@ -135,6 +135,34 @@ class TrainingTests(unittest.TestCase):
             selected_batches=manifest.selected_batches, adapter_version=4)
         self.assertNotEqual(manifest.fingerprint, hashlib.sha256(encode(old_inputs).encode()).hexdigest())
 
+    def test_per_recording_augmentation_rng_invalidates_old_fingerprint(self):
+        import hashlib
+        from studio.training import encode
+        self.audio()
+        manifest = self.service.snapshot(self.word.id, 'd' * 32)
+        old_inputs = dict(model_id=manifest.model_id, phrase=manifest.phrase, language=manifest.language,
+            config=asdict(manifest.config), seed=manifest.seed, audio=[asdict(a) for a in manifest.audio],
+            datasets=[asdict(d) for d in manifest.datasets], augmentation=[asdict(a) for a in manifest.augmentation],
+            selected_batches=manifest.selected_batches, adapter_version=5)
+        self.assertNotEqual(manifest.fingerprint, hashlib.sha256(encode(old_inputs).encode()).hexdigest())
+
+    def test_augmentation_cache_report_is_retained_in_private_archive(self):
+        import json
+        self.audio()
+        original = self.runner.run
+        report = {'policy_version': 1, 'workers': 2, 'splits': [{'hit': True, 'key': 'a' * 64}]}
+        def with_report(context, argv, **kwargs):
+            result = original(context, argv, **kwargs)
+            root = Path(next(arg.split('=', 1)[1] for arg in argv if arg.startswith('--data-dir=')))
+            (root / 'logs').mkdir(exist_ok=True)
+            (root / 'logs/augmentation.json').write_text(json.dumps(report))
+            return result
+        with patch.object(self.runner, 'run', side_effect=with_report):
+            self.assertEqual(self.run_job().status, 'complete')
+        version = self.service.versions(self.word.id).items[0]
+        saved = Path(version.path) / 'logs/orchestration/augmentation.json'
+        self.assertEqual(json.loads(saved.read_text()), report)
+
     def test_missing_failed_cancelled_interrupted_never_publishable(self):
         self.audio()
         self.assertEqual(self.run_job().status, 'complete')
