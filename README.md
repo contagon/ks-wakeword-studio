@@ -193,6 +193,17 @@ rate. A one-step smoke run uses only the initial rate. Existing saved step budge
 and explicit CLI overrides are preserved; they also use the staged schedule.
 This does not enable upstream's positive-batch floor or corrective training pass.
 
+Validation transfers at most **128 examples at a time** from host memory to the
+GPU, including the final partial batch. It still evaluates the complete ordinary
+and ambient validation sets with the upstream metric/reset logic. This avoids
+Keras trying to copy the entire ambient corpus into VRAM before batching it.
+Completed validation inputs are explicitly released even if TensorFlow retains
+its generator callbacks, preventing host RAM from growing by a corpus per pass.
+Training batches remain size 16. GPU failures stop the run by default rather than
+retrying on CPU. CPU-only systems still train normally. Set
+`MWW_ALLOW_CPU_FALLBACK=true` only to explicitly permit CPU fallback when a GPU
+is present but unusable or GPU training fails.
+
 ### Downloaded datasets and training prerequisites
 
 **Data → Downloaded** contains two separate resource types:
