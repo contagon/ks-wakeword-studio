@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
-"""Run the pinned training engine with host-backed, bounded validation inputs.
+"""Run the pinned engine with streamed, bounded validation inputs.
 
 Passing whole NumPy arrays to Keras evaluate can copy the entire validation
 corpus onto the GPU before its batch_size takes effect. A generator-backed
 dataset transfers only a batch at a time and leaves upstream metric logic intact.
+The validation handler adapter also avoids assembling whole host feature arrays.
 """
 
 from functools import wraps
+from pathlib import Path
 import runpy
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from studio.mww_validation import StreamingValidationHandler, ValidationFeatures
 
 
 VALIDATION_BATCH_SIZE = 128
@@ -22,6 +29,9 @@ def evaluate_bounded(evaluate, features, labels, *, batch_size=VALIDATION_BATCH_
     import tensorflow as tf
 
     def batches():
+        if isinstance(features, ValidationFeatures):
+            yield from features.batches(labels, batch_size)
+            return
         for start in range(0, len(features), batch_size):
             yield features[start:start + batch_size], labels[start:start + batch_size]
 
@@ -58,7 +68,7 @@ def install_bounded_validation(train_module):
         # Preserve upstream's resets and its accumulation across ordinary and
         # ambient evaluation. One evaluate call still scores each complete set.
         with train_module.swap_attribute(model, 'evaluate', bounded):
-            return original_validate(config, data_processor, model, test_set)
+            return original_validate(config, StreamingValidationHandler(data_processor), model, test_set)
 
     train_module.validate_nonstreaming = validate
 
@@ -67,7 +77,7 @@ def main():
     from microwakeword import train
 
     install_bounded_validation(train)
-    print(f'→ Validation uses host-backed batches of at most {VALIDATION_BATCH_SIZE} examples', flush=True)
+    print(f'→ Validation streams mmap features in batches of at most {VALIDATION_BATCH_SIZE} examples', flush=True)
     runpy.run_module('microwakeword.model_train_eval', run_name='__main__')
 
 
