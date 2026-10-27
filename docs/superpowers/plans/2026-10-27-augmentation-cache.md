@@ -1,5 +1,8 @@
 # Augmentation Cache and Parallelism Implementation Plan
 
+Historical record: caching was implemented in `a6c25fc` and subsequently removed
+at the user's request. See `2026-10-27-remove-augmentation-cache.md`; parallelism remains.
+
 > **For agentic workers:** Use executing-plans to implement inline with test-driven development.
 
 **Goal:** Reuse unchanged split features and parallelize cold augmentation with deterministic bounded CPU workers.

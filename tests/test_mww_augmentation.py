@@ -25,7 +25,7 @@ def test_selected_corpora_keep_existing_transform_settings():
     assert empty['augmentation_probabilities']['RIR'] == 0
 
 
-def test_pool_cache_reuses_unchanged_splits_across_paths_and_negative_updates(tmp_path):
+def test_pool_always_generates_fresh_splits(tmp_path):
     module = api()
     source = tmp_path / 'audio'
     source.mkdir()
@@ -43,27 +43,24 @@ def test_pool_cache_reuses_unchanged_splits_across_paths_and_negative_updates(tm
             (path / 'data.ninja').write_bytes(b'features')
             return len(records) * config['repeat'] * config['slide_frames']
     report = []
-    kwargs = dict(cache_root=tmp_path / 'cache', assignments=assignments, seed=10,
-                  policy={}, corpora={}, versions={'engine': 'one'}, builder=Builder(), report=report)
+    kwargs = dict(assignments=assignments, seed=10, builder=Builder(), report=report)
     module.generate_pool(source, tmp_path / 'first', 'generated', **kwargs)
     assert calls == [('generated', s) for s in ('training', 'validation', 'testing')]
     assert [r['examples'] for r in report] == [20, 10, 1]
-    assert report[0]['identity']['versions'] == {'engine': 'one'}
+    assert not {'hit', 'key', 'identity'} & report[0].keys()
     report.clear()
     module.generate_pool(source, tmp_path / 'second', 'generated', **kwargs)
-    assert len(calls) == 3
-    assert all(r['hit'] for r in report)
+    assert len(calls) == 6
     new = source / 'negative.wav'
     new.write_bytes(b'new negative')
     assignments[str(new.resolve())] = 'training'
     report.clear()
     module.generate_pool(source, tmp_path / 'negative', 'reviewed negatives', **kwargs)
-    assert [r['hit'] for r in report] == [False, False, False]
+    assert len(calls) == 9
     report.clear()
-    # A different negative pool does not invalidate generated features.
     new.unlink()
     module.generate_pool(source, tmp_path / 'third', 'generated', **kwargs)
-    assert all(r['hit'] for r in report)
+    assert len(calls) == 12
 
 
 def test_empty_splits_are_skipped_without_building_cache_entries(tmp_path):
@@ -77,18 +74,17 @@ def test_empty_splits_are_skipped_without_building_cache_entries(tmp_path):
             (path / 'data.ninja').write_bytes(b'one')
             return 1
     reports = []
-    assert api().generate_pool(source, tmp_path / 'out', 'personal', cache_root=tmp_path / 'cache',
-        assignments={str(p.resolve()): 'testing'}, seed=10, policy={}, corpora={}, versions={},
+    assert api().generate_pool(source, tmp_path / 'out', 'personal',
+        assignments={str(p.resolve()): 'testing'}, seed=10,
         builder=Builder(), report=reports)
     assert [p.name for p in (tmp_path / 'out').iterdir()] == ['testing']
     assert reports[0]['split'] == 'testing'
-    assert reports[0]['identity']['seed'] == 10
     assert not api().generate_pool(tmp_path / 'missing', tmp_path / 'none', 'generated',
-        cache_root=tmp_path / 'cache', assignments={}, seed=10, policy={}, corpora={}, versions={},
+        assignments={}, seed=10,
         builder=Builder(), report=[])
 
 
-def test_warm_cache_does_not_invoke_or_import_ml_builder(tmp_path):
+def test_repeated_output_is_rejected_without_running_builder(tmp_path):
     module = api()
     source = tmp_path / 'audio'
     source.mkdir()
@@ -99,19 +95,18 @@ def test_warm_cache_does_not_invoke_or_import_ml_builder(tmp_path):
             path.mkdir()
             (path / 'data.ninja').write_bytes(b'one')
             return 20
-    kwargs = dict(cache_root=tmp_path / 'cache', assignments={str(p.resolve()): 'training'},
-                  seed=10, policy={}, corpora={}, versions={}, builder=Builder(), report=[])
+    kwargs = dict(assignments={str(p.resolve()): 'training'}, seed=10, builder=Builder(), report=[])
     module.generate_pool(source, tmp_path / 'a', 'generated', **kwargs)
     with patch.object(kwargs['builder'], 'write', side_effect=AssertionError('ML builder must not run')):
-        module.generate_pool(source, tmp_path / 'b', 'generated', **kwargs)
-    assert kwargs['report'][-1]['hit']
+        with pytest.raises(ValueError, match='exists'):
+            module.generate_pool(source, tmp_path / 'a', 'generated', **kwargs)
 
 
 def test_cli_accepts_existing_explicit_paths_and_worker_bounds(tmp_path):
     args = api().parse_args([f'--data-dir={tmp_path}', '--augmentation-ids=', '--workers=1'])
     assert args.workers == 1
     assert args.input_dir == tmp_path / 'work/wake_word_samples'
-    assert args.cache_dir == tmp_path / '.cache/mww-augmentation/v1'
+    assert not hasattr(args, 'cache_dir')
     with pytest.raises(SystemExit):
         api().parse_args([f'--data-dir={tmp_path}', '--workers=5'])
 

@@ -244,7 +244,7 @@ def main(argv=None):
     dataset_path.write_text(json.dumps({'schema_version': 1, 'datasets': mww_datasets}))
     _stage(env, 'augmenting')
     _run([python, cli / 'wake_word_sample_augmenter', f'--data-dir={root}', f'--split-manifest={split_path}', f'--seed={manifest["seed"]}',
-          f'--tool-data-dir={shared}', f'--input-manifest={args.input_manifest.resolve()}',
+          f'--input-manifest={args.input_manifest.resolve()}',
           f'--augmentation-ids={",".join(augmentation)}',
           f'--personal-dir={root / "work/personal_samples"}', f'--negative-dir={root / "work/reviewed_negatives"}',
           *[f'--{name.replace("_", "-")}-dir={path}' for name, path in augmentation.items()]], cwd=root, env=env)

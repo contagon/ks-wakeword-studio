@@ -158,7 +158,7 @@ START_TS=$EPOCHSECONDS
 mkdir -p "${WORK_DIR}/trained_models" || :
 
 YAML_PATH="${WORK_DIR}/trained_models/training_parameters.yaml"
-EVAL_STEP_INTERVAL=500
+EVAL_STEP_INTERVAL=2000
 
 config_args=( --output "${YAML_PATH}" --work-dir "${WORK_DIR}" --training-steps "${TRAINING_STEPS}"
               --eval-step-interval "${EVAL_STEP_INTERVAL}" )

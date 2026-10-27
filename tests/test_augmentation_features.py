@@ -22,18 +22,8 @@ def test_content_identity_and_seeds_ignore_paths_but_keep_duplicates_and_splits(
     assert s != api().task_seed(10, 'generated', 'testing', records[0], 0)
     assert s != api().task_seed(10, 'generated', 'training', records[1], 0)
     assert s != api().task_seed(10, 'generated', 'training', records[0], 1)
-    options = dict(seed=10, pool='generated', split='training', config={'repeat': 2, 'slide_frames': 10},
-                   policy={'gain': .8}, corpora={'music': 'abc'}, versions={'engine': 'pin'})
-    identity = api().split_identity(records, **options)
-    moved = [dict(r, path='/different/' + str(i)) for i, r in enumerate(records)]
-    assert identity == api().split_identity(moved, seed=10, pool='generated', split='training',
-        config={'repeat': 2, 'slide_frames': 10}, policy={'gain': .8}, corpora={'music': 'abc'}, versions={'engine': 'pin'})
-    for key, changed in [('seed', 11), ('pool', 'personal'), ('split', 'testing'),
-                         ('config', {'repeat': 1}), ('policy', {'gain': .9}),
-                         ('corpora', {'music': 'changed'}), ('versions', {'engine': 'other'})]:
-        assert api().split_identity(records, **dict(options, **{key: changed})) != identity
     b.write_bytes(b'changed')
-    assert api().split_identity(api().recordings([a, b]), **options) != identity
+    assert api().task_seed(10, 'generated', 'training', api().recordings([b])[0], 0) != s
 
 
 def test_split_assignment_is_explicit_or_matches_legacy_seed_ten(tmp_path):

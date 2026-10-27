@@ -1,4 +1,4 @@
-"""Cached split augmentation orchestration, with a lazily started CPU worker pool."""
+"""Fresh run-local augmentation with a lazily started CPU worker pool."""
 
 import argparse
 from concurrent.futures import ProcessPoolExecutor
@@ -10,16 +10,17 @@ import os
 from pathlib import Path
 import re
 import signal
+import shutil
+import stat
 import sys
 import time
 from uuid import uuid4
 
 from studio.augmentation import CATALOG, tree_fingerprint
-from studio.augmentation_cache import digest, encoded, materialize
 from studio.augmentation_features import (POLICY_VERSION, SPLITS, ordered_results, recordings,
-                                          split_files, split_identity, task_seed, worker_count)
+                                          split_files, task_seed, worker_count, digest, encoded)
 from studio.augmentation_worker import initialize, process_clip
-from studio.storage import ensure_directory
+from studio.storage import ensure_directory, fsync_directories
 
 
 def augmentation_policy(paths, selected):
@@ -47,7 +48,7 @@ def runtime_versions():
     root = Path(next(iter(spec.submodule_search_locations)))
     versions['engine_sources'] = {str(p.relative_to(root)): digest(p) for p in sorted(root.rglob('*.py'))}
     versions['implementation'] = {name: digest(Path(__file__).with_name(name)) for name in (
-        'mww_augmentation.py', 'augmentation_features.py', 'augmentation_worker.py', 'augmentation_cache.py')}
+        'mww_augmentation.py', 'augmentation_features.py', 'augmentation_worker.py')}
     return versions
 
 
@@ -99,8 +100,44 @@ class FeatureBuilder:
         return count
 
 
-def generate_pool(source, output, pool, *, cache_root, assignments, seed, policy, corpora,
-                  versions, builder, report):
+def write_features(destination, build, expected_examples):
+    """Publish fresh features atomically; never replace previous run outputs."""
+    destination = Path(destination)
+    if destination.exists() or destination.is_symlink():
+        raise ValueError('Augmentation output already exists; use a fresh output directory')
+    ensure_directory(destination.parent)
+    stage = destination.parent / ('.partial-' + uuid4().hex)
+    started = time.monotonic()
+    try:
+        examples = build(stage)
+        if type(examples) is not int or examples < 1 or examples != expected_examples:
+            raise ValueError('Augmentation feature count does not match its recipe')
+        size = 0
+        data_found = False
+        for path in stage.rglob('*'):
+            mode = path.lstat().st_mode
+            if stat.S_ISDIR(mode):
+                continue
+            if not stat.S_ISREG(mode):
+                raise ValueError('Augmentation output must contain regular files')
+            size += path.stat().st_size
+            data_found |= path.name == 'data.ninja' and path.stat().st_size > 0
+            with path.open('rb') as handle:
+                os.fsync(handle.fileno())
+        if not data_found:
+            raise ValueError('Augmentation output has no feature data')
+        fsync_directories(stage)
+        if destination.exists() or destination.is_symlink():
+            raise ValueError('Augmentation output already exists; use a fresh output directory')
+        stage.rename(destination)
+        fsync_directories(destination.parent)
+        return dict(examples=examples, bytes=size, seconds=time.monotonic() - started)
+    finally:
+        if stage.exists():
+            shutil.rmtree(stage)
+
+
+def generate_pool(source, output, pool, *, assignments, seed, builder, report):
     files = sorted(Path(source).glob('*.wav'))
     if not files:
         print(f'→ No WAVs for {pool}; skipping', flush=True)
@@ -110,14 +147,13 @@ def generate_pool(source, output, pool, *, cache_root, assignments, seed, policy
             continue
         records = recordings(paths)
         config = dict(SPLITS[split], remove_silence=pool != 'reviewed negatives')
-        identity = split_identity(records, seed=seed, pool=pool, split=split, config=config,
-                                  policy=policy, corpora=corpora, versions=versions)
         def build(path):
             return builder.write(path, records, config=config, seed=seed, pool=pool, split=split)
-        result = materialize(cache_root, identity, Path(output) / split / 'wakeword_mmap', build)
-        result.update(pool=pool, split=split, recordings=len(records), identity=identity)
+        expected = len(records) * config['repeat'] * config['slide_frames']
+        result = write_features(Path(output) / split / 'wakeword_mmap', build, expected)
+        result.update(pool=pool, split=split, recordings=len(records))
         report.append(result)
-        print(f'→ {pool}/{split}: cache {"hit" if result["hit"] else "miss"}; '
+        print(f'→ {pool}/{split}: generated '
               f'{result["examples"]} features; {result["seconds"]:.2f}s', flush=True)
     return True
 
@@ -126,13 +162,10 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--data-dir', type=Path,
                         default=Path.cwd() if Path('.mww-data-dir').exists() else Path('/data'))
-    parser.add_argument('--tool-data-dir', type=Path)
     parser.add_argument('--input-manifest', type=Path)
     parser.add_argument('--split-manifest', type=Path)
     parser.add_argument('--seed', type=int, default=10)
     parser.add_argument('--augmentation-ids', default=None)
-    parser.add_argument('--cache-dir', type=Path)
-    parser.add_argument('--no-cache', action='store_true')
     parser.add_argument('--workers', type=int, default=None)
     for name in ('input-dir', 'output-dir', 'personal-dir', 'personal-output-dir',
                  'negative-dir', 'negative-output-dir', *[name.replace('_', '-') + '-dir' for name in CATALOG]):
@@ -146,8 +179,6 @@ def parse_args(argv=None):
     except ValueError as exc:
         parser.error(str(exc))
     args.data_dir = args.data_dir.resolve()
-    shared = (args.tool_data_dir or args.data_dir).resolve()
-    args.cache_dir = args.cache_dir or shared / '.cache/mww-augmentation/v1'
     work = args.data_dir / 'work'
     for name, default in dict(input_dir=work / 'wake_word_samples', personal_dir=args.data_dir / 'personal_samples',
         personal_output_dir=work / 'personal_augmented_features', negative_dir=args.data_dir / 'negative_samples',
@@ -195,12 +226,10 @@ def main(argv=None):
     assignments = json.loads(args.split_manifest.read_text()) if args.split_manifest else None
     corpora = corpus_identities(args, paths)
     policy = augmentation_policy(paths, args.selected)
-    cache_policy = dict(policy, impulse_paths=['mit_rirs_16k'] if 'mit_rirs_16k' in args.selected else [],
-                        background_paths=[name for name in ('chime_16k', 'fma_16k', 'audioset_16k') if name in args.selected])
     versions = runtime_versions()
-    report = dict(policy_version=POLICY_VERSION, workers=args.workers, cache_dir=None if args.no_cache else str(args.cache_dir), splits=[])
-    # Raising on TERM unwinds cache staging and worker contexts; no partial entry
-    # is published. Studio still owns/signals the complete subprocess group.
+    report = dict(policy_version=POLICY_VERSION, seed=args.seed, workers=args.workers,
+                  policy=policy, corpora=corpora, versions=versions, splits=[])
+    # Raising on TERM unwinds run-local staging and worker contexts.
     def terminated(signum, frame):
         raise SystemExit(128 + signum)
     old_handler = signal.signal(signal.SIGTERM, terminated)
@@ -209,9 +238,8 @@ def main(argv=None):
             for source, output, pool in ((args.input_dir, args.output_dir, 'generated'),
                     (args.personal_dir, args.personal_output_dir, 'personal'),
                     (args.negative_dir, args.negative_output_dir, 'reviewed negatives')):
-                generate_pool(source, output, pool, cache_root=None if args.no_cache else args.cache_dir,
-                    assignments=assignments, seed=args.seed, policy=cache_policy, corpora=corpora,
-                    versions=versions, builder=builder, report=report['splits'])
+                generate_pool(source, output, pool, assignments=assignments, seed=args.seed,
+                    builder=builder, report=report['splits'])
             report['worker_pids'] = sorted(builder.worker_pids)
     finally:
         signal.signal(signal.SIGTERM, old_handler)
@@ -225,5 +253,5 @@ def main(argv=None):
     finally:
         temporary.unlink(missing_ok=True)
     print(f'Augmentation complete: {report["seconds"]:.2f}s; {args.workers} CPU worker(s); '
-          f'{sum(s["hit"] for s in report["splits"])}/{len(report["splits"])} cached splits', flush=True)
+          f'{len(report["splits"])} freshly generated splits', flush=True)
     return 0

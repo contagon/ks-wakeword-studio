@@ -39,7 +39,35 @@ pages are reclaimable; resident mmap pages are not equivalent to a Python leak.
 - This is **not** an end-to-end GPU speedup measurement. Full-data GPU timing is
   deferred while official training is active. This change is not yet deployed.
 
-## 1. Cache and parallelize augmentation — implemented, not deployed
+## 1. Parallel augmentation retained; shared caching removed
+
+Commit `a6c25fc` introduced both caching and parallelism. The user subsequently
+requested removal of shared feature caching after diagnostics isolated severe
+SATA SSD write stalls. Current augmentation always rebuilds fresh run-local
+features; it retains bounded deterministic workers, input verification, atomic
+publication, durable syncing and private reports. Cache directories, hit/miss
+logic, cache manifests/checksum inventories, locks and reuse links/copies are gone.
+Existing cache files and historical outputs are not automatically deleted.
+
+Storage diagnostics on the full Janet dataset (40,480 recordings; 690,732 examples;
+34.1 GB output) measured 72m31s on the SATA drive before targeted TRIM/idle,
+2m07s discarding output, and 3m23s for a cold cached NVMe build. After TRIM/idle,
+8 GiB SATA writes improved from 5m06s to 19.5s (one sync) and 16m17s to 20.9s
+(256 MiB sync intervals). Other applications contributed negligible writes.
+These observations identify a storage bottleneck, not a general caching speedup.
+The full post-removal real-CLI SATA benchmark completed in **274.21 s (4m34s)**,
+including fresh generation, run-local writing and durable syncing of all nine
+splits. Input staging was another 18.93 s, measured separately. All 40,480
+recordings, 690,732 examples and 34,094,943,063 output bytes were verified. This is
+about 16x faster than the 72m31s pre-TRIM cold SATA run; storage recovery and cache
+removal both changed, so this is not an isolated estimate of the benefit of
+removing caching. Four workers, five-container-CPU quota and 16 GiB memory limit
+were used; no OOM occurred (filesystem caching reached the memory limit).
+Logs: `/tmp/opencode/augmentation-without-cache/`. Private benchmark inputs and
+features were removed. Existing shared caches and historical outputs remain;
+no deployment was performed.
+
+### Historical cache design and fixture results (superseded)
 
 Target the measured 33-minute stage, without changing augmentation probabilities,
 recording splits, repeat counts, feature extraction, training sampling or loss.
@@ -84,13 +112,24 @@ This could reduce the shifted storage component by roughly 10x, not necessarily
 total run storage or wall time. Preserve logical example counts and sampling
 probabilities; test both nonstreaming validation and streaming inference behavior.
 
-## 3. Validate less frequently — deferred experiment
+## 3. Validate less frequently — implemented, not deployed
 
 Moving from every 500 to every 2,000 steps removes ~75% of full validation passes.
 At the observed warm rate this could save ~13 minutes per 80,000-step run.
-It also assesses fewer checkpoints and can change selected-model quality. Do not
-combine it with input-pipeline optimization until equivalent full-set validation
-has been measured; an interim subset must not silently replace final evaluation.
+The trainer now validates every 2,000 steps, while the upstream engine still
+validates at the final step even for shorter or non-divisible training budgets.
+Full validation coverage, training batches and learning-rate stages are unchanged.
+Studio's training fingerprint is incremented so the changed selection policy is
+not skipped as an unchanged run; the augmentation RNG policy is unaffected.
+
+This assesses fewer candidate checkpoints: over 80,000 steps, 40 scheduled checks
+instead of 160. For example, a stronger checkpoint at step 3,500 will no longer be
+considered when checks occur only at 2,000 and 4,000. Validation scores need not
+improve monotonically, so the exported best checkpoint can differ in recall or
+false-positive behavior. It is not guaranteed to be worse on unseen audio, but
+the best observed validation score can be lower. Final full-set evaluation remains
+unchanged; no subset replaces it. The estimated saving above is not a new measured
+production benchmark, and no live run was restarted for this change.
 
 ## 4. GPU batching and prefetching — deferred
 

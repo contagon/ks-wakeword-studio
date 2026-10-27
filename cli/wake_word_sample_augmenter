@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Augment retained WAVs using verified split caches and bounded CPU workers."""
+"""Generate fresh augmented features using bounded CPU workers."""
 
 from pathlib import Path
 import sys

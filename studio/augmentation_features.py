@@ -1,13 +1,24 @@
-"""Lightweight augmentation identities and bounded ordered task scheduling."""
+"""Deterministic augmentation seeds and bounded ordered task scheduling."""
 
 from collections import Counter, deque
 import hashlib
+import json
 import math
 import os
 from pathlib import Path
 import random
+import stat
 
-from studio.augmentation_cache import digest, encoded
+
+def encoded(value):
+    return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+
+def digest(path):
+    if not stat.S_ISREG(path.lstat().st_mode):
+        raise ValueError('Augmentation inputs must be regular files')
+    with path.open('rb') as source:
+        return hashlib.file_digest(source, 'sha256').hexdigest()
 
 
 POLICY_VERSION = 1
@@ -43,12 +54,6 @@ def recordings(files):
 def task_seed(seed, pool, split, recording, repetition):
     value = [POLICY_VERSION, seed, pool, split, recording['sha256'], recording['occurrence'], repetition]
     return int(hashlib.sha256(encoded(value).encode()).hexdigest()[:8], 16)
-
-
-def split_identity(records, *, seed, pool, split, config, policy, corpora, versions):
-    return dict(policy_version=POLICY_VERSION, seed=seed, pool=pool, split=split, config=config,
-                policy=policy, corpora=corpora, versions=versions,
-                recordings=[{k: r[k] for k in ('sha256', 'occurrence')} for r in records])
 
 
 def worker_count(requested=None):

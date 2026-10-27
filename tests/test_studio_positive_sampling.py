@@ -73,6 +73,14 @@ class PositiveSamplingTests(unittest.TestCase):
                 self.assertIn('training steps', result.stderr.lower())
                 self.assertIsNone(config)
 
+    def test_validation_interval_is_two_thousand_steps_in_real_shell_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result, config = self.configure(Path(directory), ('training',), steps=80000)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(config['eval_step_interval'], 2000)
+            self.assertEqual(config['training_steps'], [60000, 20000])
+            self.assertEqual(config['batch_size'], 16)
+
     def test_cli_defaults_to_eighty_thousand_steps_and_preserves_overrides(self):
         for override, expected in ((None, '80000'), ('123', '123')):
             with self.subTest(override=override), tempfile.TemporaryDirectory() as directory:
@@ -150,8 +158,7 @@ class PositiveSamplingTests(unittest.TestCase):
                         frames = [r['path'] for _ in range(config['repeat']) for r in records]
                         (target / 'data.ninja').write_text(json.dumps(frames))
                         return len(records) * config['repeat'] * config['slide_frames']
-                kwargs = dict(cache_root=None, assignments={str(path): split}, seed=10,
-                              policy={}, corpora={}, versions={}, builder=Builder(), report=[])
+                kwargs = dict(assignments={str(path): split}, seed=10, builder=Builder(), report=[])
                 self.assertTrue(generate_pool(path.parent, root / 'features', 'personal', **kwargs))
                 outputs = list((root / 'features').glob('*/wakeword_mmap/data.ninja'))
                 self.assertEqual([p.relative_to(root / 'features').parts[0] for p in outputs], [split])

@@ -198,7 +198,7 @@ in batches of at most **128 examples**, including the final partial batch. It
 does not first stack or shuffle a whole validation feature array in host RAM;
 only the small label/weight arrays are materialized. Every ordinary and ambient
 validation example is still evaluated with upstream's truncation, scaling,
-metric/reset logic, and the existing 500-step evaluation interval. Provider order
+metric/reset logic, with validation every 2,000 steps and at the final step. Provider order
 replaces whole-array shuffling; aggregate metrics are equivalent within normal
 floating-point tolerances, and the old shuffle's NumPy RNG advancement is retained
 so later training crops do not change just because evaluation order changed.
@@ -210,15 +210,8 @@ retrying on CPU. CPU-only systems still train normally. Set
 `MWW_ALLOW_CPU_FALLBACK=true` only to explicitly permit CPU fallback when a GPU
 is present but unusable or GPU training fails.
 
-Augmentation uses a shared content-addressed feature cache under
-`<tool-data-dir>/.cache/mww-augmentation/v1`. Generated, personal and reviewed-negative
-features are keyed independently per split, including audio hashes/duplicates,
-seed, policy, selected corpus fingerprints and engine/dependency/source versions.
-Adding training negatives therefore does not regenerate unchanged positive or
-held-out split features. Cache hits verify feature checksums; reuse is not just
-a path/mtime check and does not produce new acoustic diversity.
-
-Cold splits use up to four CPU workers (bounded by CPU affinity/quota), with at
+Augmentation generates fresh run-local features every time; there is no shared
+feature cache or reuse. Splits use up to four CPU workers (bounded by CPU affinity/quota), with at
 most twice that many tasks in flight. Workers use one numerical-library thread
 and cannot allocate a GPU context. Set `MWW_AUGMENTATION_WORKERS=1` for diagnostics,
 or pass `--workers=1` to `cli/wake_word_sample_augmenter`. Versioned per-recording/
@@ -227,17 +220,16 @@ old single global RNG stream; transform probabilities, repeats, shifts and split
 are unchanged. This policy change also invalidates unchanged scheduled-run
 fingerprints once.
 
-Cache entries are published atomically and materialized into fresh run directories
-as read-only hardlinks where possible (copies across filesystems). There is **no
-automatic cache eviction**; cached features consume disk until removed explicitly,
-and full checksum verification still reads their bytes on reuse. Corruption fails
-closed rather than silently training on it; use `--no-cache` with fresh output
-directories for diagnosis, or remove/rebuild only the affected cache entry while
-idle. Never edit cached files or historical run outputs. Each successful run's
-private `logs/orchestration/augmentation.json` archive records per-split cache keys,
-hits/misses, feature counts/times, worker PIDs/count, RNG policy version and full
-identity recipes (including implementation/dependency versions, even with caching
-disabled). Corpus file selection uses canonical relative-path ordering.
+Features are written to temporary sibling directories, synced and atomically
+published into fresh run directories. Existing outputs are never replaced, and
+failed builds are cleaned up. Source hashes and pinned-corpus checks remain.
+Each successful run's private `logs/orchestration/augmentation.json` archive
+records counts/sizes/times per split, worker PIDs/count, seed, RNG policy,
+corpora and implementation/dependency versions. Corpus selection uses canonical
+relative-path ordering. The former `--cache-dir`, `--no-cache` and augmenter
+`--tool-data-dir` options are removed. Old `.cache/mww-augmentation/v1` files
+are neither read nor automatically deleted; they can be removed separately while
+idle without touching historical run outputs.
 
 ### Downloaded datasets and training prerequisites
 

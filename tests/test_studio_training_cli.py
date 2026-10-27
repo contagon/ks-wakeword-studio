@@ -47,7 +47,7 @@ class TrainingCLITests(unittest.TestCase):
             self.assertIn('--reviewed-negative-families=1', trainer)
             augmenter = next(call.args[0] for call in command.call_args_list
                              if any(str(arg).endswith('wake_word_sample_augmenter') for arg in call.args[0]))
-            self.assertIn(f'--tool-data-dir={root / "tools"}', augmenter)
+            self.assertFalse(any(str(arg).startswith('--tool-data-dir=') for arg in augmenter))
             self.assertIn(f'--input-manifest={manifest}', augmenter)
 
     def test_pinned_augmentation_accepts_explicit_subsets_not_missing_or_duplicate_ids(self):

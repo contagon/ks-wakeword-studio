@@ -1,6 +1,6 @@
 # Augmentation caching and bounded parallelism
 
-Status: approved in conversation, including the versioned per-recording RNG change; implementation in progress.
+Status: historical design. Shared feature caching was subsequently removed at the user's request; bounded workers and the approved per-recording RNG policy remain. See `../plans/2026-10-27-remove-augmentation-cache.md`.
 
 ## Intent
 
