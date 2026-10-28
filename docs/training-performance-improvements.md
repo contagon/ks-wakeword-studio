@@ -112,11 +112,21 @@ This could reduce the shifted storage component by roughly 10x, not necessarily
 total run storage or wall time. Preserve logical example counts and sampling
 probabilities; test both nonstreaming validation and streaming inference behavior.
 
-## 3. Validate less frequently — implemented, not deployed
+## 3. Validate less frequently — reverted to 500 steps
+
+After the storage bottleneck was resolved, the user requested restoration of
+validation every **500 steps**, plus the final step, to consider more checkpoint
+candidates. An 80,000-step run again has 160 scheduled checks rather than 40.
+The bounded streaming validation path, full-set coverage, training batches,
+learning-rate stages and augmentation RNG policy are unchanged. Adapter version
+8 invalidates fingerprints from the 2,000-step policy for scheduled training.
+No live run was restarted or deployment performed for this restoration.
+
+### Historical 2,000-step tradeoff
 
 Moving from every 500 to every 2,000 steps removes ~75% of full validation passes.
 At the observed warm rate this could save ~13 minutes per 80,000-step run.
-The trainer now validates every 2,000 steps, while the upstream engine still
+The temporary policy validated every 2,000 steps, while the upstream engine still
 validates at the final step even for shorter or non-divisible training budgets.
 Full validation coverage, training batches and learning-rate stages are unchanged.
 Studio's training fingerprint is incremented so the changed selection policy is

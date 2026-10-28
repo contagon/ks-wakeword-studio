@@ -198,7 +198,7 @@ in batches of at most **128 examples**, including the final partial batch. It
 does not first stack or shuffle a whole validation feature array in host RAM;
 only the small label/weight arrays are materialized. Every ordinary and ambient
 validation example is still evaluated with upstream's truncation, scaling,
-metric/reset logic, with validation every 2,000 steps and at the final step. Provider order
+metric/reset logic, with validation every 500 steps and at the final step. Provider order
 replaces whole-array shuffling; aggregate metrics are equivalent within normal
 floating-point tolerances, and the old shuffle's NumPy RNG advancement is retained
 so later training crops do not change just because evaluation order changed.

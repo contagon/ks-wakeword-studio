@@ -73,11 +73,11 @@ class PositiveSamplingTests(unittest.TestCase):
                 self.assertIn('training steps', result.stderr.lower())
                 self.assertIsNone(config)
 
-    def test_validation_interval_is_two_thousand_steps_in_real_shell_config(self):
+    def test_validation_interval_is_five_hundred_steps_in_real_shell_config(self):
         with tempfile.TemporaryDirectory() as directory:
             result, config = self.configure(Path(directory), ('training',), steps=80000)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(config['eval_step_interval'], 2000)
+            self.assertEqual(config['eval_step_interval'], 500)
             self.assertEqual(config['training_steps'], [60000, 20000])
             self.assertEqual(config['batch_size'], 16)
 

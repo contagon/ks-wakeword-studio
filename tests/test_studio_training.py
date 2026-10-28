@@ -163,7 +163,7 @@ class TrainingTests(unittest.TestCase):
         saved = Path(version.path) / 'logs/orchestration/augmentation.json'
         self.assertEqual(json.loads(saved.read_text()), report)
 
-    def test_less_frequent_validation_invalidates_previous_training_fingerprint(self):
+    def test_restored_validation_interval_invalidates_two_thousand_step_fingerprint(self):
         import hashlib
         from studio.training import encode
         self.audio()
@@ -171,7 +171,7 @@ class TrainingTests(unittest.TestCase):
         old_inputs = dict(model_id=manifest.model_id, phrase=manifest.phrase, language=manifest.language,
             config=asdict(manifest.config), seed=manifest.seed, audio=[asdict(a) for a in manifest.audio],
             datasets=[asdict(d) for d in manifest.datasets], augmentation=[asdict(a) for a in manifest.augmentation],
-            selected_batches=manifest.selected_batches, adapter_version=6)
+            selected_batches=manifest.selected_batches, adapter_version=7)
         self.assertNotEqual(manifest.fingerprint, hashlib.sha256(encode(old_inputs).encode()).hexdigest())
 
     def test_missing_failed_cancelled_interrupted_never_publishable(self):
