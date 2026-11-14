@@ -13,7 +13,8 @@ from uuid import uuid4
 from studio.db import Store
 from studio.kiosk import KioskClient, normalize_url, validate_token
 from studio.models import (Conflict, CredentialsRequired, Device, IdentityMismatch,
-                           NotFound, RemoteRejected, ValidationError)
+                           NotFound, Publication, RemoteRejected, ValidationError)
+from studio.notifications import publication_finished_in
 from studio.storage import open_directory
 
 
@@ -106,9 +107,14 @@ class DeviceService:
     def remove(self, device_id: str) -> None:
         device = self.get(device_id)
         with self.store.transaction() as db:
+            affected = db.execute('SELECT p.* FROM publications p JOIN devices d ON d.id=p.device_id '
+                                  "WHERE d.id=? OR (d.leader_id=? AND d.role='follower')",
+                                  (device_id, device_id if device.role == 'leader' else None)).fetchall()
             db.execute("UPDATE devices SET removed=1, active=0 WHERE id=?", (device_id,))
             if device.role == 'leader':
                 db.execute("UPDATE devices SET removed=1, active=0 WHERE leader_id=? AND role='follower'", (device_id,))
+            for row in affected:
+                publication_finished_in(db, Publication(**dict(row)))
 
     def add_with_password(self, url: str, password: str, role: Literal["standalone", "leader"]) -> Device:
         url = normalize_url(url)

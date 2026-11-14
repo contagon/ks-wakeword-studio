@@ -291,6 +291,9 @@ class JobQueue:
                     db.execute('INSERT OR IGNORE INTO deployment_events(version_id) '
                                'SELECT id FROM model_versions WHERE run_id=?', (job_id,))
                 job = self.record(self.fetch(db, job_id))
+                terminal_log = f'{job.kind} {job.status}' + (' (skipped)' if result.get('skipped') else '')
+                db.execute('UPDATE studio_jobs SET log=substr(log || ?, -?) WHERE id=?',
+                           (terminal_log + '\n', LOG_LIMIT, job_id))
                 job_finished_in(db, job)
             self._release(job_id)
             return job
@@ -582,7 +585,6 @@ class WorkerPool:
             if self.stop_event.is_set():
                 self.queue.cancel(job.id)
             completed = self.queue.finish(job.id, result or {})
-            context.log(f'{job.kind} {completed.status}' + (' (skipped)' if (result or {}).get('skipped') else ''))
             if completed.status == 'complete' and job.kind in self.completion_hooks:
                 try:
                     self.completion_hooks[job.kind](completed)
@@ -600,7 +602,6 @@ class WorkerPool:
             try:
                 completed = self.queue.finish(job.id, {'error': 'handler_failed', 'error_code': code,
                                                        'message': MESSAGES[code]}, 'failed')
-                context.log(f'{job.kind} {completed.status}')
             except Conflict:
                 # The handler exited but a surviving/unknown child still owns
                 # the resource. Release only the flock, never the SQL claim.

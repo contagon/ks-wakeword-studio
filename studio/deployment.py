@@ -134,6 +134,7 @@ class DeploymentService:
         rows = db.execute('SELECT p.*,d.active,d.role,d.model_eligible,b.reason staging_reason FROM publications p '
                           'JOIN devices d ON d.id=p.device_id LEFT JOIN deployment_staging_blocks b ON b.device_id=p.device_id '
                           'WHERE p.word_id=? AND d.removed=0', (word_id,)).fetchall()
+        changed = None
         for row in rows:
             # Quarantine belongs to the stable device identity, not its current
             # fleet role. Neither profile edits nor membership changes release it.
@@ -146,18 +147,19 @@ class DeploymentService:
                            'WHERE word_id=? AND device_id=?',
                             (blocked, row['staging_reason'] if blocked == 'staging_blocked' else blocked,
                              iso_now(self.clock), word_id, row['device_id']))
-                # Preexisting quarantine becomes terminal during enrollment,
-                # before _attempt/_save can observe this revision. Capture only
-                # the transition: existing terminal history is never replayed.
-                updated = db.execute('SELECT * FROM publications WHERE word_id=? AND device_id=?',
-                                     (word_id, row['device_id'])).fetchone()
-                publication_finished_in(db, Publication(**dict(updated)))
+                changed = row['device_id']
         # Membership/profile edits can make a previously blocked target eligible
         # without a new trained version. Only explicit registry eligibility
         # changes reopen these states; exhausted remote retries stay bounded.
         db.execute("UPDATE publications SET state='pending',attempts=0,next_retry=NULL WHERE word_id=? AND "
                    "state IN ('not_covered','inactive') AND device_id IN "
-                   "(SELECT id FROM devices WHERE removed=0 AND active=1 AND (role!='follower' OR model_eligible=1))", (word_id,))
+                    "(SELECT id FROM devices WHERE removed=0 AND active=1 AND (role!='follower' OR model_eligible=1))", (word_id,))
+        # Summarize only after all eligibility transitions, never midway through
+        # enrollment or by replaying unchanged terminal history on each tick.
+        if changed is not None:
+            updated = db.execute('SELECT * FROM publications WHERE word_id=? AND device_id=?',
+                                 (word_id, changed)).fetchone()
+            publication_finished_in(db, Publication(**dict(updated)))
 
     def _reconcile(self):
         # Successful versions are discovered in archive insertion order, not

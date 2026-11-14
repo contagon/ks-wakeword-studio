@@ -126,32 +126,45 @@ class DeploymentTests(unittest.TestCase):
     def status(self):
         return {p.device_id: p for p in self.service.status(self.word.id)}
 
-    def test_notifications_follow_verified_target_delivery_not_publication_request(self):
+    def test_notifications_wait_for_all_targets_and_summarize_once_per_revision(self):
         from unittest.mock import patch
         notifications = self.runtime.notifications
         notifications.save(apprise_url='json://127.0.0.1:9999/test', download=False)
         notifications.save_workspace(self.word.id, {'scrape': False, 'classify': False, 'train': False, 'deploy': True})
+        with self.runtime.jobs.store.transaction() as db:
+            db.execute("UPDATE devices SET active=0 WHERE id='locked'")
         self.client.offline.add('solo')
         version = self.train()  # Automatic publication: leader succeeds, solo retries.
         calls = []
         with patch('studio.notifications.send', side_effect=lambda *args: calls.append(args) or True):
             notifications.dispatch_once()
-            self.assertEqual(len(calls), 1)
-            self.assertIn('leader', calls[0][2])
-            self.assertFalse(calls[0][3])
+            self.assertEqual(calls, [])
             for _ in range(6):
                 self.now += timedelta(hours=1)
                 self.service.retry_due(self.now)
                 while notifications.dispatch_once():
                     pass
-            solo = [c for c in calls if 'Target: solo' in c[2]]
-            self.assertEqual(len(solo), 1)
-            self.assertTrue(solo[0][3])
+            self.assertEqual(len(calls), 1)
+            self.assertIn('Successful devices: leader', calls[0][2])
+            self.assertIn('Failed devices: follow, solo', calls[0][2])
+            self.assertTrue(calls[0][3])
+            self.assertNotIn('Archive:', calls[0][2])
+            self.assertNotIn(version.id, calls[0][2])
+            self.assertIn('\n\n', calls[0][2])
+            self.assertIn('solo: exhausted', calls[0][2].split('\n\n', 1)[1])
             self.client.offline.clear()
             self.service.publish(version.id)  # Manual publication starts a new revision.
+            self.client.files['follow'] = dict(self.client.files['leader'])
+            self.now += timedelta(hours=1)
+            self.service.retry_due(self.now)
             while notifications.dispatch_once():
                 pass
-            self.assertTrue(any('Target: solo' in c[2] and not c[3] for c in calls))
+            self.assertEqual(len(calls), 2)
+            self.assertIn('Successful devices: follow, leader, solo', calls[1][2])
+            self.assertFalse(calls[1][3])
+            self.service.reconcile()
+            self.service.retry_due(self.now)
+            self.assertFalse(notifications.dispatch_once())
 
     def test_preexisting_quarantine_notifies_for_automatic_and_manual_publication(self):
         from unittest.mock import patch
@@ -160,12 +173,13 @@ class DeploymentTests(unittest.TestCase):
         notifications.save_workspace(self.word.id, {'scrape': False, 'classify': False, 'train': False, 'deploy': True})
         with self.runtime.jobs.store.transaction() as db:
             db.execute("INSERT INTO deployment_staging_blocks(device_id,reason) VALUES ('solo','staging_unowned')")
+            db.execute("UPDATE devices SET active=0 WHERE id IN ('follow','locked')")
         calls = []
         with patch('studio.notifications.send', side_effect=lambda *args: calls.append(args) or True):
             version = self.train()
             while notifications.dispatch_once():
                 pass
-            blocked = [c for c in calls if 'Target: solo' in c[2]]
+            blocked = [c for c in calls if 'Failed devices: solo' in c[2]]
             self.assertEqual(len(blocked), 1)
             self.assertTrue(blocked[0][3])
             self.service.reconcile()
@@ -173,9 +187,25 @@ class DeploymentTests(unittest.TestCase):
             self.service.publish(version.id)
             while notifications.dispatch_once():
                 pass
-            blocked = [c for c in calls if 'Target: solo' in c[2]]
+            blocked = [c for c in calls if 'Failed devices: solo' in c[2]]
             self.assertEqual(len(blocked), 2)
             self.assertTrue(all(c[3] for c in blocked))
+
+    def test_removing_last_unresolved_target_finishes_summary(self):
+        notifications = self.runtime.notifications
+        notifications.save(apprise_url='json://127.0.0.1:9999/test', download=False)
+        notifications.save_workspace(self.word.id, {'scrape': False, 'classify': False, 'train': False, 'deploy': True})
+        with self.runtime.jobs.store.transaction() as db:
+            db.execute("UPDATE devices SET active=0 WHERE id='follow'")
+        self.train()
+        with self.runtime.jobs.store.transaction() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM notification_outbox').fetchone()[0], 0)
+        self.runtime.devices.remove('locked')
+        with self.runtime.jobs.store.transaction() as db:
+            events = db.execute('SELECT * FROM notification_outbox').fetchall()
+        self.assertEqual(len(events), 1)
+        self.assertIn('Successful devices: leader, solo', events[0]['body'])
+        self.assertFalse(events[0]['failed'])
 
     def test_archive_and_delivery_run_numbers_follow_the_training_job(self):
         old = self.train()

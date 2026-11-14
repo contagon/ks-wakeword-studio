@@ -2,7 +2,7 @@
 import logging
 import threading
 from contextvars import ContextVar
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from studio.models import RemoteRejected, ValidationError, aware_utc
 from studio.storage import flock
@@ -27,6 +27,10 @@ LABELS = {'scrape': 'Collection', 'classify': 'Classification', 'train': 'Traini
           'deploy': 'Deployment', 'download': 'Dataset download'}
 
 
+def readable_date(value):
+    return aware_utc(datetime.fromisoformat(value)).strftime('%b %d, %Y at %H:%M:%S UTC')
+
+
 def enabled_in(db, kind, word_id):
     settings = db.execute('SELECT * FROM notification_settings WHERE id=1').fetchone()
     if not settings['apprise_url']:
@@ -44,7 +48,7 @@ def enqueue_in(db, key, kind, word_id, body, failed, now):
         return
     word = require_word(db, word_id) if word_id is not None else None
     subject = word['phrase'] if word else 'Global'
-    title = f'microWakeWord · {subject}: {LABELS[kind]} {"failed" if failed else "completed"}'
+    title = f'{subject}: {LABELS[kind]} {"failed" if failed else "completed"}'
     db.execute('INSERT OR IGNORE INTO notification_outbox(event_key,word_id,kind,title,body,failed,next_retry) '
                'VALUES (?,?,?,?,?,?,?)', (key, word_id, kind, title, body, failed, now))
 
@@ -63,26 +67,45 @@ def job_finished_in(db, job):
         collection_failed = (any(row['status'] not in ('complete', 'inactive', 'diagnostics_disabled') for row in devices)
                              if devices else job.result.get('status') not in (None, 'complete'))
         failed = failed or bool(job.result.get('failed')) or collection_failed
-    body = f'Job: {job.id}\nStatus: {"failed" if failed else "completed"}\nFinished: {job.finished_at}'
+    body = f'Job: {job.id}\nStatus: {"failed" if failed else "completed"}\nFinished: {readable_date(job.finished_at)}'
     if job.run_number is not None:
         body += f'\nTraining run: {job.run_number}'
     if job.kind == 'download':
         identity = job.payload.get('dataset_id') or job.payload.get('augmentation_id') or job.result.get('dataset_id') or job.result.get('augmentation_id')
         if isinstance(identity, str):
             body += f'\nDataset: {identity[:200]}'
+    logs = db.execute('SELECT log FROM studio_jobs WHERE id=?', (job.id,)).fetchone()['log']
+    if logs:
+        body += '\n\n' + logs.rstrip('\n')
     enqueue_in(db, 'job:' + job.id, job.kind, job.word_id, body, failed, job.finished_at)
 
 
 def publication_finished_in(db, publication):
-    """One event per target/revision/outcome, not per retry or scheduler tick."""
-    success = publication.state in ('published', 'synced')
-    failed = publication.state in ('exhausted', 'staging_blocked', 'role_changed', 'archive_invalid')
-    if not success and not failed:
+    """One summary per revision, only after all registered targets settle."""
+    rows = db.execute('SELECT p.* FROM publications p JOIN devices d ON d.id=p.device_id '
+                      'WHERE p.word_id=? AND p.revision=? AND p.desired_version=? AND d.removed=0 '
+                      'ORDER BY p.device_id',
+                      (publication.word_id, publication.revision, publication.desired_version)).fetchall()
+    successes = {'published', 'synced'}
+    failures = {'exhausted', 'staging_blocked', 'role_changed', 'archive_invalid'}
+    skipped = {'inactive', 'not_covered'}
+    if not rows or any(row['state'] not in successes | failures | skipped for row in rows):
         return
-    key = f'publication:{publication.word_id}:{publication.device_id}:{publication.revision}:{"failed" if failed else "complete"}'
-    body = (f'Target: {publication.device_id}\nArchive: {publication.desired_version}\n'
-            f'Delivery: {publication.state}\nFinished: {publication.updated_at}')
-    enqueue_in(db, key, 'deploy', publication.word_id, body, failed, publication.updated_at)
+    successful = [row['device_id'] for row in rows if row['state'] in successes]
+    unsuccessful = [row['device_id'] for row in rows if row['state'] in failures]
+    if not successful and not unsuccessful:
+        return
+    finished = max(row['updated_at'] for row in rows)
+    body = f'Successful devices: {", ".join(successful) or "None"}'
+    if unsuccessful:
+        body += f'\nFailed devices: {", ".join(unsuccessful)}'
+    body += f'\nFinished: {readable_date(finished)}\n\n'
+    # Deployment has durable delivery records rather than a worker log: include
+    # every target's outcome, retry count and fixed (credential-safe) error code.
+    body += '\n'.join(f'{row["device_id"]}: {row["state"]} (attempts: {row["attempts"]})'
+                      + (f' · {row["error_code"]}' if row['error_code'] else '') for row in rows)
+    key = f'publication:{publication.word_id}:{publication.revision}'
+    enqueue_in(db, key, 'deploy', publication.word_id, body, bool(unsuccessful), finished)
 
 
 def client(url):
@@ -168,7 +191,7 @@ class NotificationService:
         if not url:
             raise ValidationError('Configure notifications first')
         try:
-            if send(url, 'microWakeWord: test notification',
+            if send(url, 'test notification',
                     'Notifications are working' + (f' for {word["phrase"]}.' if word else '.')):
                 return {'sent': True}
         except Exception:
@@ -191,13 +214,21 @@ class NotificationService:
                                ('failed' if row['attempts'] >= 3 else 'discarded', row['event_key']))
                     return True
                 url = db.execute('SELECT apprise_url FROM notification_settings WHERE id=1').fetchone()[0]
+                body = row['body']
+                if row['event_key'].startswith('job:'):
+                    # Completion hooks may append progress after the terminal
+                    # transaction. Include all logs available at delivery time.
+                    job = db.execute('SELECT log FROM studio_jobs WHERE id=?',
+                                     (row['event_key'][4:],)).fetchone()
+                    if job is not None and job['log']:
+                        body = body.split('\n\n', 1)[0] + '\n\n' + job['log'].rstrip('\n')
                 attempt = row['attempts'] + 1
                 retry = (now + timedelta(seconds=30 * 2 ** (attempt - 1))).isoformat()
                 # Reserve the retry before network I/O, including crash recovery.
                 db.execute('UPDATE notification_outbox SET attempts=?,next_retry=? WHERE event_key=?',
                            (attempt, retry, row['event_key']))
             try:
-                delivered = bool(send(url, row['title'], row['body'], bool(row['failed'])))
+                delivered = bool(send(url, row['title'], body, bool(row['failed'])))
             except Exception:
                 delivered = False
             with self.store.transaction() as db:

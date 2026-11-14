@@ -174,6 +174,7 @@ def test_test_notification_uses_saved_global_url_and_sanitizes_failure(tmp_path,
             monkeypatch.setattr('studio.notifications.send', lambda *args: deliveries.append(args) or True)
             assert api.post('/api/studio/notifications/test').json() == {'sent': True}
             assert deliveries[0][0] == URL
+            assert deliveries[0][1] == 'test notification'
 
             def fail(*args):
                 raise RuntimeError(URL)
@@ -309,6 +310,56 @@ def test_runtime_starts_and_joins_notification_worker(tmp_path, monkeypatch):
         assert delivered.wait(5)
         runtime.shutdown()
         assert not any(t.name == 'studio-notifications' for t in threading.enumerate())
+    finally:
+        runtime.shutdown()
+
+
+def test_job_notification_readable_details_and_complete_logs(tmp_path):
+    now = datetime(2026, 10, 28, 14, 5, 6, tzinfo=timezone.utc)
+    runtime = StudioRuntime(tmp_path, clock=lambda: now)
+    try:
+        word = runtime.workspaces.create('Cedar', 'en')
+        runtime.notifications.save(apprise_url=URL, download=False)
+        runtime.notifications.save_workspace(word.id, {**OFF, 'classify': True})
+        job = runtime.jobs.enqueue('classify', word.id, {})
+
+        def handler(job, context):
+            context.log('First detail')
+            context.log('x' * 4000)
+            context.log('Last detail')
+            return {}
+
+        runtime.workers.register('classify', job.resource, handler)
+        runtime.workers.run_once(job.resource)
+        with runtime.jobs.store.transaction() as db:
+            event = db.execute('SELECT * FROM notification_outbox').fetchone()
+            logs = db.execute('SELECT log FROM studio_jobs WHERE id=?', (job.id,)).fetchone()[0]
+        assert event['title'] == 'Cedar: Classification completed'
+        assert 'Finished: Oct 28, 2026 at 14:05:06 UTC' in event['body']
+        assert event['body'].split('\n\n', 1)[1] == logs.rstrip('\n')
+        assert logs.endswith('classify complete\n')
+    finally:
+        runtime.shutdown()
+
+
+def test_delivery_includes_logs_added_by_completion_hook(tmp_path, monkeypatch):
+    runtime = StudioRuntime(tmp_path)
+    try:
+        word = runtime.workspaces.create('Cedar', 'en')
+        runtime.notifications.save(apprise_url=URL, download=False)
+        runtime.notifications.save_workspace(word.id, {**OFF, 'train': True})
+        job = runtime.jobs.enqueue('train', word.id, {})
+        runtime.workers.register('train', job.resource, lambda job, context: {})
+
+        def failed_hook(job):
+            raise RuntimeError('completion failure')
+
+        runtime.workers.register_completion('train', failed_hook)
+        runtime.workers.run_once(job.resource)
+        calls = []
+        monkeypatch.setattr('studio.notifications.send', lambda *args: calls.append(args) or True)
+        runtime.notifications.dispatch_once()
+        assert calls[0][2].endswith('\ncompletion_hook_failed')
     finally:
         runtime.shutdown()
 
