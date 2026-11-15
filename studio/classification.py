@@ -80,6 +80,7 @@ class ClassificationService:
         if not candidates:
             return {}
         manifest = {'phrase': word['phrase'], 'language': word['language'],
+                    'positive': original,
                     'cache_dir': str(self.store.data_dir / 'auto_train_models'),
                     'samples': [{'id': r['id'], 'path': str(self.samples.blobs.root / (r['recording_hash'] if original else r['normalized_hash']))}
                                 for r in candidates]}

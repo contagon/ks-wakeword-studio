@@ -18,6 +18,7 @@ class TrimRunner:
              dict(word='lights', start=1.5, end=1.8, probability=.95)]
     before_result = None
     speech_segments = [dict(start=.4, end=1), dict(start=1.5, end=1.8)]
+    prompted_words = []
 
     def run(self, context, argv, **kwargs):
         args = dict(a[2:].split('=', 1) for a in argv if a.startswith('--'))
@@ -26,7 +27,8 @@ class TrimRunner:
             self.before_result()
         Path(args['output-json']).write_text(json.dumps([
             dict(id=s['id'], speech=True, transcript='Hey Cedar lights', guided_transcript='',
-                 model='fixture', words=self.words, speech_segments=self.speech_segments) for s in manifest['samples']]))
+                 model='fixture', words=self.words, speech_segments=self.speech_segments,
+                 prompted_words=self.prompted_words) for s in manifest['samples']]))
 
 
 @pytest.fixture
@@ -95,6 +97,52 @@ def test_uncertain_positive_stays_full_length_for_review(fixture, words):
     updated = runtime.samples.get(sample.id)
     assert (updated.label, updated.trim_status, updated.audio_id) == ('positive', 'needs_review', sample.audio_id)
     assert runtime.samples.list(word.id, SampleQuery(trim_status='needs_review')).total == 1
+
+
+@pytest.mark.parametrize('automatic_label', [False, True])
+def test_positive_trim_can_use_prompted_fallback_without_relabelling(fixture, tmp_path, automatic_label):
+    runtime, word, runner = fixture
+    runner.prompted_words = runner.words
+    runner.words = []
+    sample = scraped(runtime, word)
+    if automatic_label:
+        settings = runtime.automation.get(word.id).settings
+        runtime.automation.save(word.id, replace(settings, classification=replace(settings.classification,
+            enabled=True, confirm_activations=True)))
+        runtime.jobs.enqueue('classify', word.id, {})
+    else:
+        runtime.samples.set_label(sample.id, 'positive', sample.revision)
+    runtime.workers.run_once('gpu')
+    trimmed = runtime.samples.get(sample.id)
+    assert (trimmed.label, trimmed.labelled_by, trimmed.trim_status) == (
+        'positive', 'auto' if automatic_label else 'manual', 'auto')
+    assert seconds(runtime, trimmed) == pytest.approx(.9)
+    assert runtime.samples.audio(sample.id, word.id, original=True) == wav(seconds=3)
+    job, = runtime.jobs.list().items
+    manifest = json.loads((tmp_path / 'studio/jobs' / job.id / 'classify-0.json').read_text())
+    assert manifest['positive'] is not automatic_label
+
+
+def test_successful_unprompted_crop_wins_over_prompted_alternative(fixture):
+    runtime, word, runner = fixture
+    runner.prompted_words = [dict(word='Hey', start=2.2, end=2.4), dict(word='Cedar', start=2.5, end=2.8)]
+    runner.speech_segments = [*runner.speech_segments, dict(start=2.2, end=2.8)]
+    sample = scraped(runtime, word)
+    runtime.samples.set_label(sample.id, 'positive', sample.revision)
+    runtime.workers.run_once('gpu')
+    assert seconds(runtime, runtime.samples.get(sample.id)) == pytest.approx(.9)
+
+
+def test_prompted_crop_still_cannot_end_inside_detected_speech(fixture):
+    runtime, word, runner = fixture
+    runner.words = []
+    runner.prompted_words = [dict(word='Hey', start=1.5, end=1.8), dict(word='Cedar', start=1.8, end=2.2)]
+    runner.speech_segments = [dict(start=2.2, end=2.7)]
+    sample = scraped(runtime, word)
+    runtime.samples.set_label(sample.id, 'positive', sample.revision)
+    runtime.workers.run_once('gpu')
+    updated = runtime.samples.get(sample.id)
+    assert (updated.label, updated.trim_status, updated.audio_id) == ('positive', 'needs_review', sample.audio_id)
 
 
 def test_manual_trim_during_inference_wins(fixture):

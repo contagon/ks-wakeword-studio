@@ -193,3 +193,118 @@ def test_transcriber_returns_only_unprompted_word_timestamps(tmp_path, monkeypat
     assert result['words'] == [word(plain, .2, .8)]
     assert result['transcript'] == plain
     assert result['speech_segments'] == [dict(start=0, end=1)]
+
+
+@pytest.fixture
+def positive_transcriber(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from studio_harness import wav
+    monkeypatch.setattr('studio.capture.detect_speech', lambda data: [dict(start=.4, end=1)])
+
+    class Model:
+        plain = 'Hey Cedar'
+        plain_words = [word('Hey', .4, .6), word('Cedar', .7, 1)]
+        prompted_words = [word('Hey', .4, .6, .01), word('Cedar', .7, 1, .01)]
+        calls = None
+
+        def transcribe(self, audio, **kwargs):
+            self.calls.append(kwargs)
+            prompted = 'initial_prompt' in kwargs
+            text = 'Hey Cedar' if prompted else self.plain
+            words = self.prompted_words if prompted else self.plain_words
+            return iter([SimpleNamespace(text=text, words=[SimpleNamespace(**w) for w in words]
+                         if kwargs.get('word_timestamps') else None)]), None
+
+    path = tmp_path / 'audio.wav'
+    path.write_bytes(wav(seconds=3))
+    transcriber = speech_module.SpeechTranscriber(tmp_path)
+    transcriber.model = Model()
+    transcriber.model.calls = []
+    return transcriber, path
+
+
+def test_known_positive_can_retry_a_missing_unprompted_phrase(positive_transcriber):
+    transcriber, path = positive_transcriber
+    transcriber.model.plain = 'Hey dude'
+    transcriber.model.plain_words = [word('Hey', .4, .6), word('dude', .7, 1)]
+    result = transcriber.transcribe(path, language='en', phrase='Hey Cedar', positive=True)
+    assert result['transcript'] == 'Hey dude'
+    assert result['words'] == transcriber.model.plain_words
+    assert result['prompted_words'] == transcriber.model.prompted_words
+    assert len(transcriber.model.calls) == 2
+    prompted = transcriber.model.calls[-1]
+    assert prompted['beam_size'] == 1 and prompted['temperature'] == 0
+    assert prompted['word_timestamps'] is True
+    assert prompted['initial_prompt'] == 'The wake phrase is "hey cedar".'
+    assert prompted['hotwords'] == 'hey cedar'
+
+
+@pytest.mark.parametrize('positive', [False, True])
+def test_invalid_unprompted_timing_triggers_fallback_even_when_text_matches(positive_transcriber, positive):
+    transcriber, path = positive_transcriber
+    transcriber.model.plain_words = [word('Hey', .4, .6), word('Cedar', 1, 1)]
+    result = transcriber.transcribe(path, language='en', phrase='Hey Cedar', positive=positive)
+    assert result['transcript'] == 'Hey Cedar'
+    assert result['words'] == transcriber.model.plain_words
+    assert result['prompted_words'] == transcriber.model.prompted_words
+    assert speech_module.phrase_interval('Hey Cedar', result['prompted_words'], 3,
+        result['speech_segments']) == pytest.approx((.25, 1.15))
+
+
+def test_valid_unprompted_trim_does_not_run_prompted_fallback(positive_transcriber):
+    transcriber, path = positive_transcriber
+    result = transcriber.transcribe(path, language='en', phrase='Hey Cedar', positive=True)
+    assert result['words'] == transcriber.model.plain_words
+    assert result.get('prompted_words', []) == []
+    assert len(transcriber.model.calls) == 1
+    assert 'initial_prompt' not in transcriber.model.calls[0]
+
+
+def test_numpy_whisper_timestamps_do_not_trigger_unnecessary_fallback(positive_transcriber):
+    import numpy as np
+    transcriber, path = positive_transcriber
+    transcriber.model.plain_words = [
+        word('Hey', np.float64(.4), np.float64(.6)), word('Cedar', np.float64(.7), np.float64(1))]
+    result = transcriber.transcribe(path, language='en', phrase='Hey Cedar', positive=True)
+    assert result.get('prompted_words', []) == []
+    assert len(transcriber.model.calls) == 1
+    assert speech_module.phrase_interval('Hey Cedar', result['words'], 3,
+        result['speech_segments']) == pytest.approx((.25, 1.15))
+
+
+def test_pending_classification_does_not_use_prompted_trim_timestamps(positive_transcriber):
+    transcriber, path = positive_transcriber
+    transcriber.model.plain = 'Hey dude'
+    transcriber.model.plain_words = [word('Hey', .4, .6), word('dude', .7, 1)]
+    result = transcriber.transcribe(path, language='en', phrase='Hey Cedar')
+    assert result.get('prompted_words', []) == []
+    assert classify_transcript('Hey Cedar', ALL_ON, speech=result['speech'], text=result['transcript'],
+        primed=result['guided_transcript']) == 'pending'
+    assert transcriber.model.calls[-1]['beam_size'] == 5
+    assert not transcriber.model.calls[-1].get('word_timestamps')
+
+
+def test_known_positive_without_speech_does_not_attempt_prompted_decode(positive_transcriber, monkeypatch):
+    transcriber, path = positive_transcriber
+    monkeypatch.setattr('studio.capture.detect_speech', lambda data: [])
+    result = transcriber.transcribe(path, language='en', phrase='Hey Cedar', positive=True)
+    assert result['speech'] is False
+    assert result.get('prompted_words', []) == []
+    assert transcriber.model.calls == []
+
+
+def test_classify_cli_passes_known_positive_context_to_transcriber(positive_transcriber, tmp_path, monkeypatch):
+    import json
+    from cli import studio_classify
+    transcriber, path = positive_transcriber
+    transcriber.model.plain = 'Hey dude'
+    transcriber.model.plain_words = [word('Hey', .4, .6), word('dude', .7, 1)]
+    monkeypatch.setattr(studio_classify, 'SpeechTranscriber', lambda cache: transcriber)
+    manifest, output = tmp_path / 'input.json', tmp_path / 'output.json'
+    manifest.write_text(json.dumps(dict(phrase='Hey Cedar', language='en', cache_dir=str(tmp_path),
+        positive=True, samples=[dict(id='sample', path=str(path))])))
+    monkeypatch.setattr('sys.argv', ['studio_classify', f'--input-manifest={manifest}', f'--output-json={output}'])
+    studio_classify.main()
+    result, = json.loads(output.read_text())
+    assert result['id'] == 'sample' and result['transcript'] == 'Hey dude'
+    assert result['prompted_words'] == transcriber.model.prompted_words

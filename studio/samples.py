@@ -407,6 +407,8 @@ class SampleService:
             duration = audio.getnframes() / 16000
         interval = phrase_interval(phrase, result.get('words', []), duration, result.get('speech_segments'))
         if interval is None:
+            interval = phrase_interval(phrase, result.get('prompted_words', []), duration, result.get('speech_segments'))
+        if interval is None:
             return _sample(db, row)
         return self._trim(db, row, *interval, actor='auto', source=source)
 

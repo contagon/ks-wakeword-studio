@@ -120,12 +120,12 @@ class SpeechTranscriber:
         self.cache_dir = Path(cache_dir)
         self.model = None
 
-    def transcribe(self, audio_path: Path, *, language: str, phrase: str) -> dict:
+    def transcribe(self, audio_path: Path, *, language: str, phrase: str, positive: bool = False) -> dict:
         from studio.capture import detect_speech
         model_name = 'small.en' if language == 'en' else 'small'
         segments = detect_speech(Path(audio_path).read_bytes())
         result = {'speech': bool(segments), 'speech_segments': segments,
-                  'transcript': '', 'guided_transcript': '', 'model': model_name, 'words': []}
+                  'transcript': '', 'guided_transcript': '', 'model': model_name, 'words': [], 'prompted_words': []}
         if not result['speech']:
             return result
         if self.model is None:
@@ -145,11 +145,18 @@ class SpeechTranscriber:
                 condition_on_previous_text=False, **kwargs)
             segments = list(segments)
             text = ' '.join(str(s.text).strip() for s in segments).strip()[:16000]
-            words = [dict(word=w.word, start=w.start, end=w.end, probability=w.probability)
+            words = [dict(word=w.word, start=float(w.start), end=float(w.end), probability=w.probability)
                      for s in segments for w in (s.words or [])]
             return text, words
         result['transcript'], result['words'] = decode(beam_size=1, word_timestamps=True)
-        if not contains_phrase(result['transcript'], phrase):
+        heard_phrase = contains_phrase(result['transcript'], phrase)
+        if positive or heard_phrase:
+            if phrase_interval(phrase, result['words'], len(audio) / 16000, segments) is None:
+                # Keep prompted timing separate: it must never establish a positive classification.
+                result['guided_transcript'], result['prompted_words'] = decode(beam_size=1, temperature=0.0,
+                    word_timestamps=True, initial_prompt=f'The wake phrase is "{normalize(phrase)}".',
+                    hotwords=normalize(phrase))
+        else:
             result['guided_transcript'], _ = decode(beam_size=5, best_of=5, temperature=0.0,
                 initial_prompt=f'The wake phrase is "{normalize(phrase)}".', hotwords=normalize(phrase))
         return result

@@ -16,7 +16,8 @@ def main():
     manifest = json.loads(args.input_manifest.read_text())
     transcriber = SpeechTranscriber(Path(manifest['cache_dir']))
     results = [{'id': sample['id'], **transcriber.transcribe(Path(sample['path']),
-               language=manifest['language'], phrase=manifest['phrase'])} for sample in manifest['samples']]
+               language=manifest['language'], phrase=manifest['phrase'],
+               positive=manifest.get('positive', False))} for sample in manifest['samples']]
     with args.output_json.open('x') as output:
         json.dump(results, output)
 
