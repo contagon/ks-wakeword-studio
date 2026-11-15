@@ -59,20 +59,16 @@ def test_phrase_padding_does_not_include_neighboring_words():
 @pytest.mark.parametrize('words', [
     [],
     [word('cedarwood', .2, .6)],
-    [word('Cedar', .2, .6), word('cedar', 1, 1.4)],
-    [word('Cedar', .2, .6, .2)],
     [word('Cedar', float('nan'), .6)],
     [word('Cedar', .2, float('inf'))],
     [word('Cedar', -.1, .6)],
     [word('Cedar', .6, .2)],
     [word('Cedar', .6, .6)],
     [word('Cedar', .2, 4)],
-    [word('Cedar', .2, .6, float('nan'))],
     [word('Cedar', True, .6)],
-    [dict(word='cedar', start=.2, end=.6)],
     [None],
 ])
-def test_phrase_interval_refuses_uncertain_or_unsafe_crops(words):
+def test_phrase_interval_refuses_unlocatable_or_invalid_crops(words):
     assert speech_module.phrase_interval('Cedar', words, 3, [dict(start=.2, end=.6)]) is None
 
 
@@ -106,20 +102,69 @@ def test_unverified_word_timestamps_alone_cannot_authorize_a_crop():
     assert speech_module.phrase_interval('Janet', [word('Janet', .3, .8)], 3) is None
 
 
-def test_coarse_context_timing_cannot_justify_a_boundary_inside_speech():
+def test_unrelated_coarse_context_does_not_reject_a_positive():
     words = [word('Hey', 0, 2.5), word('Janet', 2.5, 2.7)]
-    assert speech_module.phrase_interval('Janet', words, 3, [dict(start=2.3, end=2.8)]) is None
+    assert speech_module.phrase_interval('Janet', words, 3, [dict(start=2.3, end=2.8)]) == pytest.approx((2.5, 2.95))
 
 
-def test_contextual_clip_cannot_ignore_unexplained_speech_elsewhere():
+def test_contextual_crop_does_not_need_to_explain_separate_speech():
     words = [word('Please', .2, .4), word('Janet', .5, .8)]
     assert speech_module.phrase_interval('Janet', words, 3,
-        [dict(start=.2, end=.8), dict(start=2.3, end=2.8)]) is None
+        [dict(start=.2, end=.8), dict(start=2.3, end=2.8)]) == pytest.approx((.4, .95))
 
 
-def test_contextual_crop_must_keep_every_acoustically_supported_phrase_token():
+def test_contextual_crop_preserves_the_whole_phrase_even_when_vad_misses_a_word():
     words = [word('Hey', .2, .4), word('Janet', 2.3, 2.6), word('please', 2.7, 2.9)]
-    assert speech_module.phrase_interval('Hey Janet', words, 3, [dict(start=2.3, end=2.9)]) is None
+    assert speech_module.phrase_interval('Hey Janet', words, 3,
+        [dict(start=2.3, end=2.9)]) == pytest.approx((.05, 2.7))
+
+
+@pytest.mark.parametrize('probability', [0, .349, float('nan'), None])
+def test_positive_trim_does_not_use_phrase_confidence(probability):
+    assert speech_module.phrase_interval('Janet', [word('Janet', 0, 2.54, probability)], 3,
+        [dict(start=2.3, end=2.7)]) == pytest.approx((2.15, 2.85))
+
+
+def test_positive_trim_does_not_require_probability_metadata():
+    assert speech_module.phrase_interval('Janet', [dict(word='Janet', start=.2, end=.6)], 1,
+        [dict(start=.2, end=.6)]) == pytest.approx((.05, .75))
+
+
+@pytest.mark.parametrize('context', [word("planner's", .02, .16), word('noise', 0, 0),
+                                    word('noise', float('nan'), 1), word('noise', .8, .2)])
+def test_unrelated_word_problems_do_not_reject_a_timed_phrase(context):
+    words = [context, word('Janet', 2.1, 2.44)]
+    assert speech_module.phrase_interval('Janet', words, 3,
+        [dict(start=.1, end=1.6), dict(start=2.3, end=2.8)]) == pytest.approx((1.95, 2.95))
+
+
+def test_repeated_phrase_selects_latest_valid_occurrence():
+    words = [word('Janet', .2, .6), word('Janet', 2.2, 2.5)]
+    assert speech_module.phrase_interval('Janet', words, 3,
+        [dict(start=.2, end=.6), dict(start=2.2, end=2.8)]) == pytest.approx((2.05, 2.95))
+
+
+def test_repeated_phrase_can_skip_an_occurrence_with_invalid_timestamps():
+    words = [word('Janet', .2, .6), word('Janet', 2.5, 2.5)]
+    assert speech_module.phrase_interval('Janet', words, 3,
+        [dict(start=.2, end=.6), dict(start=2.3, end=2.8)]) == pytest.approx((.05, .75))
+
+
+def test_phrase_can_span_speech_regions_and_preserve_quiet_hey():
+    words = [word('Hey', 1.8, 2), word('Doof', 2.2, 2.6)]
+    assert speech_module.phrase_interval('Hey Doof', words, 3,
+        [dict(start=1.9, end=2), dict(start=2.2, end=2.7)]) == pytest.approx((1.65, 2.85))
+
+
+@pytest.mark.parametrize('words,segments', [
+    ([word('Am I the worst?', 0, 1.7), word('Janet', 2.34, 2.5)], [dict(start=2.6, end=2.8)]),
+    ([word('Okay', 0, .22), word('Janet', 1.5, 2.2)], [dict(start=.2, end=.4), dict(start=2.2, end=2.7)]),
+])
+@pytest.mark.parametrize('following', [None, '...', '', '_'])
+def test_positive_trim_refuses_to_end_inside_detected_speech(words, segments, following):
+    if following is not None:
+        words = [*words, word(following, 2.65, 2.7)]
+    assert speech_module.phrase_interval('Janet', words, 3, segments) is None
 
 
 @pytest.mark.parametrize('segments', [[], [dict(start=0, end=3)], [dict(start=-1, end=1)],

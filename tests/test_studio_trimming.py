@@ -69,7 +69,8 @@ def test_manual_positive_queues_trim_preserves_original_and_undo(fixture):
 
 
 def test_classification_reuses_timestamps_for_automatic_positive_trim(fixture):
-    runtime, word, _ = fixture
+    runtime, word, runner = fixture
+    runner.words = [{**w, 'probability': .01} for w in runner.words]
     sample = scraped(runtime, word)
     settings = runtime.automation.get(word.id).settings
     runtime.automation.save(word.id, replace(settings, classification=replace(settings.classification,
@@ -219,7 +220,8 @@ def test_classification_discards_results_for_a_changed_workspace(fixture, change
     assert runtime.training.counts(word.id)['positive'] == 0
 
 
-def test_legacy_automatic_crops_need_revalidation_from_full_original(fixture, tmp_path):
+@pytest.mark.parametrize('previous_policy', [None, 2])
+def test_legacy_automatic_crops_need_revalidation_from_full_original(fixture, tmp_path, previous_policy):
     runtime, word, runner = fixture
     augmentation_fixture(tmp_path)
     runtime.datasets.select(word.id, [])
@@ -229,7 +231,10 @@ def test_legacy_automatic_crops_need_revalidation_from_full_original(fixture, tm
     legacy = runtime.samples.get(sample.id)
     assert legacy.trim_status == 'auto'
     with runtime.jobs.store.transaction() as db:
-        db.execute('DELETE FROM audio_trim_validation WHERE audio_id=?', (legacy.audio_id,))
+        if previous_policy is None:
+            db.execute('DELETE FROM audio_trim_validation WHERE audio_id=?', (legacy.audio_id,))
+        else:
+            db.execute('UPDATE audio_trim_validation SET policy=? WHERE audio_id=?', (previous_policy, legacy.audio_id))
     assert runtime.samples.get(sample.id).trim_status == 'needs_review'
     assert runtime.training.counts(word.id)['positive'] == 0
     job = runtime.jobs.enqueue('classify', word.id, {'trim_only': True})

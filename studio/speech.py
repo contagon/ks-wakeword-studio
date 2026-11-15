@@ -17,39 +17,29 @@ def contains_phrase(text, phrase):
 
 # Reserve the augmentation policy's maximum 300 ms trailing jitter.
 MAX_PREPARED_SECONDS = 2.9
-TRIM_POLICY_VERSION = 2
+TRIM_POLICY_VERSION = 3
 
 
 def phrase_interval(phrase, words, duration, speech_segments=None):
-    """Select one confidently timed phrase; uncertain recognition needs human review."""
+    """Locate an already-positive phrase without rechecking recognition confidence."""
     if (not isinstance(words, list) or len(words) > 4096
             or type(duration) not in (int, float) or not math.isfinite(duration) or duration <= 0):
         return None
-    tokens, timed = [], []
-    previous_end = 0
-    for word in words:
+    tokens, owners, timed = [], [], []
+    for index, word in enumerate(words):
         if not isinstance(word, dict) or not isinstance(word.get('word'), str):
             return None
-        start, end, probability = (word.get(key) for key in ('start', 'end', 'probability'))
-        if (any(type(v) not in (int, float) or not math.isfinite(v) for v in (start, end, probability))
-                or not previous_end <= start < end <= duration or not 0 <= probability <= 1):
-            return None
-        previous_end = end
-        parts = normalize(word['word']).split()
-        if len(parts) > 1:
-            return None
-        for token in parts:
+        start, end = word.get('start'), word.get('end')
+        valid = (all(type(v) in (int, float) and math.isfinite(v) for v in (start, end))
+                 and 0 <= start < end <= duration)
+        timed.append((start, end) if valid else None)
+        for token in normalize(word['word']).split():
             tokens.append(token)
-            timed.append((start, end, probability))
+            owners.append(index)
     target = normalize(phrase).split()
     if not target:
         return None
     matches = [i for i in range(len(tokens) - len(target) + 1) if tokens[i:i + len(target)] == target]
-    if len(matches) != 1:
-        return None
-    first, last = matches[0], matches[0] + len(target) - 1
-    if any(w[2] < .5 for w in timed[first:last + 1]):
-        return None
     if not isinstance(speech_segments, list) or not 0 < len(speech_segments) <= 4096:
         return None
     segments, previous_end = [], 0
@@ -62,30 +52,42 @@ def phrase_interval(phrase, words, duration, speech_segments=None):
             return None
         segments.append((start, end))
         previous_end = end
-    start, end = timed[first][0], timed[last][1]
-    if tokens == target:
-        # Short-clip Whisper timings often include seconds of silence or miss the actual speech entirely.
-        if len(segments) != 1:
-            return None
-        start, end = segments[0]
-    else:
-        if any(not any(a < right and b > left for a, b, _ in timed) for left, right in segments):
-            return None
-        overlap = [(left, right) for left, right in segments if left < end and right > start]
-        if len(overlap) != 1:
-            return None
-        left, right = overlap[0]
-        if any(a < left - .15 or b > right + .15 or b <= left or a >= right for a, b, _ in timed[first:last + 1]):
-            return None
-        if any(a < left - .15 or b > right + .15 for a, b, _ in timed if a < right and b > left):
-            return None
-        if first == 0 or timed[first - 1][1] <= left:
-            start = left
-        if last + 1 == len(timed) or timed[last + 1][0] >= right:
-            end = right
-    start = max(0, start - .15, timed[first - 1][1] if first else 0)
-    end = min(duration, end + .15, timed[last + 1][0] if last + 1 < len(timed) else duration)
-    return (start, end) if 0 < end - start <= MAX_PREPARED_SECONDS else None
+    for first in reversed(matches):
+        last = first + len(target) - 1
+        left_index, right_index = owners[first], owners[last]
+        # A whole timestamped word is usable; a boundary inside one is not.
+        if ((first and owners[first - 1] == left_index)
+                or (last + 1 < len(tokens) and owners[last + 1] == right_index)):
+            continue
+        selected = timed[left_index:right_index + 1]
+        if any(t is None for t in selected) or any(a[1] > b[0] for a, b in zip(selected, selected[1:])):
+            continue
+        start, end = selected[0][0], selected[-1][1]
+        before = timed[left_index - 1] if left_index else None
+        after = (timed[right_index + 1] if right_index + 1 < len(timed)
+                 and normalize(words[right_index + 1]['word']) else None)
+        before_end = before[1] if before and before[1] <= start else 0
+        after_start = after[0] if after and after[0] >= end else duration
+        if tokens == target and len(target) == 1 and len(segments) == 1:
+            # Single-word Whisper timestamps often cover silence rather than the utterance.
+            start, end = segments[0]
+        else:
+            overlap = [(left, right) for left, right in segments if left < end and right > start]
+            if overlap:
+                left, right = overlap[0][0], overlap[-1][1]
+                if not (before and before[0] < start and before[1] > left):
+                    start = min(start, left)
+                if not (after and after[0] < right and after[1] > end):
+                    end = max(end, right)
+        start = max(0, start - .15, before_end)
+        end = min(duration, end + .15, after_start)
+        # A following word may explain remaining speech; otherwise this cuts off the phrase.
+        if any(left < end < right and not (after and end <= after[0] < right)
+               for left, right in segments):
+            continue
+        if 0 < end - start <= MAX_PREPARED_SECONDS:
+            return start, end
+    return None
 
 
 def hearing(phrase, *, speech, text='', primed=''):
