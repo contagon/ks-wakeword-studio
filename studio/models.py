@@ -422,6 +422,9 @@ class Sample:
     labelled_by: str | None = None  # 'auto', 'manual', or None while pending
     recording: Recording | None = None
     capture: CaptureMetadata | None = None
+    trim_status: str | None = None
+    trim_start_s: float | None = None  # Coordinates in the full normalized source, including nested crops.
+    trim_end_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -436,6 +439,7 @@ class SampleQuery:
     after: str | None = None
     before: str | None = None
     labelled_by: str | None = None
+    trim_status: str | None = None
 
 
 T = TypeVar("T")

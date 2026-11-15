@@ -136,7 +136,7 @@ export function fakeStudio() {
     samples: [] as Sample[],
     unmapped: [] as Recording[],
     jobs: [] as Job[],
-    history: new Map<string, { label: string; audio_id: string }[]>(),
+    history: new Map<string, Pick<Sample, "label" | "audio_id" | "trim_start_s" | "trim_end_s" | "trim_status">[]>(),
     audio: (id: string): Response => new Response(`audio:${id}`, { headers: { "Content-Type": "audio/wav" } }),
   };
   const requests: Req[] = [];
@@ -162,6 +162,7 @@ export function fakeStudio() {
       (s) =>
         s.word_id === word &&
         (!q.get("label") || s.label === q.get("label")) &&
+        (!q.get("trim_status") || s.trim_status === q.get("trim_status")) &&
         (!q.get("source") || s.source === q.get("source")) &&
         (!q.get("device_id") || s.recording?.device_id === q.get("device_id")) &&
         (!q.get("near_miss") || String(s.recording?.near_miss ?? false) === q.get("near_miss")) &&
@@ -226,6 +227,22 @@ export function fakeStudio() {
       return json(page(filtered(m[1], q), off, lim));
     }
     if ((m = p.match(/^\/wakewords\/([^/]+)\/samples$/))) return json(page(filtered(m[1], q), off, lim));
+    if ((m = p.match(/^\/wakewords\/([^/]+)\/samples\/trim\/jobs$/))) {
+      const queued: Job = {
+        id: `trim-${++created}`,
+        kind: "classify",
+        word_id: m[1]!,
+        resource: "gpu",
+        payload: { trim_only: true, force: true },
+        status: "queued",
+        created_at: "2026-03-01T10:00:00Z",
+        started_at: null,
+        finished_at: null,
+        result: {},
+      };
+      db.jobs.push(queued);
+      return json(queued, 201);
+    }
     if ((m = p.match(/^\/wakewords\/([^/]+)\/samples\/capture(?:\/(preview))?$/))) {
       if (m[2]) return json({ duration_s: 3, start_s: 0.2, end_s: 2.8, trim_method: "silero", warning: null });
       const form = r.body as FormData;
@@ -267,9 +284,20 @@ export function fakeStudio() {
         if (!previous) return json({}, 409);
         Object.assign(s, previous, { revision: s.revision + 1 });
       } else {
-        history.push({ label: s.label, audio_id: s.audio_id });
+        history.push({
+          label: s.label,
+          audio_id: s.audio_id,
+          trim_start_s: s.trim_start_s,
+          trim_end_s: s.trim_end_s,
+          trim_status: s.trim_status,
+        });
         if (action === "label") s.label = String(body!.label);
-        else s.audio_id = `${s.audio_id}-trim`;
+        else {
+          s.audio_id = `${s.audio_id}-trim`;
+          s.trim_start_s = Number(body!.start_s);
+          s.trim_end_s = Number(body!.end_s);
+          s.trim_status = s.source === "diagnostic" && s.label === "positive" ? "manual" : null;
+        }
         s.revision += 1;
       }
       db.history.set(id, history);

@@ -187,7 +187,14 @@ export const studioApi = {
   undo: (word: string, id: string, revision: number, signal?: AbortSignal) =>
     post<Sample>(`${samplePath(word, id)}/undo`, { expected_revision: revision }, signal),
   trim: (word: string, id: string, start: number, end: number, revision: number, signal?: AbortSignal) =>
-    post<Sample>(`${samplePath(word, id)}/trim`, { start_s: start, end_s: end, expected_revision: revision }, signal),
+    post<Sample>(
+      `${samplePath(word, id)}/trim`,
+      { start_s: start, end_s: end, expected_revision: revision, from_original: true },
+      signal,
+    ),
+  trimAudioUrl: (word: string, id: string) => `${base}${samplePath(word, id)}/audio${query({ full: true })}`,
+  trimPositives: (word: string, signal?: AbortSignal) =>
+    post<Job>(`${wordPath(word)}/samples/trim/jobs`, undefined, signal),
   audioUrl: (word: string, id: string, original = false) =>
     `${base}${samplePath(word, id)}/audio${query({ original })}`,
   devices: (signal?: AbortSignal) => get<Device[]>("/devices", undefined, signal),

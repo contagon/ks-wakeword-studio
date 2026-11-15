@@ -123,6 +123,8 @@ test("real kiosk collection, keyboard labels, focus suppression and workspace is
   await expect(page.locator("[data-progress]")).toContainText("1 reviewed");
   await page.keyboard.press("z");
   await expect(page.locator("[data-progress]")).toContainText("2 pending");
+  // Drain the now-stale positive-preparation job; undo must win without changing audio.
+  expect((await (await request.post("/__test/drain-gpu")).json()).ran).toBe(true);
   await page.keyboard.press("s");
   await expect(page.locator("[data-progress]")).toContainText("1 skipped");
   await page.keyboard.press("d");
@@ -138,6 +140,33 @@ test("real kiosk collection, keyboard labels, focus suppression and workspace is
   await expect(page.locator("#studio-word")).toHaveValue(b.id);
   await page.locator("#studio-word").selectOption(a.id);
   await expect(page.locator("[data-progress]")).toContainText("1 pending");
+  const pending = (await (await request.get(`/api/studio/wakewords/${a.id}/queue`)).json()).items[0];
+  expect(
+    (
+      await request.post(`/api/studio/wakewords/${a.id}/samples/${pending.id}/label`, {
+        data: { label: "positive", expected_revision: pending.revision },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  expect((await (await request.post("/__test/drain-gpu")).json()).ran).toBe(true);
+  await page.goto(`/#/samples?word=${a.id}`);
+  await page.locator('[name="trim-status"]').selectOption("needs_review");
+  const positive = page.locator(`[data-row-id="${pending.id}"]`);
+  await expect(positive).toContainText("Needs trim review");
+  const backfill = page.waitForResponse(
+    (r) => r.url().endsWith("/samples/trim/jobs") && r.request().method() === "POST",
+  );
+  await page.locator('[data-action="auto-trim"]').click();
+  expect((await backfill).ok()).toBeTruthy();
+  expect((await (await request.post("/__test/drain-gpu")).json()).ran).toBe(true);
+  await positive.locator('[data-action="trim"]').click();
+  const trim = page.getByRole("dialog", { name: "Trim audio", exact: true });
+  await expect(trim.locator('[data-action="save-trim"]')).toBeEnabled();
+  await trim.locator('[data-action="save-trim"]').click();
+  await expect(positive).toContainText("Manually trimmed");
+  await expect(positive.locator('[data-action="play-original"]')).toBeVisible();
+  await positive.locator('[data-action="undo"]').click();
+  await expect(positive).toContainText("Needs trim review");
 });
 
 test("200-entry real catalog pagination, filtering, selection and server error", async ({ page, request }) => {

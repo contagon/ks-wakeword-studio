@@ -14,6 +14,7 @@ from studio.models import (AugmentationInput, Conflict, DatasetInput, LegacyRun,
                            iso_now, utc_now)
 from studio.mww_training import MwwTrainingAdapter, checked_file, sha256
 from studio.storage import ensure_directory, open_directory
+from studio.samples import TRIM_READY
 from studio.workspaces import require_word
 
 
@@ -90,7 +91,8 @@ class TrainingService:
             seed = db.execute('SELECT seed FROM training_seed WHERE id=1').fetchone()[0]
             rows = db.execute("SELECT a.*,s.id sample_id,s.revision,s.label,NULL batch_id FROM samples s JOIN audio_records a ON a.id=s.audio_id "
                               "LEFT JOIN recordings r ON r.id=s.recording_id WHERE s.word_id=? AND s.deleted=0 "
-                              "AND (r.id IS NULL OR r.quarantined=0) AND s.label IN ('positive','negative') ORDER BY s.rowid", (word_id,)).fetchall()
+                              "AND (r.id IS NULL OR r.quarantined=0) AND s.label IN ('positive','negative') "
+                              f"AND {TRIM_READY} ORDER BY s.rowid", (word_id,)).fetchall()
             batches = tuple(r[0] for r in db.execute('SELECT s.batch_id FROM generation_selection s JOIN generation_batches b ON b.id=s.batch_id '
                             "JOIN studio_jobs j ON j.id=b.id WHERE s.word_id=? AND j.status='complete' AND b.committed_at IS NOT NULL ORDER BY s.batch_id", (word_id,)))
             for batch in batches:
@@ -110,7 +112,7 @@ class TrainingService:
                                           row['sample_id'], row['revision'], row['batch_id']))
             effective = dict(model_id=word['model_id'], phrase=word['phrase'], language=word['language'],
                              config=asdict(settings), seed=seed, audio=[asdict(a) for a in audio],
-                               datasets=[asdict(d) for d in datasets], augmentation=[asdict(a) for a in augmentation], selected_batches=batches, adapter_version=8)
+                                datasets=[asdict(d) for d in datasets], augmentation=[asdict(a) for a in augmentation], selected_batches=batches, adapter_version=9)
             fingerprint = hashlib.sha256(encode(effective).encode()).hexdigest()
             manifest = RunManifest(1, run_id, word_id, word['model_id'], word['phrase'], word['language'], settings,
                                    seed, tuple(audio), datasets, batches, fingerprint, iso_now(self.clock), augmentation)
@@ -128,9 +130,10 @@ class TrainingService:
         with self.store.transaction() as db:
             require_word(db, word_id)
             counts = {'positive': 0, 'negative': 0, 'artificial': 0}
-            for row in db.execute("SELECT s.label,count(*) FROM samples s LEFT JOIN recordings r ON r.id=s.recording_id "
+            for row in db.execute("SELECT s.label,count(*) FROM samples s JOIN audio_records a ON a.id=s.audio_id "
+                                   "LEFT JOIN recordings r ON r.id=s.recording_id "
                                   "WHERE s.word_id=? AND s.deleted=0 AND (r.id IS NULL OR r.quarantined=0) "
-                                  "AND s.label IN ('positive','negative') GROUP BY s.label", (word_id,)):
+                                   f"AND s.label IN ('positive','negative') AND {TRIM_READY} GROUP BY s.label", (word_id,)):
                 counts[row[0]] = row[1]
             counts['artificial'] = db.execute('SELECT count(*) FROM generation_selection s JOIN generation_batches b ON b.id=s.batch_id '
                 "JOIN studio_jobs j ON j.id=b.id JOIN generation_batch_audio a ON a.batch_id=b.id WHERE s.word_id=? AND j.status='complete' AND b.committed_at IS NOT NULL", (word_id,)).fetchone()[0]

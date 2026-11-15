@@ -64,6 +64,13 @@ class StudioWorkflowTests(unittest.TestCase):
         queue = self.client.get(f"/api/studio/wakewords/{word['id']}/queue").json()
         sample = queue["items"][0]
         self.client.post(f"/api/studio/wakewords/{word['id']}/samples/{sample['id']}/label", json={"label": "positive", "expected_revision": sample["revision"]}).raise_for_status()
+        # Positive labels now prepare audio on the GPU queue; this fixture has no recognized phrase.
+        self.assertTrue(self.runtime.workers.run_once('gpu'))
+        sample_path = f"/api/studio/wakewords/{word['id']}/samples/{sample['id']}"
+        reviewed = self.client.get(sample_path).json()
+        self.assertEqual(reviewed['trim_status'], 'needs_review')
+        self.client.post(sample_path + '/trim', json={'start_s': .02, 'end_s': .18,
+                         'expected_revision': reviewed['revision']}).raise_for_status()
         submission = self.client.post(f"/api/studio/wakewords/{word['id']}/generation/submissions", json={"language": "en", "english_accent": "mixed", "tts_mode": "modern", "samples": 1, "batch_size": 1, "engines": ["qwen3"]})
         submission.raise_for_status()
         [batch] = submission.json()["jobs"]
@@ -79,6 +86,7 @@ class StudioWorkflowTests(unittest.TestCase):
         self.assertEqual(self.runtime.jobs.get(admitted[0].id).status, 'complete')
         version = self.client.get(f"/api/studio/wakewords/{word['id']}/models").json()["items"][0]
         manifest = self.runtime.training.get_manifest(word['id'], version['run_id'])
+        self.assertIn(sample['id'], [a.sample_id for a in manifest.audio])
         self.assertEqual(list(manifest.selected_batches), [batch['id']])
         self.assertEqual([dataset.id for dataset in manifest.datasets], ['speech'])
         archive_path = Path(version['path'])

@@ -21,20 +21,32 @@ from studio.deletion import source_deleted
 from studio.models import (CaptureMetadata, Conflict, DiagnosticClip, NotFound, Page, Recording, Sample,
                            SampleQuery, ValidationError, check_page, iso_now, utc_now)
 from studio.storage import BlobStore, normalize_audio
+from studio.speech import MAX_PREPARED_SECONDS, TRIM_POLICY_VERSION, phrase_interval
 from studio.workspaces import WorkspaceService, clean_text, require_word, source_word
 
 
 # Undo pops history, so the newest live label change set the current label; none means it was given at intake.
 LABELLED_BY = ("CASE WHEN s.label='pending' THEN NULL ELSE COALESCE((SELECT h.actor FROM sample_history h "
                "WHERE h.sample_id=s.id AND h.action='label' AND h.undone=0 ORDER BY h.revision DESC LIMIT 1),'manual') END")
-SAMPLE_SELECT = f"""SELECT s.*, {LABELLED_BY} AS labelled_by, CASE WHEN cm.sample_id IS NOT NULL THEN 'microphone'
+# Legacy Whisper-only crops must be revalidated; undo must not silently readmit unsafe audio.
+TRIM_STATUS = ("CASE WHEN s.source='diagnostic' AND s.label='positive' THEN COALESCE((SELECT h.actor "
+               "FROM sample_history h WHERE h.sample_id=s.id AND h.action='trim' AND h.undone=0 "
+               f"AND h.new_audio_id=s.audio_id AND a.end_s-a.start_s<={MAX_PREPARED_SECONDS} "
+               "AND (h.actor='manual' OR EXISTS (SELECT 1 FROM audio_trim_validation v "
+               f"WHERE v.audio_id=a.id AND v.policy={TRIM_POLICY_VERSION})) "
+               "ORDER BY h.revision DESC LIMIT 1),'needs_review') END")
+TRIM_READY = f"({TRIM_STATUS}) IS NOT 'needs_review'"
+SAMPLE_SELECT = f"""SELECT s.*, r.metadata AS recording_metadata, ra.normalized_hash AS recording_hash,
+    {LABELLED_BY} AS labelled_by, {TRIM_STATUS} AS trim_status,
+    a.start_s AS trim_start_s, a.end_s AS trim_end_s, CASE WHEN cm.sample_id IS NOT NULL THEN 'microphone'
     ELSE COALESCE(mp.source, s.source) END AS migration_source,
     a.original_hash, a.normalized_hash, a.family_id, cm.trim_method AS capture_trim_method,
     cm.start_s AS capture_start_s, cm.end_s AS capture_end_s, cm.duration_s AS capture_duration_s
     FROM samples s JOIN audio_records a ON a.id=s.audio_id
     LEFT JOIN migration_sample_provenance mp ON mp.sample_id=s.id
     LEFT JOIN sample_capture_metadata cm ON cm.sample_id=s.id
-    LEFT JOIN recordings r ON r.id=s.recording_id"""
+    LEFT JOIN recordings r ON r.id=s.recording_id
+    LEFT JOIN audio_records ra ON ra.id=r.audio_id"""
 RECORDING_SELECT = """SELECT r.*, a.original_hash, a.normalized_hash, a.family_id
     FROM recordings r JOIN audio_records a ON a.id=r.audio_id"""
 
@@ -64,6 +76,8 @@ def _samples(db: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[Sample]:
     result = []
     for row in rows:
         values = {f.name: row[f.name] for f in fields(Sample) if f.name not in ("recording", "capture")}
+        if row['trim_start_s'] is not None:
+            _, values['trim_start_s'], values['trim_end_s'] = _trim_context(db, row['audio_id'])
         values["source"] = row["migration_source"]
         capture = (CaptureMetadata(row["capture_trim_method"], row["capture_start_s"], row["capture_end_s"],
                                    row["capture_duration_s"]) if row["capture_trim_method"] is not None else None)
@@ -73,6 +87,26 @@ def _samples(db: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[Sample]:
 
 def _sample(db: sqlite3.Connection, row: sqlite3.Row) -> Sample:
     return _samples(db, [row])[0]
+
+
+def _trim_context(db: sqlite3.Connection, audio_id: str):
+    """Resolve nested crop offsets onto the full normalized source, not a cloning reference."""
+    start = end = None
+    seen = set()
+    while audio_id not in seen:
+        seen.add(audio_id)
+        audio = db.execute('SELECT * FROM audio_records WHERE id=?', (audio_id,)).fetchone()
+        if audio is None:
+            break
+        if audio['parent_id'] is None or audio['start_s'] is None or audio['end_s'] is None:
+            return audio, start, end
+        if start is None:
+            start, end = audio['start_s'], audio['end_s']
+        else:
+            start += audio['start_s']
+            end += audio['start_s']
+        audio_id = audio['parent_id']
+    raise ValidationError('Invalid trim lineage')
 
 
 def _recording(row: sqlite3.Row) -> Recording:
@@ -101,10 +135,11 @@ def insert_audio(db: sqlite3.Connection, original: str, normalized: str, created
 
 
 class SampleService:
-    def __init__(self, store: Store, blobs: BlobStore, clock: Callable[[], datetime] = utc_now):
+    def __init__(self, store: Store, blobs: BlobStore, clock: Callable[[], datetime] = utc_now, *, jobs=None):
         self.store = store
         self.blobs = blobs
         self.clock = clock
+        self.jobs = jobs
 
     @staticmethod
     def _label(label: str) -> None:
@@ -285,7 +320,12 @@ class SampleService:
             self.check_revision(row, expected_revision)
             if row["label"] == label:
                 raise ValidationError("Label is unchanged")
-            return self.apply_change(db, row, label, row["audio_id"], "label")
+            sample = self.apply_change(db, row, label, row["audio_id"], "label")
+            if self.jobs is not None and sample.trim_status == 'needs_review' and not self.manually_trimmed(db, row):
+                self.jobs.enqueue_in(db, 'classify', sample.word_id,
+                    dict(trim_only=True, sample_id=sample.id, revision=sample.revision),
+                    f'trim:{sample.id}:{sample.revision}', None, self.jobs.clock())
+            return sample
 
     def undo(self, sample_id: str, expected_revision: int) -> Sample:
         with self.store.transaction() as db:
@@ -306,33 +346,69 @@ class SampleService:
             self.check_revision(row, expected_revision)
             db.execute("UPDATE samples SET deleted=1,revision=revision+1,updated_at=? WHERE id=?", (iso_now(self.clock), sample_id))
 
-    def audio(self, sample_id: str, word_id: str, original: bool = False) -> bytes:
-        sample = self.get(sample_id, word_id)
-        return self.blobs.read(sample.original_hash if original else sample.normalized_hash)
+    def audio(self, sample_id: str, word_id: str, original: bool = False, *, full: bool = False) -> bytes:
+        with self.store.transaction() as db:
+            row = self.fetch(db, sample_id, word_id)
+            digest = row['original_hash'] if original else row['normalized_hash']
+            if full and not original:
+                digest = _trim_context(db, row['audio_id'])[0]['normalized_hash']
+        return self.blobs.read(digest)
 
-    def trim(self, sample_id: str, start_s: float, end_s: float, expected_revision: int) -> Sample:
+    def trim(self, sample_id: str, start_s: float, end_s: float, expected_revision: int,
+             *, from_original: bool = False) -> Sample:
         if any(type(v) not in (int, float) or not math.isfinite(v) for v in (start_s, end_s)) or not 0 <= start_s < end_s:
             raise ValidationError("Invalid trim interval")
         # Keep the revision claim and immutable file publication in one transaction.
         with self.store.transaction() as db:
             row = self.fetch(db, sample_id)
             self.check_revision(row, expected_revision)
-            return self._trim(db, row, start_s, end_s)
+            source = _trim_context(db, row['audio_id'])[0] if from_original else None
+            return self._trim(db, row, start_s, end_s, source=source)
 
-    def _trim(self, db: sqlite3.Connection, row: sqlite3.Row, start_s: float, end_s: float) -> Sample:
-        with wave.open(io.BytesIO(self.blobs.read(row["normalized_hash"])), "rb") as source:
-            if end_s > source.getnframes() / 16000 or int(end_s * 16000) <= int(start_s * 16000):
+    def _trim(self, db: sqlite3.Connection, row: sqlite3.Row, start_s: float, end_s: float,
+              *, actor: str = 'manual', source=None) -> Sample:
+        if row['source'] == 'diagnostic' and row['label'] == 'positive' and end_s - start_s > MAX_PREPARED_SECONDS:
+            raise ValidationError('Positive trim must fit within 2.9 seconds including padding')
+        source_hash = source['normalized_hash'] if source is not None else row['normalized_hash']
+        parent_id = source['id'] if source is not None else row['audio_id']
+        with wave.open(io.BytesIO(self.blobs.read(source_hash)), "rb") as audio:
+            if end_s > audio.getnframes() / 16000 or int(end_s * 16000) <= int(start_s * 16000):
                 raise ValidationError("Invalid trim interval")
-            source.setpos(int(start_s * 16000))
-            pcm = source.readframes(int(end_s * 16000) - int(start_s * 16000))
+            audio.setpos(int(start_s * 16000))
+            pcm = audio.readframes(int(end_s * 16000) - int(start_s * 16000))
         output = io.BytesIO()
         with wave.open(output, "wb") as target:
             target.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
             target.writeframes(pcm)
         normalized = self.blobs.put(io.BytesIO(output.getvalue())).sha256
         audio_id = insert_audio(db, row["original_hash"], normalized, iso_now(self.clock), family=row["family_id"],
-                                parent_id=row["audio_id"], start=start_s, end=end_s)
-        return self.apply_change(db, row, row["label"], audio_id, "trim")
+                                 parent_id=parent_id, start=start_s, end=end_s)
+        if actor == 'auto':
+            db.execute('INSERT INTO audio_trim_validation VALUES (?,?)', (audio_id, TRIM_POLICY_VERSION))
+        return self.apply_change(db, row, row["label"], audio_id, "trim", actor=actor)
+
+    @staticmethod
+    def manually_trimmed(db: sqlite3.Connection, row: sqlite3.Row) -> bool:
+        return db.execute("SELECT 1 FROM sample_history WHERE sample_id=? AND new_audio_id=? "
+                          "AND action='trim' AND actor='manual' AND undone=0 LIMIT 1",
+                          (row['id'], row['audio_id'])).fetchone() is not None
+
+    def auto_trim(self, db: sqlite3.Connection, row: sqlite3.Row, phrase: str, result: dict, *, force=False) -> Sample:
+        if self.manually_trimmed(db, row):
+            return _sample(db, row)
+        if force and row['trim_status'] == 'auto':
+            db.execute('DELETE FROM audio_trim_validation WHERE audio_id=?', (row['audio_id'],))
+            row = self.fetch(db, row['id'])
+        if row['trim_status'] != 'needs_review' or not result.get('speech'):
+            return _sample(db, row)
+        source = db.execute('SELECT a.* FROM recordings r JOIN audio_records a ON a.id=r.audio_id WHERE r.id=?',
+                            (row['recording_id'],)).fetchone()
+        with wave.open(io.BytesIO(self.blobs.read(source['normalized_hash'])), 'rb') as audio:
+            duration = audio.getnframes() / 16000
+        interval = phrase_interval(phrase, result.get('words', []), duration, result.get('speech_segments'))
+        if interval is None:
+            return _sample(db, row)
+        return self._trim(db, row, *interval, actor='auto', source=source)
 
     def _query(self, query: SampleQuery, created_at: str = "r.created_at",
                searched: tuple[str, ...] = ("r.phrase", "r.clip_id")) -> tuple[list[str], list[object]]:
@@ -371,6 +447,11 @@ class SampleService:
         if query.labelled_by is not None:
             clauses.append(LABELLED_BY + "=?")
             params.append(query.labelled_by)
+        if query.trim_status is not None:
+            if query.trim_status not in ('auto', 'manual', 'needs_review'):
+                raise ValidationError('Invalid trim filter')
+            clauses.append(f'({TRIM_STATUS})=?')
+            params.append(query.trim_status)
         where = " WHERE " + " AND ".join(clauses)
         with self.store.transaction() as db:
             require_word(db, word_id)
@@ -385,7 +466,7 @@ class SampleService:
 
     def unmapped(self, query: SampleQuery) -> Page[Recording]:
         clauses, params = self._query(query)
-        if query.label is not None or query.labelled_by is not None or query.source not in (None, "diagnostic"):
+        if query.label is not None or query.labelled_by is not None or query.trim_status is not None or query.source not in (None, "diagnostic"):
             raise ValidationError("Invalid unmapped filter")
         clauses += ["r.word_id IS NULL", "r.quarantined=0"]
         where = " WHERE " + " AND ".join(clauses)

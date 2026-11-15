@@ -255,7 +255,9 @@ class JobQueue:
             raise ValidationError('Invalid child identity')
         with self._lock, self.store.transaction() as db:
             row = self.fetch(db, job_id)
-            if job_id not in self._owners or row['status'] not in ACTIVE or row['child']:
+            if job_id not in self._owners or row['status'] not in ACTIVE:
+                raise Conflict('Job does not admit a child')
+            if row['child'] and self.groups.inspect(json.loads(row['child'])) != 'gone':
                 raise Conflict('Job does not admit a child')
             db.execute('UPDATE studio_jobs SET child=? WHERE id=?', (json.dumps(identity), job_id))
 

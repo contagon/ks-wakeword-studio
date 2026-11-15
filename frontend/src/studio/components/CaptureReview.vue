@@ -3,8 +3,8 @@ import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import type { CapturePreview, CaptureSelection } from "../types";
 
 const props = withDefaults(
-  defineProps<{ audio: File; preview: CapturePreview; disabled?: boolean; title?: string }>(),
-  { title: "Review your sample" },
+  defineProps<{ audio: File; preview: CapturePreview; disabled?: boolean; title?: string; fullClipLabel?: string }>(),
+  { title: "Review your sample", fullClipLabel: "Full clip" },
 );
 const emit = defineEmits<{ selection: [value: CaptureSelection | null] }>();
 const start = ref(props.preview.start_s);
@@ -149,7 +149,7 @@ onBeforeUnmount(() => {
     <div class="flex flex-wrap items-center justify-between gap-2">
       <h2>{{ props.title }}</h2>
       <span class="studio-muted text-xs"
-        >{{ method === "silero" ? "Auto-trimmed" : method === "manual" ? "Manual trim" : "Full clip" }} ·
+        >{{ method === "silero" ? "Auto-trimmed" : method === "manual" ? "Manual trim" : props.fullClipLabel }} ·
         {{ Math.max(0, end - start).toFixed(2) }} s retained</span
       >
     </div>

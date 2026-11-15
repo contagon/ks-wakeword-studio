@@ -38,5 +38,23 @@ test("records through real browser media, trims, saves and finds the recorded so
   await page.getByRole("link", { name: "View samples" }).click();
   await expect(page.locator("[data-row-id]")).toContainText("Recorded");
   await expect(page.locator("[data-form=import]")).toHaveCount(0);
+  // Reopen the crop against the full source and expand both edges without undoing first.
+  await page.locator('[data-action="trim"]').click();
+  const dialog = page.getByRole("dialog", { name: "Trim audio", exact: true });
+  await expect(dialog).toContainText("Current trim: 1.20–2.40 s");
+  await expect(dialog).toContainText("1.20 s retained");
+  await dialog.locator('[data-action="adjust-trim"]').click();
+  await expect(dialog.locator('[name="trim-start"]')).toHaveValue("1.2");
+  await expect(dialog.locator('[name="trim-end"]')).toHaveValue("2.4");
+  expect(Number(await dialog.locator('[name="trim-end"]').getAttribute("max"))).toBeGreaterThanOrEqual(3);
+  await dialog.locator('[name="trim-start"]').fill("0.4");
+  await dialog.locator('[name="trim-end"]').fill("2.8");
+  await expect(dialog).toContainText("2.40 s retained");
+  await dialog.locator('[data-action="save-trim"]').click();
+  await expect(dialog).not.toBeVisible();
+  const updated = await (await request.get(`/api/studio/wakewords/${word.id}/samples`)).json();
+  expect(updated.items[0]).toMatchObject({ trim_start_s: 0.4, trim_end_s: 2.8 });
+  await page.locator('[data-action="undo"]').click();
+  await expect(page.locator("[data-row-id]")).toContainText("1.20–2.40 s of original");
   expect(errors).toEqual([]);
 });

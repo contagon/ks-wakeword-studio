@@ -7,6 +7,7 @@ import sys
 from studio import REPO
 from studio.models import Conflict, NotFound, ValidationError, iso_now
 from studio.speech import classify_transcript
+from studio.samples import SAMPLE_SELECT, TRIM_STATUS
 
 
 class ClassificationService:
@@ -14,6 +15,8 @@ class ClassificationService:
         self.store, self.jobs, self.samples, self.automation = store, jobs, samples, automation
 
     def handle(self, job, context):
+        if job.payload.get('trim_only') is True:
+            return self.trim_positives(job, context)
         context.log('Checking classification policy and pending recordings')
         status = self.automation.get(job.word_id)
         policy = status.settings.classification
@@ -38,32 +41,7 @@ class ClassificationService:
                 break
             context.log(f'Classifying batch {batch + 1}: {len(candidates)} recordings')
             eligible = [r for r in candidates if not json.loads(r['metadata']).get('blocked_by_vad')]
-            manifest = {'phrase': word['phrase'], 'language': word['language'],
-                        'cache_dir': str(self.store.data_dir / 'auto_train_models'),
-                        'samples': [{'id': r['id'], 'path': str(self.samples.blobs.root / r['normalized_hash'])} for r in eligible]}
-            input_path, output_path = root / f'classify-{batch}.json', root / f'result-{batch}.json'
-            with input_path.open('x') as file:
-                json.dump(manifest, file)
-            results = []
-            if eligible:
-                context.run([sys.executable, str(REPO / 'cli/studio_classify.py'),
-                             f'--input-manifest={input_path}', f'--output-json={output_path}'], cwd=str(root))
-                if output_path.is_symlink() or output_path.stat().st_size > 2 * 1024 * 1024:
-                    raise ValidationError('Invalid speech results')
-                results = json.loads(output_path.read_text())
-                output_path.unlink()
-                if not isinstance(results, list) or len(results) != len(eligible):
-                    raise ValidationError('Incomplete speech results')
-            by_id = {}
-            for result in results:
-                if (not isinstance(result, dict) or type(result.get('speech')) is not bool
-                        or not isinstance(result.get('id'), str) or result['id'] in by_id
-                        or any(not isinstance(result.get(k, ''), str) or len(result.get(k, '')) > 16000
-                               for k in ('transcript', 'guided_transcript', 'model'))):
-                    raise ValidationError('Invalid speech result')
-                by_id[result['id']] = result
-            if set(by_id) != {r['id'] for r in eligible}:
-                raise ValidationError('Invalid speech identities')
+            by_id = self.transcribe(context, word, eligible, root, batch)
             for snapshot in candidates:
                 if context.cancelled() or not (manual or self.automation.get(job.word_id).settings.classification.enabled):
                     return counts
@@ -73,6 +51,9 @@ class ClassificationService:
                     speech=result['speech'], text=result.get('transcript', ''),
                     primed=result.get('guided_transcript', '')) if result else 'pending'
                 with self.store.transaction() as db:
+                    current_word = db.execute('SELECT phrase,language FROM wakewords WHERE id=?', (job.word_id,)).fetchone()
+                    if current_word is None or tuple(current_word) != (word['phrase'], word['language']):
+                        return counts
                     try:
                         current = self.samples.fetch(db, snapshot['id'], job.word_id)
                         self.samples.check_revision(current, snapshot['revision'])
@@ -81,6 +62,8 @@ class ClassificationService:
                             raise Conflict('Already reviewed')
                         if outcome != 'pending':
                             self.samples.apply_change(db, current, outcome, current['audio_id'], 'label', actor='auto')
+                            if outcome == 'positive':
+                                self.samples.auto_trim(db, self.samples.fetch(db, current['id']), word['phrase'], result)
                     except (Conflict, NotFound):
                         counts['conflicts'] += 1
                     else:
@@ -91,4 +74,81 @@ class ClassificationService:
                          result.get('model', '')[:200], iso_now(self.samples.clock)))
             batch += 1
             context.log(f'Classification progress: {counts["reviewed"]} reviewed, {counts["conflicts"]} conflicts')
+        return counts
+
+    def transcribe(self, context, word, candidates, root, batch, *, original=False):
+        if not candidates:
+            return {}
+        manifest = {'phrase': word['phrase'], 'language': word['language'],
+                    'cache_dir': str(self.store.data_dir / 'auto_train_models'),
+                    'samples': [{'id': r['id'], 'path': str(self.samples.blobs.root / (r['recording_hash'] if original else r['normalized_hash']))}
+                                for r in candidates]}
+        input_path, output_path = root / f'classify-{batch}.json', root / f'result-{batch}.json'
+        with input_path.open('x') as file:
+            json.dump(manifest, file)
+        context.run([sys.executable, str(REPO / 'cli/studio_classify.py'),
+                     f'--input-manifest={input_path}', f'--output-json={output_path}'], cwd=str(root))
+        if output_path.is_symlink() or output_path.stat().st_size > 2 * 1024 * 1024:
+            raise ValidationError('Invalid speech results')
+        results = json.loads(output_path.read_text())
+        output_path.unlink()
+        if not isinstance(results, list) or len(results) != len(candidates):
+            raise ValidationError('Incomplete speech results')
+        by_id = {}
+        for result in results:
+            if (not isinstance(result, dict) or type(result.get('speech')) is not bool
+                    or not isinstance(result.get('id'), str) or result['id'] in by_id
+                    or any(not isinstance(result.get(k, ''), str) or len(result.get(k, '')) > 16000
+                           for k in ('transcript', 'guided_transcript', 'model'))):
+                raise ValidationError('Invalid speech result')
+            by_id[result['id']] = result
+        if set(by_id) != {r['id'] for r in candidates}:
+            raise ValidationError('Invalid speech identities')
+        return by_id
+
+    def trim_positives(self, job, context):
+        """Explicit backfill or durable follow-up to a manual positive label; never relabel."""
+        counts = dict(trimmed=0, needs_review=0, conflicts=0)
+        root = self.store.scoped_directory('jobs', job.id)
+        cursor, batch = '', 0
+        force = job.payload.get('force') is True
+        with self.store.transaction() as db:
+            word = db.execute('SELECT * FROM wakewords WHERE id=?', (job.word_id,)).fetchone()
+            if word is None:
+                raise NotFound('Workspace not found')
+        while not context.cancelled():
+            with self.store.transaction() as db:
+                candidates = db.execute(SAMPLE_SELECT + f" WHERE s.word_id=? AND s.deleted=0 AND r.quarantined=0 "
+                    f"AND s.source='diagnostic' AND s.label='positive' AND (({TRIM_STATUS})='needs_review' OR ?) "
+                    "AND s.id>? AND (? IS NULL OR s.id=?) "
+                    "AND (? IS NULL OR s.revision=?) ORDER BY s.id LIMIT 50",
+                    (job.word_id, force, cursor, job.payload.get('sample_id'), job.payload.get('sample_id'),
+                     job.payload.get('revision'), job.payload.get('revision'))).fetchall()
+            if not candidates:
+                break
+            cursor = candidates[-1]['id']
+            with self.store.transaction() as db:
+                candidates = [row for row in candidates if not self.samples.manually_trimmed(db, row)]
+            if not candidates:
+                continue
+            context.log(f'Locating wake phrases in batch {batch + 1}: {len(candidates)} positives')
+            eligible = [r for r in candidates if not json.loads(r['recording_metadata']).get('blocked_by_vad')]
+            results = self.transcribe(context, word, eligible, root, batch, original=True)
+            for snapshot in candidates:
+                if context.cancelled():
+                    return counts
+                with self.store.transaction() as db:
+                    current_word = db.execute('SELECT phrase,language FROM wakewords WHERE id=?', (job.word_id,)).fetchone()
+                    if current_word is None or tuple(current_word) != (word['phrase'], word['language']):
+                        return counts
+                    try:
+                        current = self.samples.fetch(db, snapshot['id'], job.word_id)
+                        self.samples.check_revision(current, snapshot['revision'])
+                        self.samples.check_editable(db, current)
+                        updated = self.samples.auto_trim(db, current, word['phrase'], results.get(snapshot['id'], {}), force=force)
+                    except (Conflict, NotFound):
+                        counts['conflicts'] += 1
+                    else:
+                        counts['trimmed' if updated.trim_status == 'auto' else 'needs_review'] += 1
+            batch += 1
         return counts

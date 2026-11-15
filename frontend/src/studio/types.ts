@@ -116,7 +116,12 @@ export type Job =
   | PreviewJob
   | ScrapeJob
   | DownloadJob
-  | JobRecord<"classify", "gpu", Record<string, never>, Record<string, number | string | boolean>>
+  | JobRecord<
+      "classify",
+      "gpu",
+      { manual?: boolean; trim_only?: boolean; force?: boolean; sample_id?: string; revision?: number },
+      Record<string, number | string | boolean>
+    >
   | JobRecord<"deploy", "collection", Record<string, never>, Record<string, string | boolean>>;
 /** The generic queue endpoint is used only for collection; other kinds have dedicated, validated endpoints. */
 export interface Device {
@@ -189,6 +194,10 @@ export interface Sample {
   labelled_by?: "auto" | "manual" | null;
   recording: Recording | null;
   capture?: (CaptureSelection & { duration_s: number }) | null;
+  trim_status?: "auto" | "manual" | "needs_review" | null;
+  /** Trim coordinates are relative to the full normalized original, not the last crop. */
+  trim_start_s?: number | null;
+  trim_end_s?: number | null;
 }
 export interface CollectionCounters {
   listed: number;
@@ -353,6 +362,7 @@ export interface SampleQuery extends Pagination {
   after?: string;
   before?: string;
   labelled_by?: "auto" | "manual";
+  trim_status?: "auto" | "manual" | "needs_review";
 }
 export interface WorkspaceSummary {
   pending: number;

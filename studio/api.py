@@ -90,6 +90,7 @@ class LabelBody(RevisionBody):
 class TrimBody(RevisionBody):
     start_s: float
     end_s: float
+    from_original: bool = False
 
 
 class AssignBody(StrictBody):
@@ -178,8 +179,9 @@ def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=1
                  label: str | None = None, device_id: str | None = None,
                  near_miss: bool | None = None, source: str | None = None,
                  search: str = "", after: str | None = None, before: str | None = None,
-                 labelled_by: Literal['auto', 'manual'] | None = None) -> SampleQuery:
-    return SampleQuery(offset, limit, label, device_id, near_miss, source, search, after, before, labelled_by)
+                 labelled_by: Literal['auto', 'manual'] | None = None,
+                 trim_status: Literal['auto', 'manual', 'needs_review'] | None = None) -> SampleQuery:
+    return SampleQuery(offset, limit, label, device_id, near_miss, source, search, after, before, labelled_by, trim_status)
 
 
 def create_router(runtime: StudioRuntime) -> APIRouter:
@@ -452,6 +454,10 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
         require_audio_mime(audio)
         return runtime.samples.import_audio(word_id, label, audio.file)
 
+    @router.post('/wakewords/{word_id}/samples/trim/jobs', response_model=Job, status_code=201)
+    def trim_positives(word_id: str) -> Job:
+        return runtime.jobs.enqueue('classify', word_id, {'trim_only': True, 'force': True})
+
     @router.post('/wakewords/{word_id}/samples/capture/preview', response_model=CapturePreview)
     def preview_capture(word_id: str, audio: UploadFile = File(...)) -> CapturePreview:
         runtime.workspaces.get(word_id)
@@ -482,11 +488,12 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
     @router.post("/wakewords/{word_id}/samples/{sample_id}/trim", response_model=Sample)
     def trim_sample(word_id: str, sample_id: str, body: TrimBody) -> Sample:
         runtime.samples.get(sample_id, word_id)
-        return runtime.samples.trim(sample_id, body.start_s, body.end_s, body.expected_revision)
+        return runtime.samples.trim(sample_id, body.start_s, body.end_s, body.expected_revision,
+                                    from_original=body.from_original)
 
     @router.get("/wakewords/{word_id}/samples/{sample_id}/audio")
-    def sample_audio(word_id: str, sample_id: str, original: bool = False) -> Response:
-        data = runtime.samples.audio(sample_id, word_id, original)
+    def sample_audio(word_id: str, sample_id: str, original: bool = False, full: bool = False) -> Response:
+        data = runtime.samples.audio(sample_id, word_id, original, full=full)
         mime = "audio/wav" if not original or data[:4] == b"RIFF" else "application/octet-stream"
         return Response(data, media_type=mime, headers={"Cache-Control": "private, no-store",
                                                        "X-Content-Type-Options": "nosniff"})

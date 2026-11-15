@@ -68,6 +68,7 @@ def test_upgrade_preserves_training_disables_global_scrape(tmp_path):
         db.execute('DROP TABLE studio_dataset_preferences')
         db.execute('CREATE TABLE studio_dataset_selections (word_id TEXT NOT NULL REFERENCES wakewords(id), dataset_id TEXT NOT NULL, PRIMARY KEY(word_id, dataset_id))')
         db.execute('DROP TABLE sample_capture_metadata')
+        db.execute('DROP TABLE audio_trim_validation')
         db.execute('DROP TABLE IF EXISTS automation_events')
         db.execute('DROP TABLE IF EXISTS automation_reviews')
         db.execute('DROP TABLE IF EXISTS workspace_automation')

@@ -75,10 +75,10 @@ class StudioRuntime:
                 recover_deletions(store, blobs)
                 self._blobs = blobs
                 self._workspaces = WorkspaceService(store, blobs=blobs)
-                self._samples = SampleService(store, blobs)
+                self._jobs = JobQueue(store, clock=self.clock, groups=self.groups)
+                self._samples = SampleService(store, blobs, jobs=self._jobs)
                 self._devices = DeviceService(store)
                 self._collection = CollectionService(store, self._samples, self._devices, clock=self.clock)
-                self._jobs = JobQueue(store, clock=self.clock, groups=self.groups)
                 self._notifications = NotificationService(store, clock=self.clock)
                 self._datasets = DatasetService(store, self._jobs)
                 self._augmentation = AugmentationDatasetService(store, self._jobs)

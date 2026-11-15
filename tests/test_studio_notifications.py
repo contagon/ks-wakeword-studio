@@ -276,6 +276,7 @@ def test_upgrade_does_not_notify_historical_jobs_and_recovery_notifies_interrupt
             db.execute('DROP TABLE notification_outbox')
             db.execute('DROP TABLE workspace_notifications')
             db.execute('DROP TABLE notification_settings')
+            db.execute('DROP TABLE audio_trim_validation')
             db.execute('PRAGMA user_version=21')
         runtime.shutdown()
         runtime = StudioRuntime(tmp_path)

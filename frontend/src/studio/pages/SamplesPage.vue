@@ -9,8 +9,10 @@ import LabelToggle from "../components/LabelToggle.vue";
 import { useWorkspace } from "../workspace";
 import type { Sample, SampleQuery } from "../types";
 import { absoluteTime } from "../time";
+import { useJobQueue } from "../jobs";
 
 const workspace = useWorkspace();
+const jobs = useJobQueue();
 const registry = useDeviceRegistry();
 onMounted(() => {
   void registry.load();
@@ -22,16 +24,28 @@ const limit = ref(25);
 const loading = ref(false);
 const error = ref("");
 const status = ref("");
-const filters = ref({ search: "", label: "", labelledBy: "", source: "", kind: "", after: "", before: "" });
+const filters = ref({
+  search: "",
+  label: "",
+  labelledBy: "",
+  source: "",
+  kind: "",
+  after: "",
+  before: "",
+  trimStatus: "",
+});
+const backfilling = ref(false);
 const trimTarget = ref<Sample | null>(null);
 const audio = ref<HTMLAudioElement>();
 const playingId = ref<string | null>(null);
+const playingOriginal = ref(false);
 const loadingAudioId = ref<string | null>(null);
 let request: AbortController | undefined;
 let mutation: AbortController | undefined;
 let audioRequest: AbortController | undefined;
 let audioUrl: string | undefined;
 let generation = 0;
+let refreshPending = false;
 /** Date inputs mean the viewer's local day, matching how timestamps are displayed. */
 const localDayBound = (day: string, time: string) => new Date(day + time).toISOString();
 const query = computed<SampleQuery>(() => ({
@@ -40,6 +54,7 @@ const query = computed<SampleQuery>(() => ({
   ...(filters.value.label ? { label: filters.value.label } : {}),
   ...(filters.value.search.trim() ? { search: filters.value.search.trim() } : {}),
   ...(filters.value.labelledBy ? { labelled_by: filters.value.labelledBy as "auto" | "manual" } : {}),
+  ...(filters.value.trimStatus ? { trim_status: filters.value.trimStatus as NonNullable<Sample["trim_status"]> } : {}),
   // A single kiosk is "device:<id>": kiosk samples from that device only.
   ...(filters.value.source.startsWith("device:")
     ? { source: "diagnostic", device_id: filters.value.source.slice("device:".length) }
@@ -63,8 +78,8 @@ function stopAudio(): void {
   playingId.value = null;
   loadingAudioId.value = null;
 }
-async function togglePlay(item: Sample): Promise<void> {
-  if (playingId.value === item.id) {
+async function togglePlay(item: Sample, original = false): Promise<void> {
+  if (playingId.value === item.id && playingOriginal.value === original) {
     stopAudio();
     return;
   }
@@ -73,7 +88,7 @@ async function togglePlay(item: Sample): Promise<void> {
   audioRequest = controller;
   loadingAudioId.value = item.id;
   try {
-    const response = await fetch(studioApi.audioUrl(item.word_id, item.id), {
+    const response = await fetch(studioApi.audioUrl(item.word_id, item.id, original), {
       credentials: "same-origin",
       signal: controller.signal,
     });
@@ -83,6 +98,7 @@ async function togglePlay(item: Sample): Promise<void> {
     audioUrl = URL.createObjectURL(blob);
     audio.value.src = audioUrl;
     playingId.value = item.id;
+    playingOriginal.value = original;
     await audio.value.play();
   } catch (cause) {
     if (!controller.signal.aborted) {
@@ -99,6 +115,7 @@ async function togglePlay(item: Sample): Promise<void> {
   }
 }
 function resetTransient(): void {
+  refreshPending = false;
   trimTarget.value = null;
   stopAudio();
   error.value = "";
@@ -168,10 +185,46 @@ async function trim(range: { start: number; end: number }): Promise<void> {
   );
   if (updated) {
     replace(updated);
-    trimTarget.value = null;
+    closeTrim();
     status.value = "Non-destructive trim saved.";
   }
 }
+function closeTrim(): void {
+  trimTarget.value = null;
+  if (refreshPending) {
+    refreshPending = false;
+    void load();
+  }
+}
+async function undo(item: Sample): Promise<void> {
+  const updated = await save((signal) => studioApi.undo(item.word_id, item.id, item.revision, signal));
+  if (updated) {
+    stopAudio();
+    replace(updated);
+    status.value = "Last change undone. The original audio is retained.";
+  }
+}
+async function autoTrim(): Promise<void> {
+  const word = workspace.selectedId.value;
+  if (!word || backfilling.value || jobs.busy("classify", word)) return;
+  backfilling.value = true;
+  try {
+    const job = await save((signal) => studioApi.trimPositives(word, signal));
+    if (job) {
+      jobs.track(job);
+      if (workspace.selectedId.value === word) status.value = "Automatic trimming queued. Follow it in the job queue.";
+    }
+  } finally {
+    backfilling.value = false;
+  }
+}
+jobs.onFinished(
+  (job) => job.kind === "classify" && job.word_id === workspace.selectedId.value,
+  () => {
+    if (trimTarget.value) refreshPending = true;
+    else void load();
+  },
+);
 function filterChanged(): void {
   offset.value = 0;
   void load();
@@ -182,6 +235,7 @@ function rowKind(item: Sample): string {
 const LABELS = { positive: "Positive", negative: "Negative", discarded: "Discarded" } as const;
 const LABEL_TONES: Record<string, string> = { positive: "success", negative: "failed", pending: "warning" };
 const LABELLED_BY = { auto: "Automatic", manual: "Manual" } as const;
+const TRIM_STATUSES = { needs_review: "Needs trim review", auto: "Auto-trimmed", manual: "Manually trimmed" } as const;
 const SOURCES: Record<string, string> = {
   diagnostic: "Kiosk",
   microphone: "Recorded",
@@ -215,8 +269,23 @@ onBeforeUnmount(() => {
     />
     <p v-if="status" data-samples-status class="studio-note" role="status" aria-live="polite">{{ status }}</p>
     <p v-if="error" data-samples-error class="studio-note" role="alert" aria-live="assertive">{{ error }}</p>
+    <div class="mb-4 flex flex-wrap items-center gap-3">
+      <button
+        type="button"
+        data-action="auto-trim"
+        :disabled="!workspace.selectedId.value || backfilling || jobs.busy('classify', workspace.selectedId.value)"
+        @click="autoTrim"
+      >
+        Re-trim all scraped positives
+      </button>
+      <button type="button" :disabled="loading" @click="load">Refresh samples</button>
+      <p class="studio-note">
+        Scraped positives needing trim review are excluded from training. Synthetic data is unchanged. Re-trimming
+        starts from originals, including previous automatic crops. Manual trims are protected.
+      </p>
+    </div>
     <div class="studio-card mb-4">
-      <div data-sample-filters class="grid gap-3 sm:grid-cols-3 lg:grid-cols-7">
+      <div data-sample-filters class="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
         <label
           >Search<input
             name="search"
@@ -255,6 +324,11 @@ onBeforeUnmount(() => {
             <option value="true">Close miss</option>
             <option value="false">Activation</option>
           </select></label
+        ><label
+          >Trim status<select name="trim-status" v-model="filters.trimStatus" @change="filterChanged">
+            <option value="">All trim statuses</option>
+            <option v-for="(name, value) in TRIM_STATUSES" :key="value" :value="value">{{ name }}</option>
+          </select></label
         ><label>After<input name="after" v-model="filters.after" type="date" @input="filterChanged" /></label
         ><label>Before<input name="before" v-model="filters.before" type="date" @input="filterChanged" /></label>
       </div>
@@ -280,12 +354,21 @@ onBeforeUnmount(() => {
               }}<small v-if="item.recording" class="block studio-muted"
                 >{{ item.recording.phrase }} · {{ item.recording.engine }} · {{ rowKind(item) }}</small
               >
+              <small v-if="item.trim_start_s != null && item.trim_end_s != null" class="block studio-muted">
+                {{ item.trim_start_s.toFixed(2) }}–{{ item.trim_end_s.toFixed(2) }} s of original
+              </small>
             </td>
             <td data-caption="Date">{{ absoluteTime(item.recording?.timestamp ?? item.created_at) }}</td>
             <td data-caption="Label">
               <span class="studio-status" :class="`studio-status-${LABEL_TONES[item.label] ?? 'muted'}`">{{
                 LABELS[item.label as keyof typeof LABELS] ?? "Pending"
               }}</span>
+              <small
+                v-if="item.trim_status"
+                class="block"
+                :class="item.trim_status === 'needs_review' ? 'studio-note' : 'studio-muted'"
+                >{{ TRIM_STATUSES[item.trim_status] }}</small
+              >
             </td>
             <td data-caption="Label source">{{ item.labelled_by ? LABELLED_BY[item.labelled_by] : "—" }}</td>
             <td data-caption="Source">
@@ -307,13 +390,31 @@ onBeforeUnmount(() => {
                   type="button"
                   data-action="play"
                   :disabled="loadingAudioId === item.id"
-                  :aria-pressed="playingId === item.id"
-                  :aria-label="playingId === item.id ? 'Stop sample' : 'Play sample'"
+                  :aria-pressed="playingId === item.id && !playingOriginal"
+                  :aria-label="playingId === item.id && !playingOriginal ? 'Stop sample' : 'Play sample'"
                   @click="togglePlay(item)"
                 >
-                  {{ loadingAudioId === item.id ? "Loading…" : playingId === item.id ? "Stop" : "Play" }}
+                  {{
+                    loadingAudioId === item.id
+                      ? "Loading…"
+                      : playingId === item.id && !playingOriginal
+                        ? "Stop"
+                        : "Play"
+                  }}
+                </button>
+                <button
+                  v-if="item.trim_start_s != null"
+                  type="button"
+                  data-action="play-original"
+                  :aria-pressed="playingId === item.id && playingOriginal"
+                  @click="togglePlay(item, true)"
+                >
+                  {{ playingId === item.id && playingOriginal ? "Stop original" : "Play original" }}
                 </button>
                 <button type="button" data-action="trim" @click="trimTarget = item">Trim</button>
+                <button v-if="item.revision > 0" type="button" data-action="undo" @click="undo(item)">
+                  Undo last change
+                </button>
                 <LabelToggle
                   class="ml-3"
                   :model-value="item.label"
@@ -342,9 +443,11 @@ onBeforeUnmount(() => {
       />
     </div>
     <SampleTrimDialog
-      :src="trimTarget ? studioApi.audioUrl(trimTarget.word_id, trimTarget.id) : null"
+      :src="trimTarget ? studioApi.trimAudioUrl(trimTarget.word_id, trimTarget.id) : null"
+      :trim-start="trimTarget?.trim_start_s"
+      :trim-end="trimTarget?.trim_end_s"
       @save="trim($event)"
-      @close="trimTarget = null"
+      @close="closeTrim"
     />
   </section>
 </template>

@@ -408,6 +408,7 @@ class DeploymentTests(unittest.TestCase):
         with sqlite3.connect(root / 'studio/studio.sqlite3') as db:
             db.execute('ALTER TABLE publications DROP COLUMN published_at')
             db.execute('ALTER TABLE sample_history DROP COLUMN actor')
+            db.execute('DROP TABLE audio_trim_validation')
             db.execute('PRAGMA user_version=19')
         self.runtime.startup()
         self.runtime.devices.client = self.client
@@ -573,7 +574,7 @@ class DeploymentTests(unittest.TestCase):
             store = Store.open(root)
             try:
                 with store.transaction() as db:
-                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 22)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 23)
                     self.assertEqual(db.execute('SELECT phrase FROM wakewords').fetchone()[0], 'Retained')
                     self.assertEqual(db.execute('SELECT count(*) FROM publications').fetchone()[0], 0)
             finally:
@@ -849,6 +850,7 @@ class DeploymentTests(unittest.TestCase):
             db.execute('ALTER TABLE studio_jobs DROP COLUMN run_number')
             db.execute('ALTER TABLE publications DROP COLUMN published_at')
             db.execute('ALTER TABLE sample_history DROP COLUMN actor')
+            db.execute('DROP TABLE audio_trim_validation')
             db.execute('PRAGMA user_version=9')
         self.runtime.startup()
         self.runtime.devices.client = self.client
@@ -856,7 +858,7 @@ class DeploymentTests(unittest.TestCase):
         with self.runtime.devices.store.transaction() as db:
             names = db.execute("SELECT filenames FROM deployment_staging WHERE device_id='leader' AND word_id=?", (self.word.id,)).fetchone()
             self.assertEqual(set(json.loads(names[0])), {'hello_robot.json', 'hello_robot.tflite'})
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 22)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 23)
         other = self.other_version()
         self.service.publish(other.id)
         self.assertEqual(self.client.files['leader']['microwakeword/hello_robot.tflite'],

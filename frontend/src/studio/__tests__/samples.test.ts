@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import StudioShell from "../components/StudioShell.vue";
 import { fakeMedia, fakeStudio, recording, sample, wav } from "./fakeStudio";
@@ -44,6 +44,7 @@ afterEach(() => {
   wrapper?.unmount();
   wrapper = undefined;
   document.body.innerHTML = "";
+  vi.useRealTimers();
 });
 
 async function open() {
@@ -59,6 +60,116 @@ const lists = () =>
 const row = (ui: VueWrapper, id: string) => ui.get(`[data-row-id="${id}"]`);
 
 describe("provenance-aware sample library", () => {
+  it.each(["save", "cancel"])(
+    "preserves an open trim selection until %s when a background job finishes",
+    async (action) => {
+      vi.useFakeTimers();
+      server.db.jobs.push({
+        id: "background-trim",
+        kind: "classify",
+        word_id: "a",
+        resource: "gpu",
+        payload: { trim_only: true },
+        status: "queued",
+        created_at: "2026-03-01T10:00:00Z",
+        started_at: null,
+        finished_at: null,
+        result: {},
+      });
+      const ui = await open();
+      await row(ui, "s2").get("[data-action=trim]").trigger("click");
+      await settle();
+      const dialog = ui.get("[role=dialog][aria-label='Trim audio']");
+      await dialog.get("[data-action=adjust-trim]").trigger("click");
+      await dialog.get("[name=trim-start]").setValue("0.2");
+      const before = lists().length;
+      server.db.jobs[0]!.status = "complete";
+      await vi.advanceTimersByTimeAsync(2000);
+      await settle();
+      expect(ui.find("[aria-label='Trim audio']").exists()).toBe(true);
+      expect(dialog.get<HTMLInputElement>("[name=trim-start]").element.value).toBe("0.2");
+      expect(lists()).toHaveLength(before);
+      if (action === "save") await dialog.get("[data-action=save-trim]").trigger("click");
+      else
+        await dialog
+          .findAll("button")
+          .find((button) => button.text() === "Cancel")!
+          .trigger("click");
+      await settle();
+      expect(ui.find("[aria-label='Trim audio']").exists()).toBe(false);
+      expect(lists().length).toBeGreaterThan(before);
+    },
+  );
+
+  it("shows trim review status and filters unresolved positives", async () => {
+    Object.assign(server.db.samples[0]!, { trim_status: "needs_review" });
+    Object.assign(server.db.samples[2]!, { trim_status: "auto", trim_start_s: 0.25, trim_end_s: 1.15 });
+    const ui = await open();
+    expect(row(ui, "s0").text()).toContain("Needs trim review");
+    expect(row(ui, "s2").text()).toContain("Auto-trimmed");
+    expect(ui.text()).toContain("excluded from training");
+    await ui.get("select[name=trim-status]").setValue("needs_review");
+    await settle();
+    expect(lists().at(-1)!.url.searchParams.get("trim_status")).toBe("needs_review");
+    expect(ui.findAll("[data-row-id]").map((r) => r.attributes("data-row-id"))).toEqual(["s0"]);
+  });
+
+  it("queues an explicit backfill for only the active workspace", async () => {
+    const ui = await open();
+    expect(ui.get("[data-action=auto-trim]").text()).toBe("Re-trim all scraped positives");
+    expect(ui.text()).toContain("Manual trims are protected");
+    await ui.get("[data-action=auto-trim]").trigger("click");
+    await settle();
+    expect(server.mutations().at(-1)!.url.pathname).toBe("/api/studio/wakewords/a/samples/trim/jobs");
+    expect(ui.get("[data-samples-status]").text()).toContain("queued");
+    expect(ui.get("[data-action=auto-trim]").attributes("disabled")).toBeDefined();
+  });
+
+  it("plays the full original and can undo a saved automatic trim", async () => {
+    Object.assign(server.db.samples[2]!, { trim_status: "auto", trim_start_s: 0.25, trim_end_s: 1.15 });
+    server.db.history.set("s2", [{ label: "positive", audio_id: "full-s2" }]);
+    const ui = await open();
+    await row(ui, "s2").get("[data-action=play-original]").trigger("click");
+    await settle();
+    expect(server.requests.some((r) => r.path === "/api/studio/wakewords/a/samples/s2/audio?original=true")).toBe(true);
+    await row(ui, "s2").get("[data-action=undo]").trigger("click");
+    await settle();
+    expect(server.mutations().at(-1)!.body).toEqual({ expected_revision: 2 });
+    expect(server.mutations().at(-1)!.url.pathname).toBe("/api/studio/wakewords/a/samples/s2/undo");
+  });
+
+  it("shows the full original with the current trim selected and lets either edge expand", async () => {
+    Object.assign(server.db.samples[2]!, { trim_status: "auto", trim_start_s: 0.25, trim_end_s: 1.15 });
+    server.db.audio = () => new Response(wav(3).buffer as ArrayBuffer, { headers: { "Content-Type": "audio/wav" } });
+    const ui = await open();
+    expect(row(ui, "s2").text()).toContain("0.25–1.15 s");
+    await row(ui, "s2").get("[data-action=trim]").trigger("click");
+    await settle();
+    const dialog = ui.get("[role=dialog][aria-label='Trim audio']");
+    expect(server.requests.some((r) => r.path === "/api/studio/wakewords/a/samples/s2/audio?full=true")).toBe(true);
+    expect(dialog.text()).toContain("Full clip: 3.00 s");
+    expect(dialog.text()).toContain("Current trim");
+    expect(dialog.text()).toContain("0.90 s retained");
+    expect(dialog.text()).toContain("0.25–1.15 s");
+    await dialog.get("[data-action=adjust-trim]").trigger("click");
+    expect(dialog.get<HTMLInputElement>("[name=trim-start]").element.value).toBe("0.25");
+    expect(dialog.get<HTMLInputElement>("[name=trim-end]").element.value).toBe("1.15");
+    expect(dialog.get("[name=trim-end]").attributes("max")).toBe("3");
+    await dialog.get("[name=trim-start]").setValue("0.1");
+    await dialog.get("[name=trim-end]").setValue("2.5");
+    await settle();
+    expect(dialog.text()).toContain("2.40 s retained");
+    await dialog.get("[data-action=save-trim]").trigger("click");
+    await settle();
+    expect(server.mutations().at(-1)!.body).toEqual({
+      start_s: 0.1,
+      end_s: 2.5,
+      expected_revision: 2,
+      from_original: true,
+    });
+    expect(ui.find("[aria-label='Trim audio']").exists()).toBe(false);
+  });
+
   it("shows all filters inline without a disclosure", async () => {
     const ui = await open();
     expect(ui.find("details").exists()).toBe(false);
@@ -196,7 +307,7 @@ describe("provenance-aware sample library", () => {
     await settle();
     const request = server.mutations().at(-1)!;
     expect(request.url.pathname).toBe("/api/studio/wakewords/a/samples/s5/trim");
-    expect(request.body).toEqual({ start_s: 0.2, end_s: 1, expected_revision: 2 });
+    expect(request.body).toEqual({ start_s: 0.2, end_s: 1, expected_revision: 2, from_original: true });
     expect(server.requests.some((r) => r.method === "DELETE")).toBe(false);
     expect(ui.find("[aria-label='Trim audio']").exists()).toBe(false);
   });
