@@ -185,8 +185,12 @@ def sample_query(offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=1
                  near_miss: bool | None = None, source: str | None = None,
                  search: str = "", after: str | None = None, before: str | None = None,
                  labelled_by: Literal['auto', 'manual'] | None = None,
-                 trim_status: Literal['auto', 'manual', 'needs_review'] | None = None) -> SampleQuery:
-    return SampleQuery(offset, limit, label, device_id, near_miss, source, search, after, before, labelled_by, trim_status)
+                 trim_status: Literal['auto', 'manual', 'needs_review'] | None = None,
+                 trim_source: Literal['auto', 'manual', 'untrimmed'] | None = None,
+                 sort: Literal['sample', 'source', 'date', 'label', 'labelled_by', 'trim'] | None = None,
+                 order: Literal['asc', 'desc'] = 'asc') -> SampleQuery:
+    return SampleQuery(offset, limit, label, device_id, near_miss, source, search, after, before, labelled_by,
+                       trim_status, trim_source, sort, order == 'desc')
 
 
 def create_router(runtime: StudioRuntime) -> APIRouter:

@@ -196,6 +196,8 @@ export interface Sample {
   recording: Recording | null;
   capture?: (CaptureSelection & { duration_s: number }) | null;
   trim_status?: "auto" | "manual" | "needs_review" | null;
+  /** Who cut the current audio; a microphone capture's voice-detection crop counts as "auto". */
+  trim_source?: "auto" | "manual" | null;
   /** Trim coordinates are relative to the full normalized original, not the last crop. */
   trim_start_s?: number | null;
   trim_end_s?: number | null;
@@ -364,7 +366,11 @@ export interface SampleQuery extends Pagination {
   before?: string;
   labelled_by?: "auto" | "manual";
   trim_status?: "auto" | "manual" | "needs_review";
+  trim_source?: "auto" | "manual" | "untrimmed";
+  sort?: SampleSort;
+  order?: "asc" | "desc";
 }
+export type SampleSort = "sample" | "source" | "date" | "label" | "labelled_by" | "trim";
 export interface WorkspaceSummary {
   pending: number;
   modelCount: number;

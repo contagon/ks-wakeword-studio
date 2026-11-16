@@ -199,11 +199,11 @@ it("lets sample audio loading recover without closing the editor", async () => {
     .mockResolvedValueOnce(new Response(null, { status: 500 }))
     .mockResolvedValueOnce(new Response(wav(5).buffer as ArrayBuffer));
   vi.stubGlobal("fetch", fetchAudio);
-  ui = mount(SampleTrimDialog, { props: { src: "/sample.wav" } });
+  ui = mount(SampleTrimDialog, { props: { src: "/sample.wav", confirmTrim: true } });
   await settle();
   expect(ui.text()).toContain("could not be loaded");
   await ui.get("[data-action=retry-audio]").trigger("click");
   await settle();
-  expect(ui.find("[data-action=save-trim]").attributes("disabled")).toBeUndefined();
+  expect(ui.find("[data-action=save-sample]").attributes("disabled")).toBeUndefined();
   expect(ui.text()).toContain("Full clip: 5.00 s");
 });

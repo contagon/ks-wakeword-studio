@@ -38,8 +38,15 @@ TRIM_STATUS = ("CASE WHEN s.source='diagnostic' AND s.label='positive' THEN COAL
                f"WHERE v.audio_id=a.id AND v.policy={TRIM_POLICY_VERSION})) "
                "ORDER BY h.revision DESC LIMIT 1),'needs_review') END")
 TRIM_READY = f"({TRIM_STATUS}) IS NOT 'needs_review'"
+# Who cut the current audio: a live trim of exactly this audio, else the microphone capture's own crop (VAD is 'auto').
+TRIM_SOURCE = ("COALESCE((SELECT h.actor FROM sample_history h WHERE h.sample_id=s.id AND h.action='trim' "
+               "AND h.undone=0 AND h.new_audio_id=s.audio_id ORDER BY h.revision DESC LIMIT 1),"
+               "CASE cm.trim_method WHEN 'silero' THEN 'auto' WHEN 'manual' THEN 'manual' END)")
+SORTS = {"sample": ("COALESCE(r.clip_id,s.id)",), "date": ("COALESCE(r.timestamp,s.created_at)",),
+         "label": ("s.label",), "labelled_by": ("labelled_by",), "source": ("migration_source", "r.device_id"),
+         "trim": ("trim_source",)}
 SAMPLE_SELECT = f"""SELECT s.*, r.metadata AS recording_metadata, ra.normalized_hash AS recording_hash,
-    {LABELLED_BY} AS labelled_by, {TRIM_STATUS} AS trim_status,
+    {LABELLED_BY} AS labelled_by, {TRIM_STATUS} AS trim_status, {TRIM_SOURCE} AS trim_source,
     a.start_s AS trim_start_s, a.end_s AS trim_end_s, CASE WHEN cm.sample_id IS NOT NULL THEN 'microphone'
     ELSE COALESCE(mp.source, s.source) END AS migration_source,
     a.original_hash, a.normalized_hash, a.family_id, cm.trim_method AS capture_trim_method,
@@ -457,11 +464,24 @@ class SampleService:
                 raise ValidationError('Invalid trim filter')
             clauses.append(f'({TRIM_STATUS})=?')
             params.append(query.trim_status)
+        if query.trim_source is not None:
+            if query.trim_source not in ('auto', 'manual', 'untrimmed'):
+                raise ValidationError('Invalid trim filter')
+            if query.trim_source == 'untrimmed':
+                clauses.append(f'({TRIM_SOURCE}) IS NULL')
+            else:
+                clauses.append(f'({TRIM_SOURCE})=?')
+                params.append(query.trim_source)
+        if query.sort not in (None, *SORTS):
+            raise ValidationError('Invalid sort')
+        direction = ' DESC' if query.descending else ''
+        order = ''.join(c + direction + ',' for c in SORTS[query.sort]) if query.sort else ''
         where = " WHERE " + " AND ".join(clauses)
         with self.store.transaction() as db:
             require_word(db, word_id)
             total = db.execute("SELECT count(*) FROM (" + SAMPLE_SELECT + where + ")", params).fetchone()[0]
-            rows = db.execute(SAMPLE_SELECT + where + " ORDER BY s.created_at,s.id LIMIT ? OFFSET ?", params + [query.limit, query.offset]).fetchall()
+            rows = db.execute(SAMPLE_SELECT + where + f" ORDER BY {order}s.created_at{direction},s.id{direction} LIMIT ? OFFSET ?",
+                              params + [query.limit, query.offset]).fetchall()
             return Page(_samples(db, rows), total, query.offset, query.limit)
 
     def queue(self, word_id: str, query: SampleQuery) -> Page[Sample]:
@@ -471,7 +491,7 @@ class SampleService:
 
     def unmapped(self, query: SampleQuery) -> Page[Recording]:
         clauses, params = self._query(query)
-        if query.label is not None or query.labelled_by is not None or query.trim_status is not None or query.source not in (None, "diagnostic"):
+        if query.label is not None or query.labelled_by is not None or query.trim_status is not None or query.trim_source is not None or query.sort is not None or query.source not in (None, "diagnostic"):
             raise ValidationError("Invalid unmapped filter")
         clauses += ["r.word_id IS NULL", "r.quarantined=0"]
         where = " WHERE " + " AND ".join(clauses)

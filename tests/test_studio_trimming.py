@@ -529,3 +529,30 @@ def test_manual_trim_rejects_finite_but_unbounded_times(fixture):
     positive = runtime.samples.set_label(sample.id, 'positive', sample.revision)
     with pytest.raises(ValidationError):
         runtime.samples.trim(sample.id, 0, 1e308, positive.revision, from_original=True)
+
+
+def test_trim_source_filter_and_sorting(fixture):
+    runtime, word, _ = fixture
+    untrimmed = scraped(runtime, word, 'c-untrimmed')
+    runtime.samples.set_label(untrimmed.id, 'negative', untrimmed.revision)
+    manual = scraped(runtime, word, 'a-manual')
+    manual = runtime.samples.trim(manual.id, 0, .8, manual.revision)
+    manual = runtime.samples.set_label(manual.id, 'negative', manual.revision)
+    review = scraped(runtime, word, 'b-review')
+    with runtime.jobs.store.transaction() as db:
+        db.execute("UPDATE samples SET label='positive' WHERE id=?", (review.id,))
+    assert manual.trim_source == 'manual'
+    assert runtime.samples.get(untrimmed.id).trim_source is None
+    ids = lambda **q: [s.recording.clip_id for s in runtime.samples.list(word.id, SampleQuery(**q)).items]
+    assert ids(trim_source='manual') == ['a-manual']
+    assert ids(trim_source='untrimmed') == ['c-untrimmed', 'b-review']
+    assert ids(sort='trim', descending=True) == ['a-manual', 'b-review', 'c-untrimmed']
+    assert ids(sort='sample', descending=True) == ['c-untrimmed', 'b-review', 'a-manual']
+    assert ids(sort='label') == ['c-untrimmed', 'a-manual', 'b-review']  # ties keep creation order
+    with api_client(runtime) as api:
+        path = f'/api/studio/wakewords/{word.id}/samples'
+        assert [s['trim_source'] for s in api.get(path, params={'sort': 'trim', 'order': 'desc'}).json()['items']][0] == 'manual'
+        assert api.get(path, params={'sort': 'bogus'}).status_code == 422
+    undone = runtime.samples.undo(manual.id, manual.revision)
+    undone = runtime.samples.undo(manual.id, undone.revision)
+    assert undone.trim_source is None

@@ -39,8 +39,8 @@ test("records through real browser media, trims, saves and finds the recorded so
   await expect(page.locator("[data-row-id]")).toContainText("Recorded");
   await expect(page.locator("[data-form=import]")).toHaveCount(0);
   // Reopen the crop against the full source and expand both edges without undoing first.
-  await page.locator('[data-action="trim"]').click();
-  const dialog = page.getByRole("dialog", { name: "Trim audio", exact: true });
+  await page.locator('[data-action="edit"]').click();
+  const dialog = page.getByRole("dialog", { name: "Edit sample", exact: true });
   await expect(dialog).toContainText("Current trim: 1.20–2.40 s");
   await expect(dialog).toContainText("1.20 s retained");
   await dialog.locator('[data-action="adjust-trim"]').click();
@@ -50,11 +50,13 @@ test("records through real browser media, trims, saves and finds the recorded so
   await dialog.locator('[name="trim-start"]').fill("0.4");
   await dialog.locator('[name="trim-end"]').fill("2.8");
   await expect(dialog).toContainText("2.40 s retained");
-  await dialog.locator('[data-action="save-trim"]').click();
+  await dialog.locator('[data-action="save-sample"]').click();
   await expect(dialog).not.toBeVisible();
   const updated = await (await request.get(`/api/studio/wakewords/${word.id}/samples`)).json();
   expect(updated.items[0]).toMatchObject({ trim_start_s: 0.4, trim_end_s: 2.8 });
-  await page.locator('[data-action="undo"]').click();
-  await expect(page.locator("[data-row-id]")).toContainText("1.20–2.40 s of original");
+  await page.locator('[data-action="edit"]').click();
+  await dialog.locator('[data-action="undo"]').click();
+  await expect(dialog).toContainText("Current trim: 1.20–2.40 s");
+  await expect(page.locator("[data-row-id]")).toContainText("1.20–2.40 s");
   expect(errors).toEqual([]);
 });

@@ -136,7 +136,10 @@ export function fakeStudio() {
     samples: [] as Sample[],
     unmapped: [] as Recording[],
     jobs: [] as Job[],
-    history: new Map<string, Pick<Sample, "label" | "audio_id" | "trim_start_s" | "trim_end_s" | "trim_status">[]>(),
+    history: new Map<
+      string,
+      Pick<Sample, "label" | "audio_id" | "trim_start_s" | "trim_end_s" | "trim_status" | "trim_source">[]
+    >(),
     audio: (id: string): Response => new Response(`audio:${id}`, { headers: { "Content-Type": "audio/wav" } }),
   };
   const requests: Req[] = [];
@@ -163,6 +166,7 @@ export function fakeStudio() {
         s.word_id === word &&
         (!q.get("label") || s.label === q.get("label")) &&
         (!q.get("trim_status") || s.trim_status === q.get("trim_status")) &&
+        (!q.get("trim_source") || (s.trim_source ?? "untrimmed") === q.get("trim_source")) &&
         (!q.get("source") || s.source === q.get("source")) &&
         (!q.get("device_id") || s.recording?.device_id === q.get("device_id")) &&
         (!q.get("near_miss") || String(s.recording?.near_miss ?? false) === q.get("near_miss")) &&
@@ -290,6 +294,7 @@ export function fakeStudio() {
           trim_start_s: s.trim_start_s,
           trim_end_s: s.trim_end_s,
           trim_status: s.trim_status,
+          trim_source: s.trim_source,
         });
         if (action === "label") s.label = String(body!.label);
         else {
@@ -297,6 +302,7 @@ export function fakeStudio() {
           s.trim_start_s = Number(body!.start_s);
           s.trim_end_s = Number(body!.end_s);
           s.trim_status = s.source === "diagnostic" && s.label === "positive" ? "manual" : null;
+          s.trim_source = "manual";
         }
         s.revision += 1;
       }

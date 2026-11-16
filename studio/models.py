@@ -429,6 +429,7 @@ class Sample:
     recording: Recording | None = None
     capture: CaptureMetadata | None = None
     trim_status: str | None = None
+    trim_source: str | None = None  # 'auto' (incl. capture VAD) or 'manual' for the current audio; None if untrimmed
     trim_start_s: float | None = None  # Coordinates in the full normalized source, including nested crops.
     trim_end_s: float | None = None
 
@@ -446,6 +447,9 @@ class SampleQuery:
     before: str | None = None
     labelled_by: str | None = None
     trim_status: str | None = None
+    trim_source: str | None = None
+    sort: str | None = None
+    descending: bool = False
 
 
 T = TypeVar("T")

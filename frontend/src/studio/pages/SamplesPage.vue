@@ -5,9 +5,8 @@ import { useDeviceRegistry } from "../devices";
 import { studioApi, StudioApiError } from "../api";
 import SampleTrimDialog from "../components/SampleTrimDialog.vue";
 import PaginatedTable from "../components/PaginatedTable.vue";
-import LabelToggle from "../components/LabelToggle.vue";
 import { useWorkspace } from "../workspace";
-import type { Sample, SampleQuery } from "../types";
+import type { Sample, SampleQuery, SampleSort } from "../types";
 import { absoluteTime } from "../time";
 import { useJobQueue } from "../jobs";
 
@@ -24,7 +23,7 @@ const limit = ref(25);
 const loading = ref(false);
 const error = ref("");
 const status = ref("");
-const filters = ref({
+const NO_FILTERS = {
   search: "",
   label: "",
   labelledBy: "",
@@ -32,12 +31,14 @@ const filters = ref({
   kind: "",
   after: "",
   before: "",
-  trimStatus: "",
-});
-const trimTarget = ref<Sample | null>(null);
+  trim: "",
+};
+const filters = ref({ ...NO_FILTERS });
+const filtered = computed(() => Object.values(filters.value).some(Boolean));
+const sort = ref<{ key: SampleSort; desc: boolean }>({ key: "date", desc: true });
+const editTarget = ref<Sample | null>(null);
 const audio = ref<HTMLAudioElement>();
 const playingId = ref<string | null>(null);
-const playingOriginal = ref(false);
 const loadingAudioId = ref<string | null>(null);
 let request: AbortController | undefined;
 let mutation: AbortController | undefined;
@@ -53,7 +54,7 @@ const query = computed<SampleQuery>(() => ({
   ...(filters.value.label ? { label: filters.value.label } : {}),
   ...(filters.value.search.trim() ? { search: filters.value.search.trim() } : {}),
   ...(filters.value.labelledBy ? { labelled_by: filters.value.labelledBy as "auto" | "manual" } : {}),
-  ...(filters.value.trimStatus ? { trim_status: filters.value.trimStatus as NonNullable<Sample["trim_status"]> } : {}),
+  ...(filters.value.trim ? { trim_source: filters.value.trim as SampleQuery["trim_source"] } : {}),
   // A single kiosk is "device:<id>": kiosk samples from that device only.
   ...(filters.value.source.startsWith("device:")
     ? { source: "diagnostic", device_id: filters.value.source.slice("device:".length) }
@@ -63,6 +64,8 @@ const query = computed<SampleQuery>(() => ({
   ...(filters.value.kind ? { near_miss: filters.value.kind === "true" } : {}),
   ...(filters.value.after ? { after: localDayBound(filters.value.after, "T00:00:00") } : {}),
   ...(filters.value.before ? { before: localDayBound(filters.value.before, "T23:59:59.999") } : {}),
+  sort: sort.value.key,
+  order: sort.value.desc ? "desc" : "asc",
 }));
 function stopAudio(): void {
   audioRequest?.abort();
@@ -77,8 +80,8 @@ function stopAudio(): void {
   playingId.value = null;
   loadingAudioId.value = null;
 }
-async function togglePlay(item: Sample, original = false): Promise<void> {
-  if (playingId.value === item.id && playingOriginal.value === original) {
+async function togglePlay(item: Sample): Promise<void> {
+  if (playingId.value === item.id) {
     stopAudio();
     return;
   }
@@ -87,7 +90,7 @@ async function togglePlay(item: Sample, original = false): Promise<void> {
   audioRequest = controller;
   loadingAudioId.value = item.id;
   try {
-    const response = await fetch(studioApi.audioUrl(item.word_id, item.id, original), {
+    const response = await fetch(studioApi.audioUrl(item.word_id, item.id), {
       credentials: "same-origin",
       signal: controller.signal,
     });
@@ -97,7 +100,6 @@ async function togglePlay(item: Sample, original = false): Promise<void> {
     audioUrl = URL.createObjectURL(blob);
     audio.value.src = audioUrl;
     playingId.value = item.id;
-    playingOriginal.value = original;
     await audio.value.play();
   } catch (cause) {
     if (!controller.signal.aborted) {
@@ -115,7 +117,7 @@ async function togglePlay(item: Sample, original = false): Promise<void> {
 }
 function resetTransient(): void {
   refreshPending = false;
-  trimTarget.value = null;
+  editTarget.value = null;
   stopAudio();
   error.value = "";
 }
@@ -166,30 +168,34 @@ async function save<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<
     return null;
   }
 }
-async function relabel(item: Sample, label: string): Promise<void> {
-  if (label === item.label) return;
-  const updated = await save((signal) =>
-    studioApi.label(item.word_id, item.id, label as keyof typeof LABELS, item.revision, signal),
-  );
-  if (updated) {
-    replace(updated);
-    status.value = "Label saved.";
-  }
-}
-async function trim(range: { start: number; end: number }): Promise<void> {
-  const item = trimTarget.value;
+/** Trim first: a positive label can be what makes an untrimmed clip need review. */
+async function saveEdit(edit: { label: string; range: { start: number; end: number } | null }): Promise<void> {
+  const item = editTarget.value;
   if (!item) return;
-  const updated = await save((signal) =>
-    studioApi.trim(item.word_id, item.id, range.start, range.end, item.revision, signal),
-  );
+  const updated = await save(async (signal) => {
+    let current = item;
+    if (edit.range) {
+      current = await studioApi.trim(item.word_id, item.id, edit.range.start, edit.range.end, item.revision, signal);
+      replace(current); // keep the row's revision in sync if the label change then fails
+    }
+    if (edit.label !== current.label)
+      current = await studioApi.label(
+        item.word_id,
+        item.id,
+        edit.label as keyof typeof LABELS,
+        current.revision,
+        signal,
+      );
+    return current;
+  });
   if (updated) {
     replace(updated);
-    closeTrim();
-    status.value = "Non-destructive trim saved.";
+    closeEdit();
+    status.value = "Sample saved. Trims are non-destructive.";
   }
 }
-function closeTrim(): void {
-  trimTarget.value = null;
+function closeEdit(): void {
+  editTarget.value = null;
   if (refreshPending) {
     refreshPending = false;
     void load();
@@ -200,13 +206,14 @@ async function undo(item: Sample): Promise<void> {
   if (updated) {
     stopAudio();
     replace(updated);
+    if (editTarget.value?.id === updated.id) editTarget.value = updated;
     status.value = "Last change undone. The original audio is retained.";
   }
 }
 jobs.onFinished(
   (job) => job.kind === "classify" && job.word_id === workspace.selectedId.value,
   () => {
-    if (trimTarget.value) refreshPending = true;
+    if (editTarget.value) refreshPending = true;
     else void load();
   },
 );
@@ -214,13 +221,27 @@ function filterChanged(): void {
   offset.value = 0;
   void load();
 }
-function rowKind(item: Sample): string {
-  return item.recording?.near_miss ? "close miss" : "activation";
+function clearFilters(): void {
+  filters.value = { ...NO_FILTERS };
+  filterChanged();
 }
+function sortBy(key: SampleSort): void {
+  // Newest first is the useful first click for dates; everything else starts A–Z.
+  sort.value = sort.value.key === key ? { key, desc: !sort.value.desc } : { key, desc: key === "date" };
+  filterChanged();
+}
+const COLUMNS: { key: SampleSort; name: string }[] = [
+  { key: "sample", name: "Sample" },
+  { key: "source", name: "Source" },
+  { key: "date", name: "Date" },
+  { key: "label", name: "Label" },
+  { key: "labelled_by", name: "Label source" },
+  { key: "trim", name: "Trim" },
+];
 const LABELS = { positive: "Positive", negative: "Negative", discarded: "Discarded" } as const;
 const LABEL_TONES: Record<string, string> = { positive: "success", negative: "failed", pending: "warning" };
 const LABELLED_BY = { auto: "Automatic", manual: "Manual" } as const;
-const TRIM_STATUSES = { needs_review: "Needs trim review", auto: "Auto-trimmed", manual: "Manually trimmed" } as const;
+const TRIMS = { auto: "Automatic", manual: "Manual", untrimmed: "Untrimmed" } as const;
 const SOURCES: Record<string, string> = {
   diagnostic: "Kiosk",
   microphone: "Recorded",
@@ -250,160 +271,166 @@ onBeforeUnmount(() => {
   <section>
     <PageHeader
       title="Samples"
-      description="Library of collected, recorded and imported audio with non-destructive trims."
-    />
+      description="Collected, recorded and imported audio. Scraped positives that need trim review are excluded from training; synthetic data is unchanged."
+    >
+      <button type="button" data-action="refresh" :disabled="loading" @click="load">Refresh</button>
+    </PageHeader>
     <p v-if="status" data-samples-status class="studio-note" role="status" aria-live="polite">{{ status }}</p>
     <p v-if="error" data-samples-error class="studio-note" role="alert" aria-live="assertive">{{ error }}</p>
-    <div class="mb-4 flex flex-wrap items-center gap-3">
-      <button type="button" :disabled="loading" @click="load">Refresh samples</button>
-      <p class="studio-note">
-        Scraped positives needing trim review are excluded from training. Synthetic data is unchanged.
-      </p>
-    </div>
-    <div class="studio-card mb-4">
-      <div data-sample-filters class="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <label
-          >Search<input
-            name="search"
-            v-model="filters.search"
-            type="search"
-            placeholder="Sample or clip ID"
-            @input="filterChanged" /></label
-        ><label
-          >Label<select name="label" v-model="filters.label" @change="filterChanged">
-            <option value="">All labels</option>
-            <option value="pending">Pending</option>
-            <option v-for="(name, value) in LABELS" :key="value" :value="value">{{ name }}</option>
-          </select></label
-        ><label
-          >Labelled by<select name="labelled-by" v-model="filters.labelledBy" @change="filterChanged">
-            <option value="">Anyone</option>
-            <option value="auto">Automatic</option>
-            <option value="manual">Manual</option>
-          </select></label
-        ><label
-          >Source<select name="source" v-model="filters.source" @change="filterChanged">
-            <option value="">All sources</option>
-            <optgroup label="Kiosks">
-              <option value="diagnostic">All kiosks</option>
-              <option v-for="device in registry.devices.value" :key="device.id" :value="`device:${device.id}`">
-                {{ registry.deviceLabel(device.id) }}
-              </option>
-            </optgroup>
-            <option v-for="value in ['microphone', 'import']" :key="value" :value="value">
-              {{ SOURCES[value] }}
-            </option>
-          </select></label
-        ><label
-          >Kind<select name="kind" v-model="filters.kind" @change="filterChanged">
-            <option value="">All kinds</option>
-            <option value="true">Close miss</option>
-            <option value="false">Activation</option>
-          </select></label
-        ><label
-          >Trim status<select name="trim-status" v-model="filters.trimStatus" @change="filterChanged">
-            <option value="">All trim statuses</option>
-            <option v-for="(name, value) in TRIM_STATUSES" :key="value" :value="value">{{ name }}</option>
-          </select></label
-        ><label>After<input name="after" v-model="filters.after" type="date" @input="filterChanged" /></label
-        ><label>Before<input name="before" v-model="filters.before" type="date" @input="filterChanged" /></label>
-      </div>
-    </div>
     <audio ref="audio" data-audio-player preload="none" class="hidden" @ended="stopAudio" />
     <div class="studio-card overflow-x-auto" :aria-busy="loading" role="region" aria-label="Samples" tabindex="0">
-      <p v-if="loading">Loading samples…</p>
-      <table v-else class="studio-samples-table w-full text-sm">
+      <div class="studio-sample-summary">
+        <span class="studio-muted" aria-live="polite">{{ loading ? "Loading…" : `${total} samples` }}</span>
+        <button v-if="filtered" type="button" data-action="clear-filters" @click="clearFilters">Clear filters</button>
+      </div>
+      <table class="studio-samples-table w-full text-sm">
         <thead>
-          <tr>
-            <th>Sample</th>
-            <th>Date</th>
-            <th>Label</th>
-            <th>Label source</th>
-            <th>Source</th>
-            <th>Actions</th>
+          <tr class="studio-sort-row">
+            <th><span class="sr-only">Play</span></th>
+            <th
+              v-for="column in COLUMNS"
+              :key="column.key"
+              :aria-sort="sort.key === column.key ? (sort.desc ? 'descending' : 'ascending') : undefined"
+            >
+              <button type="button" class="studio-sort" :data-sort="column.key" @click="sortBy(column.key)">
+                {{ column.name
+                }}<span aria-hidden="true" class="studio-sort-arrow">{{
+                  sort.key !== column.key ? "↕" : sort.desc ? "↓" : "↑"
+                }}</span>
+              </button>
+            </th>
+            <th><span class="sr-only">Edit</span></th>
+          </tr>
+          <!-- Each column's filter sits directly under its header; phones show these as a stacked grid. -->
+          <tr data-sample-filters class="studio-filter-row">
+            <th></th>
+            <th data-caption="Sample">
+              <input
+                name="search"
+                v-model="filters.search"
+                type="search"
+                aria-label="Search samples"
+                placeholder="Search ID or phrase"
+                @input="filterChanged"
+              />
+              <select name="kind" v-model="filters.kind" aria-label="Kind" @change="filterChanged">
+                <option value="">All kinds</option>
+                <option value="true">Close miss</option>
+                <option value="false">Activation</option>
+              </select>
+            </th>
+            <th data-caption="Source">
+              <select name="source" v-model="filters.source" aria-label="Source" @change="filterChanged">
+                <option value="">All sources</option>
+                <optgroup label="Kiosks">
+                  <option value="diagnostic">All kiosks</option>
+                  <option v-for="device in registry.devices.value" :key="device.id" :value="`device:${device.id}`">
+                    {{ registry.deviceLabel(device.id) }}
+                  </option>
+                </optgroup>
+                <option v-for="value in ['microphone', 'import']" :key="value" :value="value">
+                  {{ SOURCES[value] }}
+                </option>
+              </select>
+            </th>
+            <th data-caption="Date">
+              <input
+                name="after"
+                v-model="filters.after"
+                type="date"
+                aria-label="On or after"
+                title="On or after"
+                @input="filterChanged"
+              />
+              <input
+                name="before"
+                v-model="filters.before"
+                type="date"
+                aria-label="On or before"
+                title="On or before"
+                @input="filterChanged"
+              />
+            </th>
+            <th data-caption="Label">
+              <select name="label" v-model="filters.label" aria-label="Label" @change="filterChanged">
+                <option value="">All</option>
+                <option value="pending">Pending</option>
+                <option v-for="(name, value) in LABELS" :key="value" :value="value">{{ name }}</option>
+              </select>
+            </th>
+            <th data-caption="Label source">
+              <select name="labelled-by" v-model="filters.labelledBy" aria-label="Label source" @change="filterChanged">
+                <option value="">All</option>
+                <option v-for="(name, value) in LABELLED_BY" :key="value" :value="value">{{ name }}</option>
+              </select>
+            </th>
+            <th data-caption="Trim">
+              <select name="trim" v-model="filters.trim" aria-label="Trim" @change="filterChanged">
+                <option value="">All</option>
+                <option v-for="(name, value) in TRIMS" :key="value" :value="value">{{ name }}</option>
+              </select>
+            </th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in items" :key="item.id" :data-row-id="item.id">
+          <tr v-if="loading">
+            <td :colspan="COLUMNS.length + 2">Loading samples…</td>
+          </tr>
+          <tr v-for="item in loading ? [] : items" :key="item.id" :data-row-id="item.id">
+            <td>
+              <button
+                type="button"
+                data-action="play"
+                class="studio-play"
+                :disabled="loadingAudioId === item.id"
+                :aria-pressed="playingId === item.id"
+                :aria-label="playingId === item.id ? 'Stop sample' : 'Play sample'"
+                @click="togglePlay(item)"
+              >
+                {{ loadingAudioId === item.id ? "…" : playingId === item.id ? "Stop" : "Play" }}
+              </button>
+            </td>
             <td data-caption="Sample">
               {{ item.recording?.clip_id ?? item.id
               }}<small v-if="item.recording" class="block studio-muted"
-                >{{ item.recording.phrase }} · {{ item.recording.engine }} · {{ rowKind(item) }}</small
+                >{{ item.recording.phrase }}<template v-if="item.recording.near_miss"> · close miss</template></small
               >
-              <small v-if="item.trim_start_s != null && item.trim_end_s != null" class="block studio-muted">
-                {{ item.trim_start_s.toFixed(2) }}–{{ item.trim_end_s.toFixed(2) }} s of original
-              </small>
             </td>
-            <td data-caption="Date">{{ absoluteTime(item.recording?.timestamp ?? item.created_at) }}</td>
+            <td data-caption="Source">{{ sourceLabel(item) }}</td>
+            <td data-caption="Date" class="whitespace-nowrap">
+              {{ absoluteTime(item.recording?.timestamp ?? item.created_at) }}
+            </td>
             <td data-caption="Label">
               <span class="studio-status" :class="`studio-status-${LABEL_TONES[item.label] ?? 'muted'}`">{{
                 LABELS[item.label as keyof typeof LABELS] ?? "Pending"
               }}</span>
-              <small
-                v-if="item.trim_status"
-                class="block"
-                :class="item.trim_status === 'needs_review' ? 'studio-note' : 'studio-muted'"
-                >{{ TRIM_STATUSES[item.trim_status] }}</small
-              >
             </td>
             <td data-caption="Label source">{{ item.labelled_by ? LABELLED_BY[item.labelled_by] : "—" }}</td>
-            <td data-caption="Source">
-              {{ sourceLabel(item)
-              }}<small v-if="item.capture" class="block studio-muted"
-                >{{
-                  item.capture.trim_method === "silero"
-                    ? "VAD trim"
-                    : item.capture.trim_method === "manual"
-                      ? "Manual trim"
-                      : "Full recording"
-                }}
-                · {{ item.capture.duration_s.toFixed(2) }} s original</small
+            <td data-caption="Trim">
+              <span
+                class="studio-status"
+                :class="
+                  item.trim_status === 'needs_review'
+                    ? 'studio-status-warning'
+                    : item.trim_source
+                      ? 'studio-status-neutral'
+                      : 'studio-status-muted'
+                "
+                :title="item.trim_status === 'needs_review' ? 'Needs trim review: excluded from training' : undefined"
+                >{{ TRIMS[item.trim_source ?? "untrimmed"] }}</span
               >
+              <small v-if="item.trim_status === 'needs_review'" class="block studio-muted">Needs review</small>
+              <small v-else-if="item.trim_start_s != null && item.trim_end_s != null" class="block studio-muted">
+                {{ item.trim_start_s.toFixed(2) }}–{{ item.trim_end_s.toFixed(2) }} s
+              </small>
             </td>
-            <td data-caption="Actions">
-              <div class="flex flex-wrap gap-1">
-                <button
-                  type="button"
-                  data-action="play"
-                  :disabled="loadingAudioId === item.id"
-                  :aria-pressed="playingId === item.id && !playingOriginal"
-                  :aria-label="playingId === item.id && !playingOriginal ? 'Stop sample' : 'Play sample'"
-                  @click="togglePlay(item)"
-                >
-                  {{
-                    loadingAudioId === item.id
-                      ? "Loading…"
-                      : playingId === item.id && !playingOriginal
-                        ? "Stop"
-                        : "Play"
-                  }}
-                </button>
-                <button
-                  v-if="item.trim_start_s != null"
-                  type="button"
-                  data-action="play-original"
-                  :aria-pressed="playingId === item.id && playingOriginal"
-                  @click="togglePlay(item, true)"
-                >
-                  {{ playingId === item.id && playingOriginal ? "Stop original" : "Play original" }}
-                </button>
-                <button type="button" data-action="trim" @click="trimTarget = item">Trim</button>
-                <button v-if="item.revision > 0" type="button" data-action="undo" @click="undo(item)">
-                  Undo last change
-                </button>
-                <LabelToggle
-                  class="ml-3"
-                  :model-value="item.label"
-                  :values="Object.keys(LABELS)"
-                  group-label="Relabel"
-                  attribute="data-relabel"
-                  @update:model-value="relabel(item, $event)"
-                />
-              </div>
+            <td>
+              <button type="button" data-action="edit" @click="editTarget = item">Edit</button>
             </td>
           </tr>
-          <tr v-if="!items.length">
-            <td colspan="6">No samples match these filters.</td>
+          <tr v-if="!loading && !items.length">
+            <td :colspan="COLUMNS.length + 2">No samples match these filters.</td>
           </tr>
         </tbody>
       </table>
@@ -419,11 +446,16 @@ onBeforeUnmount(() => {
       />
     </div>
     <SampleTrimDialog
-      :src="trimTarget ? studioApi.trimAudioUrl(trimTarget.word_id, trimTarget.id) : null"
-      :trim-start="trimTarget?.trim_start_s"
-      :trim-end="trimTarget?.trim_end_s"
-      @save="trim($event)"
-      @close="closeTrim"
+      :src="editTarget ? studioApi.trimAudioUrl(editTarget.word_id, editTarget.id) : null"
+      :title="editTarget ? (editTarget.recording?.clip_id ?? editTarget.id) : undefined"
+      :label="editTarget?.label"
+      :trim-start="editTarget?.trim_start_s"
+      :trim-end="editTarget?.trim_end_s"
+      :confirm-trim="editTarget?.trim_status === 'needs_review'"
+      :undoable="(editTarget?.revision ?? 0) > 0"
+      @save="saveEdit"
+      @undo="editTarget && undo(editTarget)"
+      @close="closeEdit"
     />
   </section>
 </template>

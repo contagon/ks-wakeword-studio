@@ -194,9 +194,10 @@ test("real kiosk collection, keyboard labels, focus suppression and workspace is
   ).toBeTruthy();
   expect((await (await request.post("/__test/drain-gpu")).json()).ran).toBe(true);
   await page.goto(`/#/samples?word=${a.id}`);
-  await page.locator('[name="trim-status"]').selectOption("needs_review");
+  await page.locator('[name="trim"]').selectOption("untrimmed");
   const positive = page.locator(`[data-row-id="${pending.id}"]`);
-  await expect(positive).toContainText("Needs trim review");
+  const trimCell = positive.locator('[data-caption="Trim"]');
+  await expect(trimCell).toHaveText("Untrimmed Needs review");
   await expect(page.locator('[data-action="auto-trim"]')).toHaveCount(0);
   await page.goto(`/#/automate?word=${a.id}`);
   const trimming = page.waitForResponse((r) => r.url().endsWith("/trimming/jobs") && r.request().method() === "POST");
@@ -206,15 +207,17 @@ test("real kiosk collection, keyboard labels, focus suppression and workspace is
   const attempted = await (await request.get(`/api/studio/jobs/${trimJob.id}`)).json();
   expect(attempted.result).toEqual({ trimmed: 0, needs_review: 0, conflicts: 0 });
   await page.goto(`/#/samples?word=${a.id}`);
-  await page.locator('[name="trim-status"]').selectOption("needs_review");
-  await positive.locator('[data-action="trim"]').click();
-  const trim = page.getByRole("dialog", { name: "Trim audio", exact: true });
-  await expect(trim.locator('[data-action="save-trim"]')).toBeEnabled();
-  await trim.locator('[data-action="save-trim"]').click();
-  await expect(positive).toContainText("Manually trimmed");
-  await expect(positive.locator('[data-action="play-original"]')).toBeVisible();
-  await positive.locator('[data-action="undo"]').click();
-  await expect(positive).toContainText("Needs trim review");
+  await positive.locator('[data-action="edit"]').click();
+  const trim = page.getByRole("dialog", { name: "Edit sample", exact: true });
+  await expect(trim.locator('[data-action="save-sample"]')).toBeEnabled();
+  await trim.locator('[data-action="save-sample"]').click();
+  await expect(trimCell).toContainText("Manual");
+  await expect(trimCell).not.toContainText("Needs review");
+  await expect(positive.locator('[data-action="undo"]')).toHaveCount(0);
+  await positive.locator('[data-action="edit"]').click();
+  await trim.locator('[data-action="undo"]').click();
+  await expect(trimCell).toHaveText("Untrimmed Needs review");
+  await trim.getByRole("button", { name: "Cancel", exact: true }).click();
 });
 
 test("200-entry real catalog pagination, filtering, selection and server error", async ({ page, request }) => {
@@ -398,23 +401,21 @@ test("all pages have compact controls and no narrow-screen overflow", async ({ p
         // Phones stack each sample as a card instead of a horizontally scrolling table.
         expect((await page.locator("table").boundingBox())!.width).toBeLessThanOrEqual(390);
         const row = page.locator("tr[data-row-id]").first();
-        const relabel = row.getByRole("group", { name: "Relabel", exact: true });
+        const id = await row.getAttribute("data-row-id");
+        await row.locator('[data-action="edit"]').click();
+        const dialog = page.getByRole("dialog", { name: "Edit sample", exact: true });
+        const relabel = dialog.getByRole("group", { name: "Label", exact: true });
         await expect(relabel.getByRole("button")).toHaveCount(3);
         const negative = relabel.getByRole("button", { name: "Negative", exact: true });
-        const nextLabel = (await negative.getAttribute("aria-pressed")) === "true" ? "Positive" : "Negative";
+        // Never relabel to Positive here: that queues a trim job later tests would drain first.
+        const nextLabel = (await negative.getAttribute("aria-pressed")) === "true" ? "Discard" : "Negative";
         await relabel.getByRole("button", { name: nextLabel, exact: true }).click();
-        await expect(relabel.getByRole("button", { name: nextLabel, exact: true })).toHaveAttribute(
-          "aria-pressed",
-          "true",
-        );
+        await dialog.locator('[data-action="save-sample"]').click();
+        await expect(dialog).not.toBeVisible();
         await page.reload();
-        await expect(
-          page
-            .locator("tr[data-row-id]")
-            .first()
-            .getByRole("group", { name: "Relabel", exact: true })
-            .getByRole("button", { name: nextLabel, exact: true }),
-        ).toHaveAttribute("aria-pressed", "true");
+        await expect(page.locator(`tr[data-row-id="${id}"] [data-caption="Label"]`)).toHaveText(
+          nextLabel === "Discard" ? "Discarded" : nextLabel,
+        );
       }
       await page.screenshot({ path: test.info().outputPath(`polish-${route}-${width}.png`), fullPage: true });
     }

@@ -58,6 +58,11 @@ async function settle() {
 const lists = () =>
   server.requests.filter((r) => r.method === "GET" && /\/wakewords\/[^/]+\/samples$/.test(r.url.pathname));
 const row = (ui: VueWrapper, id: string) => ui.get(`[data-row-id="${id}"]`);
+async function edit(ui: VueWrapper, id: string) {
+  await row(ui, id).get("[data-action=edit]").trigger("click");
+  await settle();
+  return ui.get("[role=dialog][aria-label='Edit sample']");
+}
 
 describe("provenance-aware sample library", () => {
   it.each(["save", "cancel"])(
@@ -77,71 +82,115 @@ describe("provenance-aware sample library", () => {
         result: {},
       });
       const ui = await open();
-      await row(ui, "s2").get("[data-action=trim]").trigger("click");
+      await row(ui, "s2").get("[data-action=edit]").trigger("click");
       await settle();
-      const dialog = ui.get("[role=dialog][aria-label='Trim audio']");
+      const dialog = ui.get("[role=dialog][aria-label='Edit sample']");
       await dialog.get("[data-action=adjust-trim]").trigger("click");
       await dialog.get("[name=trim-start]").setValue("0.2");
       const before = lists().length;
       server.db.jobs[0]!.status = "complete";
       await vi.advanceTimersByTimeAsync(2000);
       await settle();
-      expect(ui.find("[aria-label='Trim audio']").exists()).toBe(true);
+      expect(ui.find("[aria-label='Edit sample']").exists()).toBe(true);
       expect(dialog.get<HTMLInputElement>("[name=trim-start]").element.value).toBe("0.2");
       expect(lists()).toHaveLength(before);
-      if (action === "save") await dialog.get("[data-action=save-trim]").trigger("click");
+      if (action === "save") await dialog.get("[data-action=save-sample]").trigger("click");
       else
         await dialog
           .findAll("button")
           .find((button) => button.text() === "Cancel")!
           .trigger("click");
       await settle();
-      expect(ui.find("[aria-label='Trim audio']").exists()).toBe(false);
+      expect(ui.find("[aria-label='Edit sample']").exists()).toBe(false);
       expect(lists().length).toBeGreaterThan(before);
     },
   );
 
-  it("shows trim review status and filters unresolved positives", async () => {
+  it("merges trim state into one column, flags review and filters by trim", async () => {
     Object.assign(server.db.samples[0]!, { trim_status: "needs_review" });
-    Object.assign(server.db.samples[2]!, { trim_status: "auto", trim_start_s: 0.25, trim_end_s: 1.15 });
+    Object.assign(server.db.samples[2]!, {
+      trim_status: "auto",
+      trim_source: "auto",
+      trim_start_s: 0.25,
+      trim_end_s: 1.15,
+    });
     const ui = await open();
-    expect(row(ui, "s0").text()).toContain("Needs trim review");
-    expect(row(ui, "s2").text()).toContain("Auto-trimmed");
+    const trim = (id: string) => row(ui, id).get("td[data-caption=Trim]");
+    expect(trim("s0").text()).toBe("Untrimmed Needs review");
+    expect(trim("s0").get(".studio-status").classes()).toContain("studio-status-warning");
+    expect(trim("s2").text()).toBe("Automatic 0.25–1.15 s");
+    expect(trim("s4").text()).toBe("Untrimmed");
     expect(ui.text()).toContain("excluded from training");
-    await ui.get("select[name=trim-status]").setValue("needs_review");
+    expect(ui.findAll("select[name=trim] option").map((o) => o.text())).toEqual([
+      "All",
+      "Automatic",
+      "Manual",
+      "Untrimmed",
+    ]);
+    await ui.get("select[name=trim]").setValue("auto");
     await settle();
-    expect(lists().at(-1)!.url.searchParams.get("trim_status")).toBe("needs_review");
-    expect(ui.findAll("[data-row-id]").map((r) => r.attributes("data-row-id"))).toEqual(["s0"]);
+    expect(lists().at(-1)!.url.searchParams.get("trim_source")).toBe("auto");
+    expect(ui.findAll("[data-row-id]").map((r) => r.attributes("data-row-id"))).toEqual(["s2"]);
   });
 
   it("keeps automatic trimming in Automate instead of exposing the retired migration action", async () => {
     const ui = await open();
     expect(ui.find("[data-action=auto-trim]").exists()).toBe(false);
     expect(ui.text()).not.toContain("Re-trim all scraped positives");
-    expect(row(ui, "s2").find("[data-action=trim]").exists()).toBe(true);
+    expect(row(ui, "s2").find("[data-action=edit]").exists()).toBe(true);
   });
 
-  it("plays the full original and can undo a saved automatic trim", async () => {
-    Object.assign(server.db.samples[2]!, { trim_status: "auto", trim_start_s: 0.25, trim_end_s: 1.15 });
-    server.db.history.set("s2", [{ label: "positive", audio_id: "full-s2" }]);
+  it("undoes from the edit dialog and keeps it open on the restored sample", async () => {
+    Object.assign(server.db.samples[2]!, {
+      trim_status: "auto",
+      trim_source: "auto",
+      trim_start_s: 0.25,
+      trim_end_s: 1.15,
+    });
+    server.db.history.set("s2", [
+      {
+        label: "positive",
+        audio_id: "full-s2",
+        trim_status: null,
+        trim_source: null,
+        trim_start_s: null,
+        trim_end_s: null,
+      },
+    ]);
     const ui = await open();
-    await row(ui, "s2").get("[data-action=play-original]").trigger("click");
-    await settle();
-    expect(server.requests.some((r) => r.path === "/api/studio/wakewords/a/samples/s2/audio?original=true")).toBe(true);
-    await row(ui, "s2").get("[data-action=undo]").trigger("click");
+    expect(row(ui, "s2").find("[data-action=undo]").exists()).toBe(false);
+    expect((await edit(ui, "s0")).find("[data-action=undo]").exists()).toBe(false);
+    await ui
+      .findAll("[role=dialog] button")
+      .find((b) => b.text() === "Cancel")!
+      .trigger("click");
+    const dialog = await edit(ui, "s2");
+    await dialog.get("[data-action=undo]").trigger("click");
     await settle();
     expect(server.mutations().at(-1)!.body).toEqual({ expected_revision: 2 });
     expect(server.mutations().at(-1)!.url.pathname).toBe("/api/studio/wakewords/a/samples/s2/undo");
+    expect(ui.find("[aria-label='Edit sample']").exists()).toBe(true);
+    expect(row(ui, "s2").get("td[data-caption=Trim]").text()).toBe("Untrimmed");
+    // The restored revision is what a follow-up save claims.
+    await dialog.get("[data-relabel=negative]").trigger("click");
+    await dialog.get("[data-action=save-sample]").trigger("click");
+    await settle();
+    expect(server.mutations().at(-1)!.body).toEqual({ label: "negative", expected_revision: 3 });
   });
 
   it("shows the full original with the current trim selected and lets either edge expand", async () => {
-    Object.assign(server.db.samples[2]!, { trim_status: "auto", trim_start_s: 0.25, trim_end_s: 1.15 });
+    Object.assign(server.db.samples[2]!, {
+      trim_status: "auto",
+      trim_source: "auto",
+      trim_start_s: 0.25,
+      trim_end_s: 1.15,
+    });
     server.db.audio = () => new Response(wav(3).buffer as ArrayBuffer, { headers: { "Content-Type": "audio/wav" } });
     const ui = await open();
     expect(row(ui, "s2").text()).toContain("0.25–1.15 s");
-    await row(ui, "s2").get("[data-action=trim]").trigger("click");
+    await row(ui, "s2").get("[data-action=edit]").trigger("click");
     await settle();
-    const dialog = ui.get("[role=dialog][aria-label='Trim audio']");
+    const dialog = ui.get("[role=dialog][aria-label='Edit sample']");
     expect(server.requests.some((r) => r.path === "/api/studio/wakewords/a/samples/s2/audio?full=true")).toBe(true);
     expect(dialog.text()).toContain("Full clip: 3.00 s");
     expect(dialog.text()).toContain("Current trim");
@@ -155,7 +204,7 @@ describe("provenance-aware sample library", () => {
     await dialog.get("[name=trim-end]").setValue("2.5");
     await settle();
     expect(dialog.text()).toContain("2.40 s retained");
-    await dialog.get("[data-action=save-trim]").trigger("click");
+    await dialog.get("[data-action=save-sample]").trigger("click");
     await settle();
     expect(server.mutations().at(-1)!.body).toEqual({
       start_s: 0.1,
@@ -163,14 +212,14 @@ describe("provenance-aware sample library", () => {
       expected_revision: 2,
       from_original: true,
     });
-    expect(ui.find("[aria-label='Trim audio']").exists()).toBe(false);
+    expect(ui.find("[aria-label='Edit sample']").exists()).toBe(false);
   });
 
   it("shows all filters inline without a disclosure", async () => {
     const ui = await open();
     expect(ui.find("details").exists()).toBe(false);
     const filters = ui.get("[data-sample-filters]");
-    for (const name of ["search", "label", "labelled-by", "source", "kind", "after", "before"])
+    for (const name of ["search", "label", "labelled-by", "source", "kind", "trim", "after", "before"])
       expect(filters.find(`[name=${name}]`).exists()).toBe(true);
     expect(filters.findAll("select[name=source] option").map((o) => o.text())).toEqual([
       "All sources",
@@ -187,21 +236,35 @@ describe("provenance-aware sample library", () => {
     const ui = await open();
     expect(ui.get("h1").text()).toBe("Samples");
     expect(ui.find("[data-legacy-trainer]").exists()).toBe(false);
-    expect(ui.findAll("thead th").map((th) => th.text())).toEqual([
+    expect(ui.findAll("thead [data-sort]").map((th) => th.text().replace(/[↕↑↓]/, ""))).toEqual([
       "Sample",
+      "Source",
       "Date",
       "Label",
       "Label source",
-      "Source",
-      "Actions",
+      "Trim",
     ]);
+    // Each filter sits in the header cell under its column title.
+    const filterCells = ui.findAll("[data-sample-filters] th");
+    expect(filterCells.map((th) => (th.find("[name]").exists() ? th.get("[name]").attributes("name") : ""))).toEqual([
+      "",
+      "search",
+      "source",
+      "after",
+      "label",
+      "labelled-by",
+      "trim",
+      "",
+    ]);
+    expect(ui.find("[data-action=play-original]").exists()).toBe(false);
+    expect(row(ui, "s0").find("[data-relabel]").exists()).toBe(false);
     expect(row(ui, "s0").get("td[data-caption=Label] .studio-status").classes()).toContain("studio-status-success");
     expect(row(ui, "s1").get("td[data-caption=Label] .studio-status").classes()).toContain("studio-status-failed");
     expect(row(ui, "s1").get("td[data-caption='Label source']").text()).toBe("Automatic");
     expect(lists().at(-1)?.url.searchParams.get("offset")).toBe("0");
     expect(ui.findAll("[data-row-id]")).toHaveLength(25);
     const first = row(ui, "s0").text();
-    for (const text of ["Positive", "Kitchen satellite", "phrase 0", "mww"]) expect(first).toContain(text);
+    for (const text of ["Positive", "Kitchen satellite", "phrase 0"]) expect(first).toContain(text);
     expect(first).not.toContain("diagnostic");
     expect(row(ui, "s1").text()).toContain("Hall satellite");
     expect(row(ui, "s1").text()).toContain("close miss");
@@ -261,8 +324,11 @@ describe("provenance-aware sample library", () => {
 
   it("relabels with the row's server revision and applies the acknowledged record", async () => {
     const ui = await open();
-    expect(row(ui, "s2").get("[data-relabel=positive]").attributes("aria-pressed")).toBe("true");
-    await row(ui, "s2").get("[data-relabel=discarded]").trigger("click");
+    const dialog = await edit(ui, "s2");
+    expect(dialog.get("[data-relabel=positive]").attributes("aria-pressed")).toBe("true");
+    expect(dialog.get("[data-action=save-sample]").attributes("disabled")).toBeDefined();
+    await dialog.get("[data-relabel=discarded]").trigger("click");
+    await dialog.get("[data-action=save-sample]").trigger("click");
     await settle();
     const request = server.mutations().at(-1)!;
     expect([request.url.pathname, request.body]).toEqual([
@@ -277,7 +343,9 @@ describe("provenance-aware sample library", () => {
     const ui = await open();
     server.db.samples.find((s) => s.id === "s4")!.revision = 9;
     const before = lists().length;
-    await row(ui, "s4").get("[data-relabel=negative]").trigger("click");
+    const dialog = await edit(ui, "s4");
+    await dialog.get("[data-relabel=negative]").trigger("click");
+    await dialog.get("[data-action=save-sample]").trigger("click");
     await settle();
     expect(ui.get("[data-samples-error]").attributes("role")).toBe("alert");
     expect(ui.get("[data-samples-error]").text()).toContain("changed elsewhere");
@@ -290,22 +358,22 @@ describe("provenance-aware sample library", () => {
       (r) => r.url.pathname === "/api/studio/wakewords/a/samples/s5/audio",
       () => new Response(wav(1).buffer as ArrayBuffer, { headers: { "Content-Type": "audio/wav" } }),
     );
-    await row(ui, "s5").get("[data-action=trim]").trigger("click");
+    await row(ui, "s5").get("[data-action=edit]").trigger("click");
     audio.release();
     await settle();
-    const dialog = ui.get("[role=dialog][aria-label='Trim audio']");
+    const dialog = ui.get("[role=dialog][aria-label='Edit sample']");
     expect(dialog.text()).toContain("1.00 s retained");
     expect(server.requests.some((r) => r.url.pathname.startsWith("/api/samples"))).toBe(false);
     await dialog.get("[data-action=adjust-trim]").trigger("click");
     await dialog.get("[name=trim-start]").setValue("0.2");
     await settle();
-    await dialog.get("[data-action=save-trim]").trigger("click");
+    await dialog.get("[data-action=save-sample]").trigger("click");
     await settle();
     const request = server.mutations().at(-1)!;
     expect(request.url.pathname).toBe("/api/studio/wakewords/a/samples/s5/trim");
     expect(request.body).toEqual({ start_s: 0.2, end_s: 1, expected_revision: 2, from_original: true });
     expect(server.requests.some((r) => r.method === "DELETE")).toBe(false);
-    expect(ui.find("[aria-label='Trim audio']").exists()).toBe(false);
+    expect(ui.find("[aria-label='Edit sample']").exists()).toBe(false);
   });
 
   it("offers no delete; discard is the way to drop a sample", async () => {
@@ -344,9 +412,77 @@ describe("provenance-aware sample library", () => {
     stale.release();
     await settle();
     expect(wrapper!.findAll("[data-row-id]").map((r) => r.attributes("data-row-id"))).toEqual(["b1"]);
-    await row(wrapper!, "b1").get("[data-relabel=positive]").trigger("click");
+    const dialog = await edit(wrapper!, "b1");
+    await dialog.get("[data-relabel=positive]").trigger("click");
+    await dialog.get("[data-action=save-sample]").trigger("click");
     await settle();
     expect(server.mutations().map((r) => r.url.pathname)).toEqual(["/api/studio/wakewords/b/samples/b1/label"]);
     void ui;
+  });
+
+  it("sorts server-side by column, newest first by default, toggling direction", async () => {
+    const ui = await open();
+    expect(Object.fromEntries(lists().at(-1)!.url.searchParams)).toMatchObject({ sort: "date", order: "desc" });
+    expect(ui.get("th[aria-sort]").text()).toContain("Date");
+    await ui.get("[data-action=next-page]").trigger("click");
+    await settle();
+    await ui.get("[data-sort=trim]").trigger("click");
+    await settle();
+    expect(Object.fromEntries(lists().at(-1)!.url.searchParams)).toMatchObject({
+      sort: "trim",
+      order: "asc",
+      offset: "0",
+    });
+    expect(ui.get("th[aria-sort]").attributes("aria-sort")).toBe("ascending");
+    await ui.get("[data-sort=trim]").trigger("click");
+    await settle();
+    expect(lists().at(-1)!.url.searchParams.get("order")).toBe("desc");
+  });
+
+  it("clears every filter at once", async () => {
+    const ui = await open();
+    expect(ui.find("[data-action=clear-filters]").exists()).toBe(false);
+    await ui.get("select[name=trim]").setValue("manual");
+    await ui.get("select[name=label]").setValue("negative");
+    await settle();
+    expect(Object.fromEntries(lists().at(-1)!.url.searchParams)).toMatchObject({
+      trim_source: "manual",
+      label: "negative",
+    });
+    await ui.get("[data-action=clear-filters]").trigger("click");
+    await settle();
+    const q = lists().at(-1)!.url.searchParams;
+    expect(q.has("trim_source") || q.has("label")).toBe(false);
+    expect(ui.get<HTMLSelectElement>("select[name=label]").element.value).toBe("");
+    expect(ui.find("[data-action=clear-filters]").exists()).toBe(false);
+  });
+
+  it("saves a trim and a label change together, trimming first and chaining revisions", async () => {
+    const ui = await open();
+    const dialog = await edit(ui, "s1");
+    await dialog.get("[data-action=adjust-trim]").trigger("click");
+    await dialog.get("[name=trim-start]").setValue("0.3");
+    await dialog.get("[data-relabel=positive]").trigger("click");
+    await dialog.get("[data-action=save-sample]").trigger("click");
+    await settle();
+    expect(server.mutations().map((r) => [r.url.pathname, r.body])).toEqual([
+      [
+        "/api/studio/wakewords/a/samples/s1/trim",
+        { start_s: 0.3, end_s: 1, expected_revision: 1, from_original: true },
+      ],
+      ["/api/studio/wakewords/a/samples/s1/label", { label: "positive", expected_revision: 2 }],
+    ]);
+    expect(ui.find("[aria-label='Edit sample']").exists()).toBe(false);
+    expect(row(ui, "s1").get("td[data-caption=Label]").text()).toBe("Positive");
+    expect(row(ui, "s1").get("td[data-caption=Trim]").text()).toContain("Manual");
+  });
+
+  it("confirms a trim that needs review even when the selection is unchanged", async () => {
+    Object.assign(server.db.samples[0]!, { trim_status: "needs_review" });
+    const ui = await open();
+    const dialog = await edit(ui, "s0");
+    await dialog.get("[data-action=save-sample]").trigger("click");
+    await settle();
+    expect(server.mutations().map((r) => r.url.pathname)).toEqual(["/api/studio/wakewords/a/samples/s0/trim"]);
   });
 });
