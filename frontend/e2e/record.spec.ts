@@ -43,7 +43,6 @@ test("records through real browser media, trims, saves and finds the recorded so
   const dialog = page.getByRole("dialog", { name: "Edit sample", exact: true });
   await expect(dialog).toContainText("Current trim: 1.20–2.40 s");
   await expect(dialog).toContainText("1.20 s retained");
-  await dialog.locator('[data-action="adjust-trim"]').click();
   await expect(dialog.locator('[name="trim-start"]')).toHaveValue("1.2");
   await expect(dialog.locator('[name="trim-end"]')).toHaveValue("2.4");
   expect(Number(await dialog.locator('[name="trim-end"]').getAttribute("max"))).toBeGreaterThanOrEqual(3);
@@ -58,5 +57,18 @@ test("records through real browser media, trims, saves and finds the recorded so
   await dialog.locator('[data-action="undo"]').click();
   await expect(dialog).toContainText("Current trim: 1.20–2.40 s");
   await expect(page.locator("[data-row-id]")).toContainText("1.20–2.40 s");
+  // The dialog edits like the Trim page: drag handles, double-click to set the start, Space and Enter shortcuts.
+  await expect(dialog.getByRole("slider")).toHaveCount(2);
+  const wave = dialog.locator(".studio-trim-wave");
+  const bounds = (await wave.boundingBox())!;
+  await wave.dblclick({ position: { x: bounds.width / 10, y: bounds.height / 2 } });
+  const start = Number(await dialog.locator('[name="trim-start"]').inputValue());
+  expect(start).toBeLessThan(1.2);
+  await page.keyboard.press("Space");
+  await expect(dialog.locator('[data-action="toggle-playback"]')).toContainText("Pause");
+  await page.keyboard.press("Enter");
+  await expect(dialog).not.toBeVisible();
+  const shortcutSaved = await (await request.get(`/api/studio/wakewords/${word.id}/samples`)).json();
+  expect(shortcutSaved.items[0].trim_start_s).toBeCloseTo(start, 2);
   expect(errors).toEqual([]);
 });

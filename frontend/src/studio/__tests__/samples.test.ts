@@ -85,7 +85,6 @@ describe("provenance-aware sample library", () => {
       await row(ui, "s2").get("[data-action=edit]").trigger("click");
       await settle();
       const dialog = ui.get("[role=dialog][aria-label='Edit sample']");
-      await dialog.get("[data-action=adjust-trim]").trigger("click");
       await dialog.get("[name=trim-start]").setValue("0.2");
       const before = lists().length;
       server.db.jobs[0]!.status = "complete";
@@ -196,7 +195,6 @@ describe("provenance-aware sample library", () => {
     expect(dialog.text()).toContain("Current trim");
     expect(dialog.text()).toContain("0.90 s retained");
     expect(dialog.text()).toContain("0.25–1.15 s");
-    await dialog.get("[data-action=adjust-trim]").trigger("click");
     expect(dialog.get<HTMLInputElement>("[name=trim-start]").element.value).toBe("0.25");
     expect(dialog.get<HTMLInputElement>("[name=trim-end]").element.value).toBe("1.15");
     expect(dialog.get("[name=trim-end]").attributes("max")).toBe("3");
@@ -364,7 +362,6 @@ describe("provenance-aware sample library", () => {
     const dialog = ui.get("[role=dialog][aria-label='Edit sample']");
     expect(dialog.text()).toContain("1.00 s retained");
     expect(server.requests.some((r) => r.url.pathname.startsWith("/api/samples"))).toBe(false);
-    await dialog.get("[data-action=adjust-trim]").trigger("click");
     await dialog.get("[name=trim-start]").setValue("0.2");
     await settle();
     await dialog.get("[data-action=save-sample]").trigger("click");
@@ -460,7 +457,6 @@ describe("provenance-aware sample library", () => {
   it("saves a trim and a label change together, trimming first and chaining revisions", async () => {
     const ui = await open();
     const dialog = await edit(ui, "s1");
-    await dialog.get("[data-action=adjust-trim]").trigger("click");
     await dialog.get("[name=trim-start]").setValue("0.3");
     await dialog.get("[data-relabel=positive]").trigger("click");
     await dialog.get("[data-action=save-sample]").trigger("click");
@@ -484,5 +480,27 @@ describe("provenance-aware sample library", () => {
     await dialog.get("[data-action=save-sample]").trigger("click");
     await settle();
     expect(server.mutations().map((r) => r.url.pathname)).toEqual(["/api/studio/wakewords/a/samples/s0/trim"]);
+  });
+
+  it("edits with the Trim page's waveform controls and keyboard shortcuts", async () => {
+    const ui = await open();
+    const dialog = await edit(ui, "s1");
+    expect(document.activeElement).toBe(dialog.element);
+    for (const action of ["play-original", "toggle-playback"])
+      expect(dialog.find(`[data-action=${action}]`).exists()).toBe(true);
+    // Negatives may be any length; a kiosk positive must fit the 2.9 s training window.
+    expect(dialog.text()).not.toContain("Keep at most 2.90 seconds");
+    await dialog.get("[data-relabel=positive]").trigger("click");
+    expect(dialog.text()).toContain("Keep at most 2.90 seconds");
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await settle();
+    expect(server.mutations().map((r) => [r.url.pathname, r.body])).toEqual([
+      ["/api/studio/wakewords/a/samples/s1/label", { label: "positive", expected_revision: 1 }],
+    ]);
+    expect(ui.find("[aria-label='Edit sample']").exists()).toBe(false);
+    await edit(ui, "s3");
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await settle();
+    expect(ui.find("[aria-label='Edit sample']").exists()).toBe(false);
   });
 });

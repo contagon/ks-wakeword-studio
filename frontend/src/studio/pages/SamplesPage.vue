@@ -453,6 +453,7 @@ onBeforeUnmount(() => {
       :trim-end="editTarget?.trim_end_s"
       :confirm-trim="editTarget?.trim_status === 'needs_review'"
       :undoable="(editTarget?.revision ?? 0) > 0"
+      :limit-positive="editTarget?.source === 'diagnostic'"
       @save="saveEdit"
       @undo="editTarget && undo(editTarget)"
       @close="closeEdit"

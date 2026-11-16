@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import SampleTrimEditor from "./SampleTrimEditor.vue";
 import LabelToggle from "./LabelToggle.vue";
+import { shortcutTarget } from "../shortcuts";
 import type { CaptureSelection } from "../types";
 
 const LABELS = ["positive", "negative", "discarded"];
@@ -15,6 +16,8 @@ const props = defineProps<{
   /** Save the trim even when unchanged: accepting it as-is resolves a pending trim review. */
   confirmTrim?: boolean;
   undoable?: boolean;
+  /** Kiosk positives must fit the server's 2.9 s training window; other clips may be any length. */
+  limitPositive?: boolean;
 }>();
 const emit = defineEmits<{
   save: [edit: { label: string; range: { start: number; end: number } | null }];
@@ -24,6 +27,19 @@ const emit = defineEmits<{
 const selection = ref<CaptureSelection | null>(null);
 const initial = ref<CaptureSelection | null>(null);
 const label = ref("");
+const editor = ref<InstanceType<typeof SampleTrimEditor>>();
+const dialog = ref<HTMLElement>();
+// Take focus from the row's Edit button so shortcuts (Enter especially) act on the dialog.
+watch(
+  () => props.src,
+  async (src) => {
+    if (src) {
+      await nextTick();
+      dialog.value?.focus();
+    }
+  },
+);
+const maxDuration = computed(() => (props.limitPositive && label.value === "positive" ? 2.9 : undefined));
 watch(
   () => [props.src, props.label, props.trimStart, props.trimEnd] as const,
   (now, before) => {
@@ -56,11 +72,30 @@ function save(): void {
     trimChanged.value && selection.value ? { start: selection.value.start_s, end: selection.value.end_s } : null;
   emit("save", { label: label.value, range });
 }
+/** The Trim page's shortcuts: Space play/pause, R replay, [ / ] set edges, Enter save, Esc cancel. */
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key === "Escape" && props.src) {
+  if (!props.src || event.isComposing || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+  const key = event.key.toLowerCase();
+  if (key === "escape") {
     event.preventDefault();
     close();
+    return;
   }
+  if (event.shiftKey) return;
+  const target = event.target instanceof Element ? event.target : null;
+  const trimField = target?.matches('[name="trim-start"],[name="trim-end"]');
+  const { typing, onControl } = shortcutTarget(event);
+  if (typing && !(trimField && (key === "enter" || key === " "))) return;
+  // Keyboard users still activate a focused button with Enter; mouse clicks never move focus onto one.
+  if (onControl && key === "enter") return;
+  if (![" ", "r", "[", "]", "enter"].includes(key)) return;
+  event.preventDefault();
+  if (props.disabled) return;
+  if (key === "enter") save();
+  else if (key === " ") editor.value?.toggle();
+  else if (key === "r") editor.value?.playSelection();
+  else if (key === "[") editor.value?.markStart();
+  else editor.value?.markEnd();
 }
 
 document.addEventListener("keydown", onKeydown);
@@ -71,11 +106,18 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="src" class="studio-modal-backdrop" @click.self="close">
-    <section class="studio-card studio-edit-dialog" role="dialog" aria-modal="true" aria-label="Edit sample">
+    <section
+      ref="dialog"
+      class="studio-card studio-edit-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Edit sample"
+      tabindex="-1"
+    >
       <h2>
         Edit sample<small v-if="title" class="block studio-muted font-normal">{{ title }}</small>
       </h2>
-      <div v-if="label" class="mb-4 flex flex-wrap items-center gap-3">
+      <div v-if="label" class="mb-4 flex flex-wrap items-center gap-3" @pointerdown.prevent>
         <span class="studio-muted">Label</span>
         <LabelToggle
           v-model="label"
@@ -86,13 +128,18 @@ onBeforeUnmount(() => {
         />
       </div>
       <SampleTrimEditor
+        ref="editor"
         :src="src"
         :trim-start="trimStart"
         :trim-end="trimEnd"
         :disabled="disabled"
+        interactive
+        :max-duration="maxDuration"
         @selection="selection = $event"
       />
-      <div class="flex flex-wrap justify-end gap-2">
+      <p class="studio-muted text-xs">Space play/pause · Enter save · Esc cancel</p>
+      <!-- Mouse clicks keep shortcut focus off these buttons; Tab/Enter still activate them. -->
+      <div class="mt-3 flex flex-wrap justify-end gap-2" @pointerdown.prevent>
         <button
           v-if="undoable"
           type="button"
@@ -112,7 +159,7 @@ onBeforeUnmount(() => {
           :aria-busy="disabled"
           @click="save"
         >
-          Save
+          Save ↵
         </button>
       </div>
     </section>

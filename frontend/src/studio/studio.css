@@ -965,7 +965,10 @@ th[aria-sort] .studio-sort-arrow {
   min-width: 52px;
 }
 .studio-modal-backdrop > .studio-card.studio-edit-dialog {
-  width: min(760px, 100%);
+  width: min(860px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  outline: none;
 }
 /* Phones: each sample becomes a stacked card with small column captions instead of a scrolling table. */
 @media (max-width: 650px) {
