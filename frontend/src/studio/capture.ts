@@ -115,3 +115,13 @@ export function useMicrophoneCapture() {
   }
   return { state, audio, error, elapsed, start, stop, reset, dispose: reset };
 }
+
+/** Bar half-heights for the shared 640×80 waveform SVG (160 bars, 4 units apart). */
+export function wavePeaks(pcm: Float32Array, width = 160): number[] {
+  const stride = Math.max(1, Math.floor(pcm.length / width));
+  return Array.from({ length: width }, (_, i) => {
+    let peak = 0;
+    for (let j = i * stride; j < Math.min((i + 1) * stride, pcm.length); j++) peak = Math.max(peak, Math.abs(pcm[j]!));
+    return Math.max(1, peak * 34);
+  });
+}

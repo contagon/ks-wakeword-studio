@@ -16,9 +16,10 @@ function deferred<T>(): Deferred<T> {
     resolve,
   };
 }
-function audioBuffer(values: number[]): AudioBuffer {
-  return { duration: 1, getChannelData: () => new Float32Array(values) } as unknown as AudioBuffer;
+function audioBuffer(values: number[], duration = 1): AudioBuffer {
+  return { duration, getChannelData: () => new Float32Array(values) } as unknown as AudioBuffer;
 }
+const bars = (ui: VueWrapper) => ui.findAll("[data-waveform] line[stroke=currentColor]").map((l) => l.attributes("y1"));
 class DecodeContext {
   static decodes: Deferred<AudioBuffer>[] = [];
   static closed: DecodeContext[] = [];
@@ -32,17 +33,6 @@ class DecodeContext {
     return Promise.resolve();
   }
 }
-const paint = {
-  clearRect: vi.fn(),
-  fillRect: vi.fn(),
-  beginPath: vi.fn(),
-  moveTo: vi.fn(),
-  lineTo: vi.fn(),
-  stroke: vi.fn(),
-  set fillStyle(_: string) {},
-  set strokeStyle(_: string) {},
-  set lineWidth(_: number) {},
-} as unknown as CanvasRenderingContext2D;
 let wrapper: VueWrapper | undefined;
 
 async function settle(): Promise<void> {
@@ -57,7 +47,6 @@ function mountPlayer(sampleId = "a", src = "/api/studio/wakewords/a/samples/a/au
   );
   vi.stubGlobal("AudioContext", DecodeContext);
   vi.stubGlobal("webkitAudioContext", undefined);
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(paint);
   wrapper = mount(AudioPlayer, { props: { sampleId, src, autoplayRequested: false }, attachTo: document.body });
   return wrapper;
 }
@@ -71,16 +60,24 @@ afterEach(() => {
 });
 
 describe("Studio review waveform", () => {
-  it("decodes authorized sample audio and renders compact waveform peaks", async () => {
+  it("decodes authorized sample audio into the Trim page's waveform and seeks on click", async () => {
     const ui = mountPlayer();
     await settle();
     expect(DecodeContext.decodes).toHaveLength(1);
-    DecodeContext.decodes[0].resolve(audioBuffer([-1, -0.5, 0, 0.75, 1]));
+    DecodeContext.decodes[0].resolve(audioBuffer([-1, -0.5, 0, 0.75, 1], 2));
     await settle();
     expect(ui.get("[data-waveform]").attributes("data-ready")).toBe("true");
     expect(ui.get("[data-waveform-status]").text()).toContain("Waveform preview ready");
-    expect(paint.fillRect).toHaveBeenCalled();
+    // 160 bars plus the playhead, same geometry as CaptureReview.
+    expect(ui.findAll("[data-waveform] line")).toHaveLength(161);
+    expect(bars(ui).slice(0, 3)).toEqual(["6", "23", "39"]);
     expect(DecodeContext.closed).toHaveLength(1);
+    const svg = ui.get("[data-waveform]").element;
+    svg.getBoundingClientRect = () => ({ left: 0, width: 200 }) as DOMRect;
+    svg.dispatchEvent(new PointerEvent("pointerdown", { clientX: 50, button: 0 }));
+    await settle();
+    expect((ui.get("audio").element as HTMLAudioElement).currentTime).toBe(0.5);
+    expect(ui.get("[data-playhead]").text()).toBe("Cursor 0.50 s");
   });
 
   it("does not render a waveform decoded for a stale sample", async () => {
@@ -93,10 +90,10 @@ describe("Studio review waveform", () => {
     expect(DecodeContext.decodes).toHaveLength(2);
     DecodeContext.decodes[1].resolve(audioBuffer([0.2, 0.8]));
     await settle();
-    const drawsAfterCurrent = (paint.fillRect as unknown as { mock: { calls: unknown[][] } }).mock.calls.length;
+    const current = bars(ui);
     DecodeContext.decodes[0].resolve(audioBuffer([-1, 1]));
     await settle();
-    expect((paint.fillRect as unknown as { mock: { calls: unknown[][] } }).mock.calls).toHaveLength(drawsAfterCurrent);
+    expect(bars(ui)).toEqual(current);
     expect(ui.get("[data-waveform]").attributes("data-ready")).toBe("true");
     expect(DecodeContext.closed).toHaveLength(2);
   });

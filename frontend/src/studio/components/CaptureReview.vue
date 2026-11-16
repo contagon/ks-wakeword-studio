@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import { wavePeaks } from "../capture";
 import type { CapturePreview, CaptureSelection } from "../types";
 
 const props = withDefaults(
@@ -97,15 +98,9 @@ async function decode() {
     const decoded = await context.decodeAudioData(data);
     if (current !== generation) return;
     buffer.value = decoded;
-    const pcm = decoded.getChannelData(0).subarray(0, Math.floor(props.preview.duration_s * decoded.sampleRate));
-    const width = 160;
-    const stride = Math.max(1, Math.floor(pcm.length / width));
-    peaks.value = Array.from({ length: width }, (_, i) => {
-      let peak = 0;
-      for (let j = i * stride; j < Math.min((i + 1) * stride, pcm.length); j++)
-        peak = Math.max(peak, Math.abs(pcm[j]!));
-      return Math.max(1, peak * 34);
-    });
+    peaks.value = wavePeaks(
+      decoded.getChannelData(0).subarray(0, Math.floor(props.preview.duration_s * decoded.sampleRate)),
+    );
     emit("ready");
   } catch {
     if (current === generation)

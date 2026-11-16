@@ -43,10 +43,13 @@
   gap: 12px;
   margin-bottom: 12px;
 }
-.studio-trim-wave {
+.studio-trim-wave,
+.studio-play-wave {
   height: 160px;
-  touch-action: none;
   cursor: crosshair;
+}
+.studio-trim-wave {
+  touch-action: none;
 }
 .studio-trim-handle {
   fill: var(--studio-text);
@@ -897,12 +900,6 @@ html[data-studio-theme="dark"] :is(.studio-status-failed, .studio-status-interru
   padding: 12px 0;
   background: var(--studio-bg);
   border-top: 1px solid var(--studio-border);
-}
-.studio-waveform {
-  color: var(--studio-selected);
-  background: var(--studio-bg);
-  border-radius: 6px;
-  max-width: 100%;
 }
 /* Short table values (labels, revisions) never break mid-word; the table scrolls instead. */
 .studio-content td {

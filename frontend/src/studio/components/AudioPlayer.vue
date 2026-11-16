@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
+import { wavePeaks } from "../capture";
 
 type AudioContextWindow = Window & { webkitAudioContext?: typeof AudioContext };
 
 const props = defineProps<{ sampleId: string | null; src: string | null; autoplayRequested: boolean }>();
 const emit = defineEmits<{ ready: []; ended: []; playbackError: [message: string] }>();
 const audio = ref<HTMLAudioElement>();
-const canvas = ref<HTMLCanvasElement>();
+const waveform = ref<SVGSVGElement>();
 const loading = ref(false);
 const playing = ref(false);
 const waveformReady = ref(false);
@@ -15,7 +16,10 @@ let controller: AbortController | undefined;
 let decodeContext: AudioContext | undefined;
 let objectUrl: string | undefined;
 let generation = 0;
-let peaks: number[] = [];
+let frame: number | undefined;
+const peaks = ref<number[]>([]);
+const duration = ref(0);
+const cursor = ref(0);
 const closedContexts = new WeakSet<AudioContext>();
 
 function authorized(url: string): boolean {
@@ -40,13 +44,28 @@ function closeDecodeContext(): void {
   if (context) closeContext(context);
 }
 function clearWaveform(): void {
-  const hadPeaks = peaks.length > 0;
-  peaks = [];
+  peaks.value = [];
+  duration.value = 0;
   waveformReady.value = false;
   waveformStatus.value = "Waveform preview will appear when audio is ready.";
-  const target = canvas.value;
-  const context = hadPeaks ? target?.getContext("2d") : null;
-  if (target && context) context.clearRect(0, 0, target.width, target.height);
+}
+/** Follow the audio clock every frame while playing, like the Trim page's playhead. */
+function track(): void {
+  cursor.value = audio.value?.currentTime ?? 0;
+  frame = playing.value ? requestAnimationFrame(track) : undefined;
+}
+watch(playing, (now) => {
+  if (frame != null) cancelAnimationFrame(frame);
+  frame = undefined;
+  if (now) track();
+  else cursor.value = audio.value?.currentTime ?? 0;
+});
+function seek(event: PointerEvent): void {
+  const element = audio.value;
+  if (!element || !duration.value || event.button !== 0) return;
+  const rect = waveform.value!.getBoundingClientRect();
+  element.currentTime = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * duration.value;
+  cursor.value = element.currentTime;
 }
 function stop(): void {
   const element = audio.value;
@@ -55,45 +74,7 @@ function stop(): void {
     element.currentTime = 0;
   }
   playing.value = false;
-  drawWaveform();
-}
-function drawWaveform(): void {
-  const target = canvas.value;
-  if (!target || !peaks.length) return;
-  const context = target.getContext("2d");
-  if (!context) return;
-  const width = 240;
-  const height = 44;
-  target.width = width;
-  target.height = height;
-  context.clearRect(0, 0, width, height);
-  // Bars use the canvas CSS colour so they read in both themes.
-  context.fillStyle = getComputedStyle(target).color || "#649c80";
-  const barWidth = width / peaks.length;
-  peaks.forEach((peak, index) => {
-    const barHeight = Math.max(2, peak * (height - 8));
-    context.fillRect(index * barWidth, (height - barHeight) / 2, Math.max(1, barWidth - 1), barHeight);
-  });
-  const element = audio.value;
-  const duration = element?.duration;
-  const progress =
-    duration && Number.isFinite(duration) && duration > 0
-      ? Math.min(1, Math.max(0, (element?.currentTime ?? 0) / duration))
-      : 0;
-  context.fillStyle = "#ff9134";
-  context.fillRect(Math.min(width - 1, progress * width), 0, 2, height);
-}
-function makePeaks(buffer: AudioBuffer, count = 60): number[] {
-  const samples = buffer.getChannelData(0);
-  const step = Math.max(1, Math.ceil(samples.length / count));
-  const values: number[] = [];
-  for (let start = 0; start < samples.length; start += step) {
-    let maximum = 0;
-    for (let index = start; index < Math.min(start + step, samples.length); index += 1)
-      maximum = Math.max(maximum, Math.abs(samples[index] ?? 0));
-    values.push(maximum);
-  }
-  return values.length ? values : [0];
+  cursor.value = 0;
 }
 function createDecodeContext(): AudioContext | null {
   const Constructor = window.AudioContext ?? (window as AudioContextWindow).webkitAudioContext;
@@ -115,11 +96,10 @@ async function decodeWaveform(data: ArrayBuffer, current: number, request: Abort
   try {
     const buffer = await context.decodeAudioData(data);
     if (request.signal.aborted || current !== generation || decodeContext !== context) return;
-    peaks = makePeaks(buffer);
+    peaks.value = wavePeaks(buffer.getChannelData(0));
+    duration.value = buffer.duration;
     waveformReady.value = true;
     waveformStatus.value = "Waveform preview ready. The orange line shows playback progress.";
-    await nextTick();
-    if (!request.signal.aborted && current === generation && decodeContext === context) drawWaveform();
   } catch {
     if (!request.signal.aborted && current === generation && decodeContext === context)
       waveformStatus.value = "Waveform preview could not be decoded.";
@@ -142,7 +122,6 @@ async function play(): Promise<void> {
 function pause(): void {
   audio.value?.pause();
   playing.value = false;
-  drawWaveform();
 }
 function toggle(): void {
   if (playing.value) pause();
@@ -197,6 +176,7 @@ watch(
 );
 onBeforeUnmount(() => {
   generation += 1;
+  if (frame != null) cancelAnimationFrame(frame);
   controller?.abort();
   closeDecodeContext();
   stop();
@@ -214,31 +194,51 @@ defineExpose({ play, pause, toggle, replay, stop });
       preload="metadata"
       @ended="
         playing = false;
-        drawWaveform();
         emit('ended');
       "
-      @pause="
-        playing = false;
-        drawWaveform();
-      "
-      @play="
-        playing = true;
-        drawWaveform();
-      "
-      @timeupdate="drawWaveform"
-      @loadedmetadata="drawWaveform"
+      @pause="playing = false"
+      @play="playing = true"
     />
-    <canvas
-      ref="canvas"
-      class="studio-waveform"
+    <!-- The same waveform as the Trim page's editor, without the trim handles. Click to seek. -->
+    <svg
+      ref="waveform"
+      class="studio-capture-wave studio-play-wave"
       data-waveform
       :data-ready="waveformReady"
+      viewBox="0 0 640 80"
+      preserveAspectRatio="none"
       role="img"
       aria-label="Audio waveform with playback progress"
-      width="240"
-      height="44"
-    />
-    <p data-waveform-status class="studio-muted text-xs" aria-live="polite">{{ waveformStatus }}</p>
+      @pointerdown.prevent="seek"
+    >
+      <line
+        v-for="(peak, i) in peaks"
+        :key="i"
+        :x1="i * 4 + 2"
+        :x2="i * 4 + 2"
+        :y1="40 - peak"
+        :y2="40 + peak"
+        stroke="currentColor"
+        stroke-width="2"
+      />
+      <line
+        v-if="duration"
+        :x1="(Math.min(cursor, duration) / duration) * 640"
+        :x2="(Math.min(cursor, duration) / duration) * 640"
+        y1="0"
+        y2="80"
+        stroke="var(--studio-warning, #ff9134)"
+        stroke-width="2"
+        pointer-events="none"
+      />
+    </svg>
+    <div v-if="duration" class="flex w-full justify-between studio-muted text-xs">
+      <span>0.00 s</span><span data-playhead>Cursor {{ cursor.toFixed(2) }} s</span>
+      <span>{{ duration.toFixed(2) }} s</span>
+    </div>
+    <p data-waveform-status :class="waveformReady ? 'sr-only' : 'studio-muted text-xs w-full'" aria-live="polite">
+      {{ waveformStatus }}
+    </p>
     <button
       type="button"
       class="studio-primary"
