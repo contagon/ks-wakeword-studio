@@ -276,15 +276,15 @@ describe("provenance-aware sample library", () => {
     expect(ui.get("[data-action=next-page]").attributes("disabled")).toBeDefined();
   });
 
-  it("filters by label, source, kind and date and resets to the first page", async () => {
+  it("filters by label, source, kind and date-time and resets to the first page", async () => {
     const ui = await open();
     await ui.get("[data-action=next-page]").trigger("click");
     await settle();
     await ui.get("select[name=label]").setValue("negative");
     await ui.get("select[name=source]").setValue("diagnostic");
     await ui.get("select[name=kind]").setValue("true");
-    await ui.get("input[name=after]").setValue("2026-02-01");
-    await ui.get("input[name=before]").setValue("2026-04-01");
+    await ui.get("input[name=after]").setValue("2026-02-01T08:15");
+    await ui.get("input[name=before]").setValue("2026-04-01T17:30");
     await settle();
     const q = lists().at(-1)!.url.searchParams;
     expect(Object.fromEntries(q)).toMatchObject({
@@ -294,8 +294,8 @@ describe("provenance-aware sample library", () => {
       offset: "0",
     });
     expect(q.has("search")).toBe(false);
-    expect(q.get("after")).toBe(new Date("2026-02-01T00:00:00").toISOString());
-    expect(q.get("before")).toBe(new Date("2026-04-01T23:59:59.999").toISOString());
+    expect(q.get("after")).toBe(new Date("2026-02-01T08:15:00").toISOString());
+    expect(q.get("before")).toBe(new Date("2026-04-01T17:30:59.999").toISOString());
     expect(ui.findAll("[data-row-id]").map((r) => r.attributes("data-row-id"))).toEqual(["s1"]);
   });
 

@@ -46,8 +46,8 @@ let audioRequest: AbortController | undefined;
 let audioUrl: string | undefined;
 let generation = 0;
 let refreshPending = false;
-/** Date inputs mean the viewer's local day, matching how timestamps are displayed. */
-const localDayBound = (day: string, time: string) => new Date(day + time).toISOString();
+/** Filters are local minutes ("YYYY-MM-DDTHH:mm"), matching how timestamps are displayed; both ends inclusive. */
+const localBound = (minute: string, seconds: string) => new Date(minute + seconds).toISOString();
 const query = computed<SampleQuery>(() => ({
   offset: offset.value,
   limit: Math.min(100, limit.value),
@@ -62,8 +62,8 @@ const query = computed<SampleQuery>(() => ({
       ? { source: filters.value.source }
       : {}),
   ...(filters.value.kind ? { near_miss: filters.value.kind === "true" } : {}),
-  ...(filters.value.after ? { after: localDayBound(filters.value.after, "T00:00:00") } : {}),
-  ...(filters.value.before ? { before: localDayBound(filters.value.before, "T23:59:59.999") } : {}),
+  ...(filters.value.after ? { after: localBound(filters.value.after, ":00") } : {}),
+  ...(filters.value.before ? { before: localBound(filters.value.before, ":59.999") } : {}),
   sort: sort.value.key,
   order: sort.value.desc ? "desc" : "asc",
 }));
@@ -337,7 +337,7 @@ onBeforeUnmount(() => {
               <input
                 name="after"
                 v-model="filters.after"
-                type="date"
+                type="datetime-local"
                 aria-label="On or after"
                 title="On or after"
                 @input="filterChanged"
@@ -345,7 +345,7 @@ onBeforeUnmount(() => {
               <input
                 name="before"
                 v-model="filters.before"
-                type="date"
+                type="datetime-local"
                 aria-label="On or before"
                 title="On or before"
                 @input="filterChanged"
