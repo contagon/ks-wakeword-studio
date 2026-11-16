@@ -122,9 +122,10 @@ describe("compact studio workspace", () => {
       "Downloaded",
       "Artificial",
       "Manual",
+      "Samples",
+      "Collect",
       "Classify",
       "Trim",
-      "Samples",
       "Train",
       "Deploy",
       "Automate",
@@ -146,8 +147,33 @@ describe("compact studio workspace", () => {
       expect(ui.find("[data-legacy-trainer]").exists()).toBe(false);
       expect(ui.find("[data-studio-placeholder]").exists()).toBe(false);
     }
-    expect(ui.get("nav").findAll("a")).toHaveLength(12);
+    expect(ui.get("nav").findAll("a")).toHaveLength(13);
     expect(ui.find("[data-legacy-trainer]").exists()).toBe(false);
+  });
+  it("nests sample workflows while keeping Samples linked to the table", async () => {
+    const ui = await open();
+    const workflows = ui.get('nav ul[aria-label="Samples"]');
+    expect(workflows.findAll("a").map((link) => link.text())).toEqual(["Collect", "Classify", "Trim"]);
+    await ui.get('[data-page="samples"]').trigger("click");
+    await flushPromises();
+    expect(ui.get("h1").text()).toBe("Samples");
+    expect(ui.find("main table").exists()).toBe(true);
+    await workflows.get('[data-page="collect"]').trigger("click");
+    await flushPromises();
+    expect(ui.get("h1").text()).toBe("Collect");
+    expect(ui.get('[data-page="collect"]').attributes("aria-current")).toBe("page");
+    expect(ui.text()).toContain("Collection history · Fleet-wide");
+    expect(ui.text()).toContain("Unmapped recordings · Fleet-wide");
+    expect(ui.find('[role="tablist"]').exists()).toBe(false);
+    expect(ui.find("[data-classify-current]").exists()).toBe(false);
+    await workflows.get('[data-page="classify"]').trigger("click");
+    await flushPromises();
+    expect(ui.get("h1").text()).toBe("Classify");
+    expect(ui.find('[data-action="collect-now"]').exists()).toBe(false);
+    expect(ui.text()).not.toContain("Unmapped recordings · Fleet-wide");
+    await workflows.get('[data-page="trim"]').trigger("click");
+    await flushPromises();
+    expect(ui.get("h1").text()).toBe("Trim");
   });
   it("preserves selection across navigation, reload, and direct links", async () => {
     let ui = await open();

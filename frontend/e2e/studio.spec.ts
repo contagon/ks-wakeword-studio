@@ -15,6 +15,46 @@ test.afterEach(async ({ page }) => {
   expect(browserErrors.get(page)).toEqual([]);
 });
 
+test("Samples keeps its table with nested Collect, Classify and Trim workflows", async ({ page, request }) => {
+  const word = await createWord(request, "sample_navigation");
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(`/#/samples?word=${word.id}`);
+    await expect(page.getByRole("heading", { name: "Samples", exact: true })).toBeVisible();
+    await expect(page.locator("main table")).toBeVisible();
+    if (width === 390) await page.getByRole("button", { name: "Menu", exact: true }).click();
+    const workflows = page.locator('nav ul[aria-label="Samples"]');
+    await expect(workflows.getByRole("link")).toHaveText(["Collect", "Classify", "Trim"]);
+    const samples = await page.locator('nav [data-page="samples"]').boundingBox();
+    const collect = await workflows.getByRole("link", { name: "Collect", exact: true }).boundingBox();
+    expect(collect!.x).toBeGreaterThan(samples!.x);
+    await workflows.getByRole("link", { name: "Collect", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Collect", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Collection history · Fleet-wide", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Unmapped recordings · Fleet-wide", exact: true })).toBeVisible();
+    await expect(page.locator("#studio-word")).toHaveValue(word.id);
+    await expect(page.locator('[role="tablist"]')).toHaveCount(0);
+    for (const name of ["Classify", "Trim"]) {
+      if (width === 390) await page.getByRole("button", { name: "Menu", exact: true }).click();
+      await workflows.getByRole("link", { name, exact: true }).click();
+      await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+      await expect(page.locator("#studio-word")).toHaveValue(word.id);
+    }
+    await page.goBack();
+    await expect(page.getByRole("heading", { name: "Classify", exact: true })).toBeVisible();
+    await page.goBack();
+    await expect(page.getByRole("heading", { name: "Collect", exact: true })).toBeVisible();
+    await page.goBack();
+    await expect(page.getByRole("heading", { name: "Samples", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+  for (const link of ["scrape", "classify?tab=collect", "classify?tab=unmapped"]) {
+    await page.goto(`/#/${link}${link.includes("?") ? "&" : "?"}word=${word.id}`);
+    await expect(page.getByRole("heading", { name: "Collect", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Unmapped recordings · Fleet-wide", exact: true })).toBeVisible();
+  }
+});
+
 test("Downloaded preserves old links and saves per-wakeword augmentation selections", async ({ page, request }) => {
   const a = await createWord(request, "browser_online_datasets");
   await page.goto(`/#/negative-datasets?word=${a.id}`);
@@ -458,7 +498,7 @@ test("workspace Automate controls scoped collection and explicitly opted-in publ
   await page.locator('[name="classification-enabled"]').check();
   await page.getByRole("button", { name: "Save automation settings", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Automation settings saved");
-  await page.locator('[data-page="classify"]').click();
+  await page.locator('[data-page="collect"]').click();
   await page.locator('[data-action="collect-now"]').click();
   await expect(page.getByRole("dialog", { name: "Global job queue" })).toHaveCount(0);
   expect((await (await request.post("/__test/drain-collection")).json()).ran).toBe(true);
@@ -666,7 +706,7 @@ test("failure badges are red and busy buttons have a spinner in both themes", as
     await expect(badge).toHaveCSS("color", theme === "light" ? "rgb(159, 28, 38)" : "rgb(255, 181, 188)");
     await expect(badge).toHaveCSS("background-color", theme === "light" ? "rgb(253, 226, 229)" : "rgb(87, 31, 43)");
     // A collection job uses the real queue API, with workers deliberately idle in this harness.
-    await page.goto(`/#/classify?word=${word.id}`);
+    await page.goto(`/#/collect?word=${word.id}`);
     const collect = page.locator('[data-action="collect-now"]');
     if (theme === "light") await collect.click();
     await expect(collect).toBeDisabled();

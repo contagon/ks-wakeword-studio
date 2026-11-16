@@ -162,7 +162,7 @@ beforeEach(() => {
   );
 });
 
-describe("Classify collection", () => {
+describe("Collect", () => {
   it("retains fleet outcomes, queues a workspace collection and maps sources explicitly", async () => {
     const ui = mount(host());
     await flushPromises();
@@ -175,7 +175,6 @@ describe("Classify collection", () => {
     await flushPromises();
     await vi.waitFor(() => expect(ui.find("[data-collection-outcome]").exists()).toBe(true), { timeout: 3500 });
     expect(ui.get("[data-collection-outcome]").text()).toContain("Collection finished");
-    await ui.get("#classify-tab-unmapped").trigger("click");
     await ui.get('select[name="mapping-word"]').setValue("a");
     await ui.get('[data-action="save-mapping"]').trigger("click");
     await flushPromises();

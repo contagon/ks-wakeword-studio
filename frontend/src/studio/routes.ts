@@ -6,16 +6,16 @@ export const pages = [
   { id: "online-datasets", name: "Downloaded", group: "Data" },
   { id: "artificial", name: "Artificial", group: "Data" },
   { id: "manual", name: "Manual", group: "Data" },
-  { id: "classify", name: "Classify", group: "Data" },
-  { id: "trim", name: "Trim", group: "Data" },
   { id: "samples", name: "Samples", group: "Data" },
+  { id: "collect", name: "Collect", group: "Data", parent: "samples" },
+  { id: "classify", name: "Classify", group: "Data", parent: "samples" },
+  { id: "trim", name: "Trim", group: "Data", parent: "samples" },
   { id: "train", name: "Train", group: "Models" },
   { id: "deploy", name: "Deploy", group: "Models" },
   { id: "automate", name: "Automate", group: "Models" },
   { id: "testing", name: "Testing", group: "Models" },
 ] as const;
 export type PageId = (typeof pages)[number]["id"];
-export type ClassifyTab = "review" | "collect" | "unmapped";
 const selectionKey = "studio.selectedWordId";
 function storedSelection(): string {
   try {
@@ -27,26 +27,23 @@ function storedSelection(): string {
 export function useStudioRoutes() {
   const page = ref<PageId>("wakewords");
   const selectedId = ref("");
-  const classifyTab = ref<ClassifyTab>("review");
   function read() {
     const [path, search = ""] = location.hash.replace(/^#\/?/, "").split("?");
+    const params = new URLSearchParams(search);
     page.value =
-      path === "scrape"
-        ? "classify"
+      path === "scrape" || (path === "classify" && ["collect", "unmapped"].includes(params.get("tab") ?? ""))
+        ? "collect"
         : path === "negative-datasets"
           ? "online-datasets"
           : path === "record"
             ? "manual"
             : (pages.find((p) => p.id === path)?.id ?? "wakewords");
-    selectedId.value = new URLSearchParams(search).get("word") ?? storedSelection();
-    const tab = path === "scrape" ? "collect" : new URLSearchParams(search).get("tab");
-    classifyTab.value = tab === "collect" || tab === "unmapped" ? tab : "review";
+    selectedId.value = params.get("word") ?? storedSelection();
   }
   read();
-  function href(id: PageId, tab: ClassifyTab = classifyTab.value) {
+  function href(id: PageId) {
     const params = new URLSearchParams();
     if (selectedId.value) params.set("word", selectedId.value);
-    if (id === "classify" && tab !== "review") params.set("tab", tab);
     return `#/${id}${params.size ? "?" + params : ""}`;
   }
   function persist() {
@@ -63,10 +60,6 @@ export function useStudioRoutes() {
     page.value = id;
     if (location.hash !== href(id)) history.pushState(null, "", href(id));
   }
-  function selectClassifyTab(tab: ClassifyTab) {
-    classifyTab.value = tab;
-    navigate("classify");
-  }
   window.addEventListener("hashchange", read);
   window.addEventListener("popstate", read);
   onScopeDispose(() => {
@@ -74,6 +67,6 @@ export function useStudioRoutes() {
     window.removeEventListener("hashchange", read);
     window.removeEventListener("popstate", read);
   });
-  return { page, selectedId, classifyTab, selectClassifyTab, href, navigate };
+  return { page, selectedId, href, navigate };
 }
 export type StudioRoutes = ReturnType<typeof useStudioRoutes>;

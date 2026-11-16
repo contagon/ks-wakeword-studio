@@ -165,18 +165,19 @@ browser request inspection can see a submitted password.
    Existing saved tokens continue to work without re-entering passwords. Treat
    these tokens like passwords: changing the kiosk's admin password does **not**
    revoke tokens already issued. Failed logins require entering the password again.
-3. In **Classify → Unmapped**, configure exact device/engine/source-phrase mappings
-   to workspaces. **Collect** at the top right immediately queues collection for
-   the selected workspace, even when automatic collection is disabled. Recordings
+3. In **Samples → Collect**, use the Unmapped inbox to configure exact
+   device/engine/source-phrase mappings to workspaces. **Collect** at the top right
+   immediately queues collection for the selected workspace, even when automatic
+   collection is disabled. Recordings
    mapped to other workspaces are skipped before download; unknown sources may
-   enter the shared Unmapped inbox but are never implicitly assigned. The Collect
-   tab shows fleet-wide collection history. Collect twice safely: source tombstones
+   enter the shared Unmapped inbox but are never implicitly assigned. The same page
+   shows fleet-wide collection history. Collect twice safely: source tombstones
    deduplicate recordings, including discarded/deleted clips. Collection never
    clears kiosk diagnostics. Kiosk history is rolling and finite; scrape often
    enough for the device's configured retention. Missed/evicted audio cannot be
    recovered, and Studio does not invent an exact count of previously lost clips.
-4. **Classify** with P/N (positive/negative), Space (play/pause), R (replay), S
-   (skip this session), Z (undo), and D (confirm discard). Shortcuts pause while
+4. In **Samples → Classify**, use P/N (positive/negative), Space (play/pause),
+   R (replay), S (skip this session), Z (undo), and D (confirm discard). Shortcuts pause while
    editing fields/buttons. Acknowledged labels, not mere playback, control training.
 5. Select installed negative datasets and completed artificial batches per word;
    save training settings and run manually or configure schedules in **Automate**,
@@ -452,8 +453,10 @@ Deployment API:
 - **Wakewords**: separate phrases, stable identities and summaries.
 - **Negative Datasets / Artificial**: searchable paginated catalog, actual per-word
   selection, saved TTS recipes, immutable completed batches, queued job/log status.
-- **Scrape / Classify / Samples**: shared registry, global collection cron, keyboard
-  review, provenance, revision-safe labels, non-destructive trimming and audio import.
+- **Samples**: sample table, with nested **Collect**, **Classify**, and **Trim** pages.
+  Collect includes fleet-wide collection history and the shared Unmapped inbox;
+  Classify provides keyboard review and revision-safe labels; Trim reviews audio
+  non-destructively. Samples retains provenance and audio import.
 - **Train / Deploy**: effective inputs, one shared GPU queue, per-word cron, retained
   run manifests/checksums/logs, downloadable archives, and publish/rollback.
 

@@ -21,6 +21,7 @@ const PAGES: Record<PageId, Component> = {
   "online-datasets": NegativeDatasetsPage,
   artificial: ArtificialPage,
   manual: RecordPage,
+  collect: ClassifyPage,
   classify: ClassifyPage,
   trim: TrimPage,
   samples: SamplesPage,
@@ -44,6 +45,8 @@ const narrow = ref(false);
 const toggle = ref<HTMLButtonElement>();
 const content = ref<HTMLElement>();
 const current = computed(() => pages.find((page) => page.id === routes.page.value)!);
+const navigationPages = pages.filter((page) => !("parent" in page));
+const samplePages = pages.filter((page) => "parent" in page && page.parent === "samples");
 const navigationHidden = computed(() => narrow.value && !navigationOpen.value);
 const narrowQuery = typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 650px)") : null;
 function updateNarrow() {
@@ -98,9 +101,11 @@ onBeforeUnmount(() => {
           </button>
         </div>
         <nav id="studio-navigation" aria-label="Main navigation" :hidden="navigationHidden">
-          <template v-for="(page, index) in pages" :key="page.id">
+          <template v-for="(page, index) in navigationPages" :key="page.id">
             <div
-              v-if="(page.group === 'Data' || page.group === 'Models') && pages[index - 1]?.group !== page.group"
+              v-if="
+                (page.group === 'Data' || page.group === 'Models') && navigationPages[index - 1]?.group !== page.group
+              "
               class="studio-nav-label"
             >
               {{ page.group }}
@@ -116,13 +121,28 @@ onBeforeUnmount(() => {
               @click.prevent="navigate(page.id)"
               >{{ page.name }}</a
             >
+            <ul v-if="page.id === 'samples'" class="studio-sample-nav" aria-label="Samples">
+              <li v-for="child in samplePages" :key="child.id">
+                <a
+                  :href="routes.href(child.id)"
+                  :data-page="child.id"
+                  class="studio-sub"
+                  :class="{ active: current.id === child.id }"
+                  :aria-current="current.id === child.id ? 'page' : undefined"
+                  @click.prevent="navigate(child.id)"
+                  >{{ child.name }}</a
+                >
+              </li>
+            </ul>
           </template>
         </nav>
         <p class="studio-sidebar-note">Independent workspaces.<br />Device selections stay unchanged.</p>
       </aside>
       <div class="studio-main">
         <header class="studio-header flex flex-wrap items-center justify-between gap-3">
-          <div class="studio-muted text-xs">{{ current.group }} / {{ current.name }}</div>
+          <div class="studio-muted text-xs">
+            {{ current.group }} / <template v-if="'parent' in current">Samples / </template>{{ current.name }}
+          </div>
           <div class="flex flex-wrap items-center gap-3">
             <label class="flex items-center gap-3 text-xs" for="studio-word"
               ><span class="studio-header-label">WAKEWORD</span>

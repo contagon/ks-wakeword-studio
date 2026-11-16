@@ -2,17 +2,23 @@ import { expect, it } from "vitest";
 import { mount } from "@vue/test-utils";
 import { useStudioRoutes } from "../routes";
 
-it("aliases old scrape links to the Collect tab without losing workspace identity", () => {
-  history.replaceState(null, "", "#/scrape?word=opaque-a");
-  let state!: ReturnType<typeof useStudioRoutes>;
-  const ui = mount({
-    setup() {
-      state = useStudioRoutes();
-    },
-    template: "<div />",
-  });
-  expect(state.page.value).toBe("classify");
-  expect(state.href("classify")).toContain("word=opaque-a");
-  expect(state.href("classify")).toContain("tab=collect");
-  ui.unmount();
-});
+it.each(["#/collect", "#/scrape", "#/classify?tab=collect", "#/classify?tab=unmapped"])(
+  "opens %s as Collect without losing workspace identity",
+  (link) => {
+    history.replaceState(null, "", `${link}${link.includes("?") ? "&" : "?"}word=opaque-a`);
+    let state!: ReturnType<typeof useStudioRoutes>;
+    const ui = mount({
+      setup() {
+        state = useStudioRoutes();
+      },
+      template: "<div />",
+    });
+    expect(state.page.value).toBe("collect");
+    expect(state.href(state.page.value)).toBe("#/collect?word=opaque-a");
+    state.navigate("classify");
+    expect(location.hash).toBe("#/classify?word=opaque-a");
+    state.selectedId.value = "opaque-b";
+    expect(location.hash).toBe("#/classify?word=opaque-b");
+    ui.unmount();
+  },
+);

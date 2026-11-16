@@ -45,6 +45,8 @@ async function contentOf(src: string | undefined) {
 }
 const playerSrc = (ui: VueWrapper) => ui.find("audio[data-audio-player]").attributes("src");
 async function completedCollection(ui: VueWrapper, result: object) {
+  await ui.get('[data-page="collect"]').trigger("click");
+  await settle();
   const job = {
     id: "collect-test",
     kind: "scrape",
@@ -96,6 +98,8 @@ describe("keyboard-first classification", () => {
       },
     ];
     await completedCollection(ui, { run_id: "name-refresh", status: "complete", new: 0, failed: 0 });
+    await ui.get('[data-page="classify"]').trigger("click");
+    await settle();
     expect(ui.get("[data-classify-current]").text()).toContain("Kitchen satellite");
   });
   it("tracks manual collection without adding a local queue button and refreshes on completion", async () => {
@@ -104,12 +108,16 @@ describe("keyboard-first classification", () => {
     await completedCollection(ui, { run_id: "new-run", status: "complete", new: 1, new_mapped: 1, failed: 0 });
     expect(ui.findAll("button").some((button) => /^View collection .* in queue$/.test(button.text()))).toBe(false);
     expect(ui.get("[data-collection-outcome]").text()).toContain("1 imported");
+    await ui.get('[data-page="classify"]').trigger("click");
+    await settle();
     expect(ui.get("[data-progress]").text()).toContain("4 pending");
     expect(ui.find('[data-action="open-job-queue"]').exists()).toBe(true);
   });
 
   it("does not enqueue a second manual collection while the tracked job is active", async () => {
     const ui = await open();
+    await ui.get('[data-page="collect"]').trigger("click");
+    await settle();
     const job = {
       id: "collect-active",
       kind: "scrape",
@@ -193,19 +201,38 @@ describe("keyboard-first classification", () => {
     expect(outcome.text()).toContain("Collection needs attention");
     expect(outcome.text()).toContain("0 imported");
     expect(outcome.text()).toContain("2 failed");
-    expect(outcome.get("a").attributes("href")).toContain("tab=collect");
+    expect(outcome.get("a").attributes("href")).toBe("#/collect?word=a");
   });
   it("refreshes newly collected unknown sources without leaving Unmapped", async () => {
     const ui = await open();
-    await ui.get("#classify-tab-unmapped").trigger("click");
+    await ui.get('[data-page="collect"]').trigger("click");
     expect(ui.text()).toContain("No unmapped recordings.");
     server.db.unmapped.push(recording("new-source", { phrase: "New unknown phrase" }));
     await completedCollection(ui, { run_id: "new-run", status: "complete", new: 1, new_mapped: 0, failed: 0 });
-    expect(ui.get("#classify-panel-unmapped").text()).toContain("New unknown phrase");
+    expect(ui.get("[data-unmapped-id=new-source]").text()).toContain("New unknown phrase");
     server.db.unmapped.push(recording("another-source", { phrase: "Another unknown phrase" }));
     await ui.get('[data-action="refresh-unmapped"]').trigger("click");
     await settle();
-    expect(ui.get("#classify-panel-unmapped").text()).toContain("Another unknown phrase");
+    expect(ui.get("[data-unmapped-id=another-source]").text()).toContain("Another unknown phrase");
+  });
+  it("stops review playback and suppresses label shortcuts on Collect", async () => {
+    const ui = await open();
+    press(" ");
+    await settle();
+    const src = playerSrc(ui)!;
+    await ui.get('[data-page="collect"]').trigger("click");
+    await settle();
+    expect(media.pauses).toContain(src);
+    expect(media.revoked).toContain(src);
+    expect(ui.find("audio[data-audio-player]").exists()).toBe(false);
+    for (const key of ["p", "n", "s", "z", "d", " "]) press(key);
+    await settle();
+    expect(labels()).toHaveLength(0);
+    expect(ui.find("[data-dialog=discard]").exists()).toBe(false);
+    await ui.get('[data-page="classify"]').trigger("click");
+    await settle();
+    expect(current(ui)).toBe("s1");
+    expect(media.plays).toHaveLength(1);
   });
   it("ignores an old label conflict after switching workspaces", async () => {
     const ui = await open();
@@ -585,6 +612,8 @@ describe("keyboard-first classification", () => {
   it("keeps unmapped recordings accessible and assigns them only explicitly to the active word", async () => {
     server.db.unmapped.push(recording("r9", { phrase: "hey seeder" }));
     const ui = await open();
+    await ui.get('[data-page="collect"]').trigger("click");
+    await settle();
     const row = ui.get("[data-unmapped-id=r9]");
     expect(row.text()).toContain("hey seeder");
     expect(server.mutations()).toHaveLength(0);
@@ -594,12 +623,17 @@ describe("keyboard-first classification", () => {
       ["/api/studio/recordings/r9/assign", { word_id: "a" }],
     ]);
     expect(ui.find("[data-unmapped-id=r9]").exists()).toBe(false);
+    expect(ui.text()).toContain("Recording assigned to this workspace");
+    await ui.get('[data-page="classify"]').trigger("click");
+    await settle();
     expect(ui.get("[data-progress]").text()).toContain("4 pending");
   });
 
   it("does not add an assignment from the previous workspace after switching workspaces", async () => {
     server.db.unmapped.push(recording("r-late", { phrase: "assigned only to A" }));
     const ui = await open();
+    await ui.get('[data-page="collect"]').trigger("click");
+    await settle();
     const assignment = server.hold(
       (r) => r.method === "POST" && r.url.pathname === "/api/studio/recordings/r-late/assign",
     );
@@ -607,6 +641,8 @@ describe("keyboard-first classification", () => {
     await settle();
     expect(assignment.request()?.body).toEqual({ word_id: "a" });
     await ui.get("#studio-word").setValue("b");
+    await settle();
+    await ui.get('[data-page="classify"]').trigger("click");
     await settle();
     expect(current(wrapper!)).toBe("b1");
     assignment.release();

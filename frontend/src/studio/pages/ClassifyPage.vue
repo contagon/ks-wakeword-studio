@@ -13,7 +13,7 @@ const undoStack = (word: string) => {
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import PageHeader from "../components/PageHeader.vue";
 import { absoluteTime } from "../time";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { StudioApiError, studioApi } from "../api";
 import { shortcutTarget } from "../shortcuts";
 import AudioPlayer from "../components/AudioPlayer.vue";
@@ -30,7 +30,7 @@ onMounted(() => {
   void registry.load();
 });
 const jobs = useJobQueue();
-const { classifyTab: tab } = workspace.routes;
+const isCollect = computed(() => workspace.routes.page.value === "collect");
 const collectionJob = ref<Job | null>(null),
   collecting = ref(false),
   collectionError = ref("");
@@ -47,7 +47,7 @@ const collectionWarning = computed(() =>
       (collectionOutcome.value.evicted ?? 0) > 0),
   ),
 );
-const collectionHistoryHref = computed(() => workspace.routes.href("classify", "collect"));
+const collectionHistoryHref = computed(() => workspace.routes.href("collect"));
 let collectionRequest: AbortController | undefined;
 async function collectNow() {
   if (!workspace.selectedId.value || collectionBusy.value) return;
@@ -384,18 +384,8 @@ async function assign(recording: Recording): Promise<void> {
     }
   }
 }
-const TABS = ["review", "collect", "unmapped"] as const;
-/** Left/Right move between tabs, as for any tablist. */
-function tabKey(event: KeyboardEvent): void {
-  const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-  if (!step) return;
-  event.preventDefault();
-  const next = TABS[(TABS.indexOf(tab.value) + step + TABS.length) % TABS.length]!;
-  workspace.routes.selectClassifyTab(next);
-  void nextTick(() => document.getElementById(`classify-tab-${next}`)?.focus());
-}
 function shortcut(event: KeyboardEvent): void {
-  if (jobs.open.value || tab.value !== "review") return;
+  if (jobs.open.value || isCollect.value) return;
   const { typing, onControl } = shortcutTarget(event);
   if (event.repeat || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || typing) return;
   const key = event.key.toLowerCase();
@@ -444,8 +434,10 @@ watch(
   { flush: "sync" },
 );
 onMounted(() => document.addEventListener("keydown", shortcut));
-watch(tab, () => {
+watch(isCollect, () => {
   player.value?.stop();
+  autoplayNext.value = false;
+  discardOpen.value = false;
 });
 onBeforeUnmount(() => {
   document.removeEventListener("keydown", shortcut);
@@ -460,10 +452,16 @@ onBeforeUnmount(() => {
 
 <template>
   <section>
-    <PageHeader title="Classify" description="Collect recordings, resolve source mappings, and review labels.">
-      <span data-progress class="studio-muted"
+    <PageHeader
+      :title="isCollect ? 'Collect' : 'Classify'"
+      :description="
+        isCollect ? 'Collect recordings and resolve unmapped sources.' : 'Review and label pending recordings.'
+      "
+    >
+      <span v-if="!isCollect" data-progress class="studio-muted"
         >{{ total }} pending · {{ reviewed }} reviewed · {{ skipped.size }} skipped</span
       ><button
+        v-if="isCollect"
         data-action="collect-now"
         class="studio-primary"
         :aria-busy="collectionBusy"
@@ -473,24 +471,9 @@ onBeforeUnmount(() => {
         {{ collecting ? "Starting…" : collectionBusy ? "Collecting…" : "Collect" }}
       </button>
     </PageHeader>
-    <div class="studio-tabs" role="tablist" aria-label="Classification sections" @keydown="tabKey">
-      <button
-        v-for="entry in TABS"
-        :id="`classify-tab-${entry}`"
-        :key="entry"
-        role="tab"
-        :aria-selected="tab === entry"
-        :aria-controls="tab === entry ? `classify-panel-${entry}` : undefined"
-        :tabindex="tab === entry ? 0 : -1"
-        :class="{ active: tab === entry }"
-        @click="workspace.routes.selectClassifyTab(entry)"
-      >
-        {{ entry === "review" ? "Review" : entry === "collect" ? "Collect" : "Unmapped" }}
-      </button>
-    </div>
-    <p v-if="collectionError" class="studio-note" role="alert">{{ collectionError }}</p>
+    <p v-if="isCollect && collectionError" class="studio-note" role="alert">{{ collectionError }}</p>
     <p
-      v-if="collectionOutcome"
+      v-if="isCollect && collectionOutcome"
       data-collection-outcome
       class="studio-note"
       :class="{ 'studio-note-warning': collectionWarning }"
@@ -500,11 +483,11 @@ onBeforeUnmount(() => {
       {{ collectionOutcome.status }} · {{ collectionOutcome.new ?? 0 }} imported ·
       {{ collectionOutcome.failed ?? 0 }} failed · {{ collectionOutcome.unmapped ?? 0 }} unmapped ·
       {{ collectionOutcome.evicted ?? 0 }} evicted.
-      <a :href="collectionHistoryHref" @click.prevent="workspace.routes.selectClassifyTab('collect')"
-        >View collection run →</a
-      >
+      <a :href="collectionHistoryHref" @click.prevent="workspace.routes.navigate('collect')">View collection run →</a>
     </p>
-    <div v-show="tab === 'review'" id="classify-panel-review" role="tabpanel" aria-labelledby="classify-tab-review">
+    <p v-if="notice" class="studio-note" role="status" aria-live="polite">{{ notice }}</p>
+    <p v-if="error" data-classify-error class="studio-note" role="alert" aria-live="assertive">{{ error }}</p>
+    <div v-if="!isCollect">
       <div class="studio-card studio-toolbar mb-4">
         <label
           >Recording type<select name="kind" v-model="kind">
@@ -514,8 +497,6 @@ onBeforeUnmount(() => {
           </select></label
         >
       </div>
-      <p v-if="notice" class="studio-note" role="status" aria-live="polite">{{ notice }}</p>
-      <p v-if="error" data-classify-error class="studio-note" role="alert" aria-live="assertive">{{ error }}</p>
       <div v-if="loading" class="studio-card" aria-busy="true">Loading review queue…</div>
       <div v-else-if="active" data-classify-current :data-sample-id="active.id" class="studio-card grid gap-4">
         <div class="flex flex-wrap justify-between gap-3">
@@ -567,8 +548,8 @@ onBeforeUnmount(() => {
         ><button v-if="total > 0" type="button" @click="refill">Retry pending window</button>
       </div>
     </div>
-    <div v-if="tab === 'collect'" id="classify-panel-collect" role="tabpanel" aria-labelledby="classify-tab-collect">
-      <div class="studio-card mb-4">
+    <div v-if="isCollect" class="grid gap-4">
+      <div class="studio-card">
         <h2>Collect recordings</h2>
         <p class="studio-muted">
           Use Collect above to fetch recordings for the selected workspace now, even when its schedule is off. Unknown
@@ -579,13 +560,6 @@ onBeforeUnmount(() => {
         >
       </div>
       <CollectionHistory :refresh-key="collectionJob?.status" :active-run-id="collectionOutcome?.run_id" />
-    </div>
-    <div
-      v-show="tab === 'unmapped'"
-      id="classify-panel-unmapped"
-      role="tabpanel"
-      aria-labelledby="classify-tab-unmapped"
-    >
       <p v-if="inboxError" class="studio-note" role="alert">{{ inboxError }}</p>
       <SourceInbox
         :recordings="unmapped"
