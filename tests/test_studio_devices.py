@@ -89,14 +89,24 @@ class DeviceTests(unittest.TestCase):
     def test_removal_keeps_history_rejects_stale_credentials_and_allows_rediscovery(self):
         leader = self.service.add(self.server.url, TOKEN, 'leader')
         followers = self.service.refresh_fleet(leader.id)
+        ref = self.service.credentials.put(TOKEN)
         with self.store.transaction() as db:
+            db.execute("UPDATE devices SET credential_ref=? WHERE id=?", (ref, followers[0].id))
             db.execute("INSERT INTO collection_runs VALUES ('run','now',NULL,'running')")
             db.execute("INSERT INTO collection_devices VALUES ('run',?,'complete','{}')", (followers[0].id,))
         self.service.remove(followers[0].id)
+        self.assertFalse((self.service.credentials.path / ref).exists())
+        with self.store.transaction() as db:
+            self.assertIsNone(db.execute("SELECT credential_ref FROM devices WHERE id=?", (followers[0].id,)).fetchone()[0])
         with self.assertRaises(NotFound):
             self.service.get(followers[0].id)
         self.service.refresh_fleet(leader.id)
         self.assertTrue(self.service.get(followers[0].id).active)
+        self.assertEqual(self.service.get(followers[0].id).credentials_status, 'credentials_required')
+        before = len(self.server.requests)
+        with self.assertRaises(CredentialsRequired):
+            self.service.client.diagnostics(followers[0])
+        self.assertEqual(len(self.server.requests), before)
         before = len(self.server.requests)
         self.service.remove(leader.id)
         self.assertEqual(self.service.list(), [])
@@ -111,6 +121,118 @@ class DeviceTests(unittest.TestCase):
         self.server.identity['data']['id'] = 'new-leader'
         self.server.fleet['data']['self']['id'] = 'new-leader'
         self.assertEqual(self.service.add(self.server.url, TOKEN, 'leader').id, 'new-leader')
+
+    def test_leader_removal_forgets_follower_tokens_but_keeps_other_kiosks(self):
+        leader = self.service.add(self.server.url, TOKEN, 'leader')
+        followers = self.service.refresh_fleet(leader.id)
+        self.server.identity['data'].update(id='standalone', leader=False)
+        standalone = self.service.add(self.server.url, TOKEN, 'standalone')
+        with self.store.transaction() as db:
+            for follower in followers:
+                ref = self.service.credentials.put(TOKEN)
+                db.execute("UPDATE devices SET credential_ref=? WHERE id=?", (ref, follower.id))
+            db.execute("UPDATE devices SET active=0 WHERE id=?", (followers[1].id,))
+            removed_refs = [row[0] for row in db.execute(
+                "SELECT credential_ref FROM devices WHERE id=? OR leader_id=?", (leader.id, leader.id))]
+            retained_ref = db.execute("SELECT credential_ref FROM devices WHERE id=?", (standalone.id,)).fetchone()[0]
+        self.service.remove(leader.id)
+        self.assertEqual([device.id for device in self.service.list()], [standalone.id])
+        self.assertTrue(all(not (self.service.credentials.path / ref).exists() for ref in removed_refs))
+        self.assertEqual(self.service.credentials.get(retained_ref), TOKEN)
+        with self.store.transaction() as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM devices WHERE removed=1 AND credential_ref IS NOT NULL").fetchone()[0], 0)
+        self.server.identity['data'].update(id=leader.id, leader=True)
+        self.service.add(self.server.url, TOKEN, 'leader')
+        self.assertTrue(all(device.credentials_status == 'credentials_required'
+                            for device in self.service.refresh_fleet(leader.id)))
+
+    def test_removal_tolerates_an_already_missing_token_file(self):
+        device = self.service.add(self.server.url, TOKEN, 'leader')
+        path = next(self.service.credentials.path.iterdir())
+        path.unlink()
+        self.service.remove(device.id)
+        self.assertEqual(self.service.list(), [])
+        with self.store.transaction() as db:
+            self.assertIsNone(db.execute("SELECT credential_ref FROM devices WHERE id=?", (device.id,)).fetchone()[0])
+
+    def test_removal_rejects_credential_path_traversal(self):
+        device = self.service.add(self.server.url, TOKEN, 'leader')
+        outside = self.store.root / 'keep'
+        outside.write_text('keep')
+        with self.store.transaction() as db:
+            db.execute("UPDATE devices SET credential_ref='../keep' WHERE id=?", (device.id,))
+        with self.assertRaises(ValidationError):
+            self.service.remove(device.id)
+        self.assertEqual(outside.read_text(), 'keep')
+        self.assertTrue(self.service.get(device.id).active)
+
+    def test_removal_unlinks_token_symlink_without_touching_its_target(self):
+        device = self.service.add(self.server.url, TOKEN, 'leader')
+        path = next(self.service.credentials.path.iterdir())
+        path.unlink()
+        outside = self.store.root / 'keep'
+        outside.write_text('keep')
+        path.symlink_to(outside)
+        self.service.remove(device.id)
+        self.assertFalse(path.is_symlink())
+        self.assertEqual(outside.read_text(), 'keep')
+
+    def test_token_removal_failure_is_reported_without_removing_the_device(self):
+        device = self.service.add(self.server.url, TOKEN, 'leader')
+        path = next(self.service.credentials.path.iterdir())
+        with patch('studio.devices.os.unlink', side_effect=PermissionError('private filesystem path')):
+            with self.assertRaisesRegex(ValidationError, '^Saved kiosk credentials could not be removed$'):
+                self.service.remove(device.id)
+        self.assertTrue(self.service.get(device.id).active)
+        self.assertTrue(path.exists())
+
+    def test_pending_authentication_cannot_restore_credentials_after_removal(self):
+        from studio.kiosk import KioskClient
+        device = self.service.add(self.server.url, TOKEN, 'leader')
+        identity = KioskClient.identity
+        def remove_after_verification(client, probe):
+            result = identity(client, probe)
+            self.service.remove(device.id)
+            return result
+        with patch('studio.devices.KioskClient.identity', autospec=True, side_effect=remove_after_verification):
+            with self.assertRaises(NotFound):
+                self.service.set_credentials(device.id, TOKEN)
+        self.assertEqual(list(self.service.credentials.path.iterdir()), [])
+        with self.store.transaction() as db:
+            self.assertIsNone(db.execute("SELECT credential_ref FROM devices WHERE id=?", (device.id,)).fetchone()[0])
+
+    def test_partial_token_removal_failure_forgets_successfully_deleted_tokens(self):
+        import os
+        leader = self.service.add(self.server.url, TOKEN, 'leader')
+        follower = self.service.refresh_fleet(leader.id)[0]
+        ref = self.service.credentials.put(TOKEN)
+        with self.store.transaction() as db:
+            db.execute("UPDATE devices SET credential_ref=? WHERE id=?", (ref, follower.id))
+        unlink = os.unlink
+        deleted = []
+        def fail_second_unlink(name, **kwargs):
+            if deleted:
+                raise PermissionError('private filesystem path')
+            unlink(name, **kwargs)
+            deleted.append(name)
+        with patch('studio.devices.os.unlink', side_effect=fail_second_unlink):
+            with self.assertRaises(ValidationError):
+                self.service.remove(leader.id)
+        self.assertEqual(len(deleted), 1)
+        self.assertEqual(self.service.get(leader.id).credentials_status, 'credentials_required')
+        self.assertTrue(self.service.get(leader.id).active)
+        self.assertEqual(self.service.get(follower.id).credentials_status, 'ready')
+        self.assertEqual(self.service.credentials.get(ref), TOKEN)
+
+    def test_token_sync_failure_does_not_leave_a_dangling_reference(self):
+        device = self.service.add(self.server.url, TOKEN, 'leader')
+        with patch('studio.devices.os.fsync', side_effect=OSError('private filesystem path')):
+            with self.assertRaisesRegex(ValidationError, '^Saved kiosk credentials could not be removed$'):
+                self.service.remove(device.id)
+        self.assertTrue(self.service.get(device.id).active)
+        self.assertEqual(self.service.get(device.id).credentials_status, 'credentials_required')
+        self.assertEqual(list(self.service.credentials.path.iterdir()), [])
 
     def test_address_and_removal_routes_are_strict_and_sanitized(self):
         device = self.service.add(self.server.url, TOKEN, 'leader')

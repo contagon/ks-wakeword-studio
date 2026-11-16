@@ -165,6 +165,10 @@ browser request inspection can see a submitted password.
    Existing saved tokens continue to work without re-entering passwords. Treat
    these tokens like passwords: changing the kiosk's admin password does **not**
    revoke tokens already issued. Failed logins require entering the password again.
+   Deleting a kiosk from Studio deletes its saved token; deleting a leader also
+   deletes its followers' saved tokens. Recordings and history are kept. A
+   rediscovered follower needs authentication again. This forgets Studio's saved
+   credentials but does not revoke tokens on the kiosks.
 3. In **Samples → Collect**, use the Unmapped inbox to configure exact
    device/engine/source-phrase mappings to workspaces. **Collect** at the top right
    immediately queues collection for the selected workspace, even when automatic

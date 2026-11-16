@@ -104,9 +104,10 @@ class DeploymentTests(unittest.TestCase):
         self.runtime.devices.client = self.client
         with self.runtime.devices.store.transaction() as db:
             for id, role, leader, eligible, credential in [
-                ('leader', 'leader', None, 1, 'fixture'), ('solo', 'standalone', None, 1, 'fixture'),
-                ('follow', 'follower', 'leader', 1, 'fixture'), ('excluded', 'follower', 'leader', 0, 'fixture'),
+                ('leader', 'leader', None, 1, True), ('solo', 'standalone', None, 1, True),
+                ('follow', 'follower', 'leader', 1, True), ('excluded', 'follower', 'leader', 0, True),
                 ('locked', 'follower', 'leader', 1, None)]:
+                credential = self.runtime.devices.credentials.put('fixture-admin') if credential else None
                 db.execute('INSERT INTO devices(id,url,role,leader_id,model_eligible,credential_ref) VALUES (?,?,?,?,?,?)',
                            (id, 'http://fixture.invalid', role, leader, eligible, credential))
         self.service = self.runtime.deployment
@@ -462,7 +463,8 @@ class DeploymentTests(unittest.TestCase):
         self.client.files['excluded'] = dict(self.client.files['leader'])
         with self.runtime.devices.store.transaction() as db:
             db.execute("UPDATE devices SET model_eligible=1 WHERE id='excluded'")
-            db.execute("INSERT INTO devices(id,url,role,credential_ref) VALUES ('new','http://fixture.invalid','standalone','fixture')")
+            db.execute("INSERT INTO devices(id,url,role,credential_ref) VALUES ('new','http://fixture.invalid','standalone',?)",
+                       (self.runtime.devices.credentials.put('fixture-admin'),))
         self.client.roles['new'] = (False, None)
         self.service.retry_due(self.now + timedelta(days=1))
         self.assertEqual(self.status()['new'].state, 'published')

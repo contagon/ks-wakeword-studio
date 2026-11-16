@@ -626,6 +626,13 @@ test("kiosk addresses survive refresh and the global queue follows jobs across w
   await page.locator("[data-job-queue-backdrop]").click({ position: { x: 10, y: 100 } });
   await expect(drawer).toHaveCount(0);
   await page.goto(`/#/kiosks?word=${b.id}`);
+  expect(
+    (
+      await request.post(`/api/studio/devices/${follower.id}/credentials`, { data: { password: fixtures.password } })
+    ).ok(),
+  ).toBeTruthy();
+  await page.getByRole("button", { name: "Refresh registry", exact: true }).click();
+  await expect(row).toContainText("Credentials ready");
   await row.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByRole("alertdialog")).toContainText("rediscovered");
   await page.getByRole("button", { name: "Keep kiosk", exact: true }).click();
@@ -642,6 +649,11 @@ test("kiosk addresses survive refresh and the global queue follows jobs across w
   await page.getByRole("button", { name: "Remove from Studio", exact: true }).click();
   release();
   await expect(row).toHaveCount(0);
+  await page.getByRole("button", { name: "Refresh followers", exact: true }).click();
+  await expect(row).toContainText("Credentials required");
+  await row.getByLabel("Follower admin password").fill(fixtures.password);
+  await row.getByRole("button", { name: "Authenticate", exact: true }).click();
+  await expect(row).toContainText("Credentials ready");
 });
 
 test("wakeword selectors fill their grid columns on desktop and mobile", async ({ page, request }) => {

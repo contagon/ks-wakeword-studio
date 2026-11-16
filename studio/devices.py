@@ -54,6 +54,21 @@ class CredentialStore:
         except (OSError, ValueError, UnicodeError, ValidationError):
             raise CredentialsRequired("Kiosk admin credentials required") from None
 
+    def remove(self, ref: str | None) -> None:
+        if ref is None:
+            return
+        if not re.fullmatch(r"[a-f0-9]{32}", ref):
+            raise ValidationError("Invalid credential reference")
+        try:
+            with open_directory(self.path) as directory:
+                os.fchmod(directory, 0o700)
+                try:
+                    os.unlink(ref, dir_fd=directory)
+                except FileNotFoundError:
+                    pass
+        except OSError:
+            raise ValidationError("Saved kiosk credentials could not be removed") from None
+
 
 class DeviceService:
     def __init__(self, store: Store, client: KioskClient | None = None):
@@ -106,15 +121,34 @@ class DeviceService:
 
     def remove(self, device_id: str) -> None:
         device = self.get(device_id)
-        with self.store.transaction() as db:
-            affected = db.execute('SELECT p.* FROM publications p JOIN devices d ON d.id=p.device_id '
-                                  "WHERE d.id=? OR (d.leader_id=? AND d.role='follower')",
-                                  (device_id, device_id if device.role == 'leader' else None)).fetchall()
-            db.execute("UPDATE devices SET removed=1, active=0 WHERE id=?", (device_id,))
-            if device.role == 'leader':
-                db.execute("UPDATE devices SET removed=1, active=0 WHERE leader_id=? AND role='follower'", (device_id,))
-            for row in affected:
-                publication_finished_in(db, Publication(**dict(row)))
+        deleted_refs = []
+        try:
+            with self.store.transaction() as db:
+                scope = (device_id, device_id if device.role == 'leader' else None)
+                credentials = db.execute("SELECT credential_ref FROM devices "
+                                         "WHERE id=? OR (leader_id=? AND role='follower')", scope).fetchall()
+                affected = db.execute('SELECT p.* FROM publications p JOIN devices d ON d.id=p.device_id '
+                                      "WHERE d.id=? OR (d.leader_id=? AND d.role='follower')",
+                                      scope).fetchall()
+                db.execute("UPDATE devices SET removed=1, active=0, credential_ref=NULL "
+                           "WHERE id=? OR (leader_id=? AND role='follower')", scope)
+                for row in affected:
+                    publication_finished_in(db, Publication(**dict(row)))
+                for row in credentials:
+                    if row[0] is not None:
+                        self.credentials.remove(row[0])
+                        deleted_refs.append((row[0],))
+                if deleted_refs:
+                    with open_directory(self.credentials.path) as directory:
+                        os.fsync(directory)
+        except Exception as exc:
+            # Unlinked files survive a database rollback; forget their references too.
+            if deleted_refs:
+                with self.store.transaction() as db:
+                    db.executemany("UPDATE devices SET credential_ref=NULL WHERE credential_ref=?", deleted_refs)
+            if isinstance(exc, OSError):
+                raise ValidationError("Saved kiosk credentials could not be removed") from None
+            raise
 
     def add_with_password(self, url: str, password: str, role: Literal["standalone", "leader"]) -> Device:
         url = normalize_url(url)
@@ -165,9 +199,12 @@ class DeviceService:
         # this identity call uses the temporary probe and newly supplied token;
         # never persist/return it or grant scrape/upload access to the record.
         identity = KioskClient(lambda _: token).identity(replace(device, active=True))
-        ref = self.credentials.put(token)
         role = "follower" if device.role == "follower" or identity.follows else device.role
         with self.store.transaction() as db:
+            # Authentication may finish after deletion; never restore a removed kiosk's token.
+            if db.execute("SELECT id FROM devices WHERE id=? AND removed=0", (device_id,)).fetchone() is None:
+                raise NotFound("Device not found")
+            ref = self.credentials.put(token)
             db.execute("UPDATE devices SET credential_ref=?, role=?,name=COALESCE(?,name) WHERE id=?", (ref, role, identity.name, device_id))
         return self.get(device_id)
 

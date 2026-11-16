@@ -45,7 +45,7 @@ async function remove(): Promise<void> {
   try {
     await registry.remove(deleting.value.id);
     closeDelete();
-    notice.value = "Kiosk removed from Studio. Saved recordings and models are kept.";
+    notice.value = "Kiosk and saved credentials removed from Studio. Saved recordings and models are kept.";
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Kiosk was not removed.";
   } finally {
@@ -243,7 +243,12 @@ onBeforeUnmount(() => registry.abort());
       @cancel="closeDelete"
     >
       <p v-if="deleting?.role === 'leader'">This also removes its discovered followers from the Studio registry.</p>
-      <p v-else-if="deleting?.role === 'follower'">This follower can be rediscovered on the next fleet refresh.</p>
+      <p v-else-if="deleting?.role === 'follower'">
+        This follower can be rediscovered on the next fleet refresh and will need authentication again.
+      </p>
+      <p>
+        Saved credentials for the removed kiosks are deleted from Studio. This does not revoke tokens on the kiosks.
+      </p>
       <p>Saved recordings and models are kept. This does not change the kiosk itself.</p>
       <p v-if="error" role="alert" class="studio-note">{{ error }}</p>
     </ConfirmDialog>
