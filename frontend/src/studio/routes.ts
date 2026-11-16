@@ -7,6 +7,7 @@ export const pages = [
   { id: "artificial", name: "Artificial", group: "Data" },
   { id: "manual", name: "Manual", group: "Data" },
   { id: "classify", name: "Classify", group: "Data" },
+  { id: "trim", name: "Trim", group: "Data" },
   { id: "samples", name: "Samples", group: "Data" },
   { id: "train", name: "Train", group: "Models" },
   { id: "deploy", name: "Deploy", group: "Models" },

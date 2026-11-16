@@ -31,7 +31,8 @@ LABELLED_BY = ("CASE WHEN s.label='pending' THEN NULL ELSE COALESCE((SELECT h.ac
 # Legacy Whisper-only crops must be revalidated; undo must not silently readmit unsafe audio.
 TRIM_STATUS = ("CASE WHEN s.source='diagnostic' AND s.label='positive' THEN COALESCE((SELECT h.actor "
                "FROM sample_history h WHERE h.sample_id=s.id AND h.action='trim' AND h.undone=0 "
-               f"AND h.new_audio_id=s.audio_id AND a.end_s-a.start_s<={MAX_PREPARED_SECONDS} "
+               "AND h.new_audio_id=s.audio_id "
+               f"AND CAST(a.end_s*16000 AS INTEGER)-CAST(a.start_s*16000 AS INTEGER)<={int(MAX_PREPARED_SECONDS * 16000)} "
                "AND (h.actor='manual' OR EXISTS (SELECT 1 FROM audio_trim_validation v "
                f"WHERE v.audio_id=a.id AND v.policy={TRIM_POLICY_VERSION})) "
                "ORDER BY h.revision DESC LIMIT 1),'needs_review') END")
@@ -367,15 +368,17 @@ class SampleService:
 
     def _trim(self, db: sqlite3.Connection, row: sqlite3.Row, start_s: float, end_s: float,
               *, actor: str = 'manual', source=None) -> Sample:
-        if row['source'] == 'diagnostic' and row['label'] == 'positive' and end_s - start_s > MAX_PREPARED_SECONDS:
-            raise ValidationError('Positive trim must fit within 2.9 seconds including padding')
         source_hash = source['normalized_hash'] if source is not None else row['normalized_hash']
         parent_id = source['id'] if source is not None else row['audio_id']
         with wave.open(io.BytesIO(self.blobs.read(source_hash)), "rb") as audio:
             if end_s > audio.getnframes() / 16000 or int(end_s * 16000) <= int(start_s * 16000):
                 raise ValidationError("Invalid trim interval")
-            audio.setpos(int(start_s * 16000))
-            pcm = audio.readframes(int(end_s * 16000) - int(start_s * 16000))
+            start_frame, end_frame = int(start_s * 16000), int(end_s * 16000)
+            if (row['source'] == 'diagnostic' and row['label'] == 'positive'
+                    and end_frame - start_frame > int(MAX_PREPARED_SECONDS * 16000)):
+                raise ValidationError('Positive trim must fit within 2.9 seconds including padding')
+            audio.setpos(start_frame)
+            pcm = audio.readframes(end_frame - start_frame)
         output = io.BytesIO()
         with wave.open(output, "wb") as target:
             target.setparams((1, 2, 16000, 0, "NONE", "not compressed"))

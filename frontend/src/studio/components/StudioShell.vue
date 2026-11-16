@@ -4,6 +4,7 @@ import { pages, useStudioRoutes, type PageId } from "../routes";
 import { createWorkspace, workspaceKey } from "../workspace";
 import WakewordsPage from "../pages/WakewordsPage.vue";
 import ClassifyPage from "../pages/ClassifyPage.vue";
+import TrimPage from "../pages/TrimPage.vue";
 import SamplesPage from "../pages/SamplesPage.vue";
 import RecordPage from "../pages/RecordPage.vue";
 import KiosksPage from "../pages/KiosksPage.vue";
@@ -21,6 +22,7 @@ const PAGES: Record<PageId, Component> = {
   artificial: ArtificialPage,
   manual: RecordPage,
   classify: ClassifyPage,
+  trim: TrimPage,
   samples: SamplesPage,
   train: TrainPage,
   deploy: DeployPage,

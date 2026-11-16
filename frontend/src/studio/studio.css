@@ -43,6 +43,24 @@
   gap: 12px;
   margin-bottom: 12px;
 }
+.studio-trim-wave {
+  height: 160px;
+  touch-action: none;
+  cursor: crosshair;
+}
+.studio-trim-handle {
+  fill: var(--studio-text);
+  fill-opacity: 0.55;
+  cursor: ew-resize;
+}
+.studio-trim-handle:focus,
+.studio-trim-handle:hover {
+  fill: var(--studio-selected);
+  fill-opacity: 1;
+  stroke: var(--studio-text);
+  stroke-width: 2;
+  outline: none;
+}
 
 .studio-layout {
   display: contents;

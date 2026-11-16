@@ -123,6 +123,7 @@ describe("compact studio workspace", () => {
       "Artificial",
       "Manual",
       "Classify",
+      "Trim",
       "Samples",
       "Train",
       "Deploy",
@@ -145,7 +146,7 @@ describe("compact studio workspace", () => {
       expect(ui.find("[data-legacy-trainer]").exists()).toBe(false);
       expect(ui.find("[data-studio-placeholder]").exists()).toBe(false);
     }
-    expect(ui.get("nav").findAll("a")).toHaveLength(11);
+    expect(ui.get("nav").findAll("a")).toHaveLength(12);
     expect(ui.find("[data-legacy-trainer]").exists()).toBe(false);
   });
   it("preserves selection across navigation, reload, and direct links", async () => {

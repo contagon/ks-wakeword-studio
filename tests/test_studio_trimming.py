@@ -7,7 +7,7 @@ import wave
 
 import pytest
 
-from studio.models import DiagnosticClip, SampleQuery
+from studio.models import DiagnosticClip, SampleQuery, ValidationError
 from studio.runtime import StudioRuntime
 from studio_harness import api_client, augmentation_fixture, wav
 
@@ -399,3 +399,29 @@ def test_full_length_editor_can_expand_an_automatic_crop_without_undo(fixture):
     assert edited.trim_status == 'manual'
     assert seconds(runtime, edited) == pytest.approx(1.4, abs=1 / 16000)
     assert runtime.samples.undo(sample.id, edited.revision).audio_id == current.audio_id
+
+
+def test_manual_trim_at_exact_duration_limit_uses_retained_pcm_frames(fixture):
+    runtime, word, _ = fixture
+    recording = runtime.samples.ingest('fixture',
+        DiagnosticClip('limit', phrase=word.phrase, engine='mww'),
+        io.BytesIO(wav(seconds=5)), word.id)
+    sample = next(s for s in runtime.samples.list(word.id, SampleQuery()).items
+                  if s.recording_id == recording.id)
+    positive = runtime.samples.set_label(sample.id, 'positive', sample.revision)
+    trimmed = runtime.samples.trim(sample.id, .3, 3.2, positive.revision, from_original=True)
+    assert trimmed.trim_status == 'manual'
+    assert runtime.samples.list(word.id, SampleQuery(trim_status='needs_review')).total == 0
+    assert runtime.training.counts(word.id)['positive'] == 1
+    with wave.open(io.BytesIO(runtime.blobs.read(trimmed.normalized_hash)), 'rb') as audio:
+        assert audio.getnframes() == 46400
+    with pytest.raises(ValidationError, match='2.9 seconds'):
+        runtime.samples.trim(sample.id, .3, 3.2000625, trimmed.revision, from_original=True)
+
+
+def test_manual_trim_rejects_finite_but_unbounded_times(fixture):
+    runtime, word, _ = fixture
+    sample = scraped(runtime, word)
+    positive = runtime.samples.set_label(sample.id, 'positive', sample.revision)
+    with pytest.raises(ValidationError):
+        runtime.samples.trim(sample.id, 0, 1e308, positive.revision, from_original=True)
