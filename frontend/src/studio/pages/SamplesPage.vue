@@ -34,7 +34,6 @@ const filters = ref({
   before: "",
   trimStatus: "",
 });
-const backfilling = ref(false);
 const trimTarget = ref<Sample | null>(null);
 const audio = ref<HTMLAudioElement>();
 const playingId = ref<string | null>(null);
@@ -204,20 +203,6 @@ async function undo(item: Sample): Promise<void> {
     status.value = "Last change undone. The original audio is retained.";
   }
 }
-async function autoTrim(): Promise<void> {
-  const word = workspace.selectedId.value;
-  if (!word || backfilling.value || jobs.busy("classify", word)) return;
-  backfilling.value = true;
-  try {
-    const job = await save((signal) => studioApi.trimPositives(word, signal));
-    if (job) {
-      jobs.track(job);
-      if (workspace.selectedId.value === word) status.value = "Automatic trimming queued. Follow it in the job queue.";
-    }
-  } finally {
-    backfilling.value = false;
-  }
-}
 jobs.onFinished(
   (job) => job.kind === "classify" && job.word_id === workspace.selectedId.value,
   () => {
@@ -270,18 +255,9 @@ onBeforeUnmount(() => {
     <p v-if="status" data-samples-status class="studio-note" role="status" aria-live="polite">{{ status }}</p>
     <p v-if="error" data-samples-error class="studio-note" role="alert" aria-live="assertive">{{ error }}</p>
     <div class="mb-4 flex flex-wrap items-center gap-3">
-      <button
-        type="button"
-        data-action="auto-trim"
-        :disabled="!workspace.selectedId.value || backfilling || jobs.busy('classify', workspace.selectedId.value)"
-        @click="autoTrim"
-      >
-        Re-trim all scraped positives
-      </button>
       <button type="button" :disabled="loading" @click="load">Refresh samples</button>
       <p class="studio-note">
-        Scraped positives needing trim review are excluded from training. Synthetic data is unchanged. Re-trimming
-        starts from originals, including previous automatic crops. Manual trims are protected.
+        Scraped positives needing trim review are excluded from training. Synthetic data is unchanged.
       </p>
     </div>
     <div class="studio-card mb-4">

@@ -193,8 +193,7 @@ export const studioApi = {
       signal,
     ),
   trimAudioUrl: (word: string, id: string) => `${base}${samplePath(word, id)}/audio${query({ full: true })}`,
-  trimPositives: (word: string, signal?: AbortSignal) =>
-    post<Job>(`${wordPath(word)}/samples/trim/jobs`, undefined, signal),
+  trimNow: (word: string, signal?: AbortSignal) => post<Job>(`${wordPath(word)}/trimming/jobs`, undefined, signal),
   audioUrl: (word: string, id: string, original = false) =>
     `${base}${samplePath(word, id)}/audio${query({ original })}`,
   devices: (signal?: AbortSignal) => get<Device[]>("/devices", undefined, signal),

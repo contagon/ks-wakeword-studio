@@ -140,6 +140,10 @@ test("real kiosk collection, keyboard labels, focus suppression and workspace is
   };
   expect((await collect()).new).toBe(2);
   expect((await collect()).new).toBe(0);
+  await page.goto(`/#/automate?word=${a.id}`);
+  await page.getByLabel("Trim after classify", { exact: true }).check();
+  await page.getByRole("button", { name: "Save automation settings", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Automation settings saved");
   await page.goto(`/#/classify?word=${a.id}`);
   await expect(page.locator("[data-progress]")).toContainText("2 pending");
   const current = page.locator("[data-classify-current]");
@@ -193,12 +197,16 @@ test("real kiosk collection, keyboard labels, focus suppression and workspace is
   await page.locator('[name="trim-status"]').selectOption("needs_review");
   const positive = page.locator(`[data-row-id="${pending.id}"]`);
   await expect(positive).toContainText("Needs trim review");
-  const backfill = page.waitForResponse(
-    (r) => r.url().endsWith("/samples/trim/jobs") && r.request().method() === "POST",
-  );
-  await page.locator('[data-action="auto-trim"]').click();
-  expect((await backfill).ok()).toBeTruthy();
+  await expect(page.locator('[data-action="auto-trim"]')).toHaveCount(0);
+  await page.goto(`/#/automate?word=${a.id}`);
+  const trimming = page.waitForResponse((r) => r.url().endsWith("/trimming/jobs") && r.request().method() === "POST");
+  await page.locator('[data-action="trim-now"]').click();
+  const trimJob = await (await trimming).json();
   expect((await (await request.post("/__test/drain-gpu")).json()).ran).toBe(true);
+  const attempted = await (await request.get(`/api/studio/jobs/${trimJob.id}`)).json();
+  expect(attempted.result).toEqual({ trimmed: 0, needs_review: 0, conflicts: 0 });
+  await page.goto(`/#/samples?word=${a.id}`);
+  await page.locator('[name="trim-status"]').selectOption("needs_review");
   await positive.locator('[data-action="trim"]').click();
   const trim = page.getByRole("dialog", { name: "Trim audio", exact: true });
   await expect(trim.locator('[data-action="save-trim"]')).toBeEnabled();
@@ -495,6 +503,11 @@ test("workspace Automate controls scoped collection and explicitly opted-in publ
     });
   expect((await request.post("/__test/new-clips")).ok()).toBeTruthy();
   await page.goto(`/#/automate?word=${a.id}`);
+  for (const rule of ["confirm_activations", "auto_negatives", "promote_close_misses", "near_miss_negatives"])
+    await expect(page.locator(`[name="${rule}"]`)).toBeChecked();
+  await page.locator('[name="trimming-enabled"]').check();
+  await expect(page.locator('[name="trimming-trigger"]')).toHaveCount(0);
+  await expect(page.locator('[name="trimming-cron"]')).toHaveCount(0);
   await page.locator('[name="classification-enabled"]').check();
   await page.getByRole("button", { name: "Save automation settings", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Automation settings saved");
@@ -504,6 +517,8 @@ test("workspace Automate controls scoped collection and explicitly opted-in publ
   expect((await (await request.post("/__test/drain-collection")).json()).ran).toBe(true);
   expect((await (await request.post("/__test/drain-gpu")).json()).ran).toBe(true);
   const automation = await (await request.get(`/api/studio/wakewords/${a.id}/automation`)).json();
+  expect(automation.settings.trimming).toEqual({ enabled: true });
+  expect(automation.schedules.some((s: { scope: string }) => s.scope === `trim:${a.id}`)).toBe(false);
   expect(automation.last_jobs.classify.status).toBe("complete");
   const samples = await (await request.get(`/api/studio/wakewords/${a.id}/samples`)).json();
   expect(samples.items.every((sample: { label: string }) => sample.label === "negative")).toBe(true);
@@ -531,6 +546,8 @@ test("workspace Automate controls scoped collection and explicitly opted-in publ
   await train();
   expect(await (await request.get(`/api/studio/wakewords/${a.id}/deployment/status`)).json()).toEqual([]);
   await page.goto(`/#/automate?word=${a.id}`);
+  await expect(page.locator('[name="trimming-enabled"]')).toBeChecked();
+  await expect(page.locator('[name="trimming-cron"]')).toHaveCount(0);
   await page.locator('[name="after-training"]').check();
   await page.getByRole("button", { name: "Save automation settings", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Automation settings saved");
@@ -539,6 +556,7 @@ test("workspace Automate controls scoped collection and explicitly opted-in publ
   expect(delivery.some((item: { state: string }) => item.state === "published")).toBe(true);
   await page.locator("#studio-word").selectOption(b.id);
   await expect(page.locator('[name="after-training"]')).not.toBeChecked();
+  await expect(page.locator('[name="trimming-enabled"]')).not.toBeChecked();
 });
 
 test("notification preferences isolate wakewords and share a secret global destination", async ({ page, request }) => {

@@ -34,6 +34,7 @@ export interface AutomationSettings {
   collection: ScheduleInput;
   classification: ClassificationPolicy;
   classification_schedule: ScheduleInput;
+  trimming: { enabled: boolean };
   training: ScheduleInput;
   skip_unchanged: boolean;
   deployment: ScheduleInput;
@@ -42,7 +43,7 @@ export interface AutomationSettings {
 export interface AutomationStatus {
   settings: AutomationSettings;
   schedules: Schedule[];
-  last_jobs: Partial<Record<"scrape" | "classify" | "train" | "deploy", Job | null>>;
+  last_jobs: Partial<Record<"scrape" | "classify" | "trim" | "train" | "deploy", Job | null>>;
 }
 export interface NotificationSettings {
   configured: boolean;
@@ -119,7 +120,7 @@ export type Job =
   | JobRecord<
       "classify",
       "gpu",
-      { manual?: boolean; trim_only?: boolean; force?: boolean; sample_id?: string; revision?: number },
+      { manual?: boolean; automatic?: boolean; trim_only?: boolean; sample_id?: string; revision?: number },
       Record<string, number | string | boolean>
     >
   | JobRecord<"deploy", "collection", Record<string, never>, Record<string, string | boolean>>;

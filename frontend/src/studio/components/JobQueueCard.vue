@@ -24,6 +24,11 @@ const names: Record<string, string> = {
   classify: "Classify recordings",
   deploy: "Deploy model",
 };
+const name = computed(() =>
+  props.job.kind === "classify" && props.job.payload.trim_only
+    ? "Trim recordings"
+    : (names[props.job.kind] ?? props.job.kind),
+);
 const scope = computed(() =>
   props.job.word_id
     ? (workspace.wakewords.value.find((word) => word.id === props.job.word_id)?.phrase ?? props.job.word_id)
@@ -83,13 +88,13 @@ onBeforeUnmount(stop);
     :data-job-id="job.id"
   >
     <div class="studio-job-heading">
-      <h3>{{ names[job.kind] ?? job.kind }}</h3>
+      <h3>{{ name }}</h3>
       <span class="studio-status" :class="statusClass(job.status)">{{ job.status }}</span
       ><button
         v-if="isActiveJob(job)"
         type="button"
         data-action="cancel-job"
-        :aria-label="`Cancel ${names[job.kind] ?? job.kind}`"
+        :aria-label="`Cancel ${name}`"
         :disabled="job.status === 'cancelling' || queue.cancelling.value.has(job.id)"
         @click="queue.cancel(job.id)"
       >

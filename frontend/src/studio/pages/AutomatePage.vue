@@ -22,6 +22,7 @@ let request: AbortController | undefined;
 let mutation: AbortController | undefined;
 let generation = 0;
 const classifying = ref(false);
+const trimming = ref(false);
 // Runs use the saved rules, so unsaved rule edits must be saved first.
 const classificationUnsaved = computed(
   () => JSON.stringify(settings.value?.classification) !== JSON.stringify(status.value?.settings.classification),
@@ -39,6 +40,22 @@ async function classifyNow() {
     if (wordId.value === id) error.value = cause instanceof Error ? cause.message : "Classification was not started.";
   } finally {
     classifying.value = false;
+  }
+}
+async function trimNow() {
+  const id = wordId.value,
+    token = generation;
+  if (!id || trimming.value || jobs.busy("classify", id)) return;
+  trimming.value = true;
+  error.value = "";
+  notice.value = "";
+  try {
+    jobs.track(await studioApi.trimNow(id));
+    if (generation === token) notice.value = "Trimming queued. Follow it in the job queue.";
+  } catch (cause) {
+    if (generation === token) error.value = cause instanceof Error ? cause.message : "Trimming was not started.";
+  } finally {
+    if (generation === token) trimming.value = false;
   }
 }
 const RULE_ROWS = [
@@ -66,14 +83,16 @@ const deploymentMode = computed(() =>
       ? "After training"
       : "Manual only",
 );
-function stageStatus(kind: "scrape" | "classify" | "train" | "deploy"): string {
+function stageStatus(kind: "scrape" | "classify" | "trim" | "train" | "deploy"): string {
   const schedule = status.value?.schedules.find((s) => s.scope === `${kind}:${wordId.value}`);
   const job = status.value?.last_jobs[kind];
   const skipped = job && "skipped" in job.result && job.result.skipped;
   const result = job
     ? `Last run: ${skipped ? "skipped" : job.status}${job.finished_at ? ` · ${absoluteTime(job.finished_at)}` : ""}`
     : "No runs yet";
-  return `${result} · ${schedule?.enabled ? `Next: ${absoluteTime(schedule.next_run_at)}` : "Not scheduled"}`;
+  return kind === "trim"
+    ? result
+    : `${result} · ${schedule?.enabled ? `Next: ${absoluteTime(schedule.next_run_at)}` : "Not scheduled"}`;
 }
 async function load() {
   request?.abort();
@@ -85,6 +104,7 @@ async function load() {
   settings.value = null;
   status.value = null;
   saving.value = false;
+  trimming.value = false;
   error.value = "";
   notice.value = "";
   loading.value = Boolean(id);
@@ -144,7 +164,7 @@ onBeforeUnmount(() => {
   <section>
     <PageHeader
       title="Automate"
-      description="Collection, classification, training, and deployment for the selected workspace."
+      description="Collection, classification, trimming, training, and deployment for the selected workspace."
     />
     <p v-if="!wordId" class="studio-card">Choose a wakeword to configure automation.</p>
     <p v-if="loading" role="status">Loading automation…</p>
@@ -244,6 +264,31 @@ onBeforeUnmount(() => {
           <span class="studio-muted text-xs">{{
             classificationUnsaved ? "Save your rule changes to run with them." : stageStatus("classify")
           }}</span>
+        </div>
+      </section>
+      <section class="studio-card">
+        <div class="studio-section-header mb-2">
+          <h2>Automatic trimming</h2>
+          <label class="studio-checkbox-label"
+            ><input v-model="settings.trimming.enabled" name="trimming-enabled" type="checkbox" />Trim after
+            classify</label
+          >
+        </div>
+        <p class="studio-muted">
+          Trim positive kiosk samples after manual or automatic classification, or run trimming now on samples not yet
+          attempted. Each sample gets one automatic attempt. Existing trims and original audio are preserved;
+          unsuccessful attempts stay in the Trim queue for manual review.
+        </p>
+        <div class="flex flex-wrap items-center gap-3 mt-3">
+          <button
+            type="button"
+            data-action="trim-now"
+            :disabled="trimming || jobs.busy('classify', wordId)"
+            @click="trimNow"
+          >
+            {{ trimming ? "Starting…" : "Run trimming now" }}
+          </button>
+          <span class="studio-muted text-xs">{{ stageStatus("trim") }}</span>
         </div>
       </section>
       <div class="grid gap-4 lg:grid-cols-2">

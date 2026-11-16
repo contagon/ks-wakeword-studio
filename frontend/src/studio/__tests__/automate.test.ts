@@ -16,13 +16,14 @@ const settings = () => ({
     near_miss_negatives: false,
   },
   classification_schedule: schedule(),
+  trimming: { enabled: false },
   training: schedule(),
   skip_unchanged: true,
   deployment: schedule(),
   deployment_policy: { after_training: false },
 });
 
-it("edits separate workspace collection, classification, training and deployment controls", async () => {
+it("edits separate workspace collection, classification, trimming, training and deployment controls", async () => {
   const pages = import.meta.glob("../pages/*.vue");
   expect(pages["../pages/AutomatePage.vue"], "Automate page is missing").toBeDefined();
   const Page = (await pages["../pages/AutomatePage.vue"]!()) as { default: object };
@@ -48,23 +49,99 @@ it("edits separate workspace collection, classification, training and deployment
     }),
   );
   await flushPromises();
-  for (const text of ["Automatic collection", "Automatic classification", "Automatic training", "Automatic deployment"])
+  for (const text of [
+    "Automatic collection",
+    "Automatic classification",
+    "Automatic trimming",
+    "Automatic training",
+    "Automatic deployment",
+  ])
     expect(ui.text()).toContain(text);
   expect(ui.text()).not.toContain("Wakewords to collect");
   await ui.get('[name="collection-enabled"]').setValue(true);
   await ui.get('[name="after-training"]').setValue(true);
   await ui.get('[name="near_miss_negatives"]').setValue(true);
+  expect(ui.find('[name="trimming-cron"]').exists()).toBe(false);
+  expect(ui.find('[name="trimming-trigger"]').exists()).toBe(false);
+  expect(ui.get<HTMLInputElement>('[name="trimming-enabled"]').element.labels?.[0]?.textContent).toMatch(
+    /Trim after\s+classify/,
+  );
+  await ui.get('[name="trimming-enabled"]').setValue(true);
   await ui.get("form").trigger("submit");
   await flushPromises();
   const saved = requests.find((r) => r.body)!.body as ReturnType<typeof settings>;
   expect(saved.collection.enabled).toBe(true);
   expect(saved.classification).toMatchObject({ near_miss_negatives: true, confirm_activations: false });
+  expect(saved.trimming).toEqual({ enabled: true });
+  expect(saved).not.toHaveProperty("trimming_schedule");
   expect(saved.training.enabled).toBe(false);
   expect(saved.deployment.enabled).toBe(false);
   expect(saved.deployment_policy.after_training).toBe(true);
   expect(
     requests.filter((r) => r.path.endsWith("/automation")).every((r) => r.path.includes("/wakewords/a/automation")),
   ).toBe(true);
+  ui.unmount();
+});
+
+it("runs trimming on demand while automation is disabled and prevents duplicate clicks", async () => {
+  const requests: { path: string; method?: string }[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string, init?: RequestInit) => {
+      requests.push({ path, method: init?.method });
+      if (path.endsWith("/trimming/jobs"))
+        return new Response(
+          JSON.stringify({
+            id: "t1",
+            kind: "classify",
+            word_id: "a",
+            status: "queued",
+            payload: { trim_only: true, manual: true },
+          }),
+          { status: 201 },
+        );
+      return new Response(JSON.stringify({ settings: settings(), schedules: [], last_jobs: {} }));
+    }),
+  );
+  history.replaceState(null, "", "#/automate?word=a");
+  const ui = mount(
+    workspaceHost(AutomatePage, (workspace) => {
+      workspace.selectedId.value = "a";
+    }),
+  );
+  await flushPromises();
+  const run = ui.get("[data-action=trim-now]");
+  expect(run.attributes("disabled")).toBeUndefined();
+  await run.trigger("click");
+  await flushPromises();
+  expect(requests.filter((r) => r.method === "POST").map((r) => r.path)).toEqual([
+    "/api/studio/wakewords/a/trimming/jobs",
+  ]);
+  expect(ui.text()).toContain("Trimming queued");
+  expect(run.attributes("disabled")).toBeDefined();
+  ui.unmount();
+});
+
+it("reports a trimming queue failure and allows retry", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string) =>
+      path.endsWith("/trimming/jobs")
+        ? new Response(JSON.stringify({ message: "Trimming unavailable" }), { status: 503 })
+        : new Response(JSON.stringify({ settings: settings(), schedules: [], last_jobs: {} })),
+    ),
+  );
+  history.replaceState(null, "", "#/automate?word=a");
+  const ui = mount(
+    workspaceHost(AutomatePage, (workspace) => {
+      workspace.selectedId.value = "a";
+    }),
+  );
+  await flushPromises();
+  await ui.get("[data-action=trim-now]").trigger("click");
+  await flushPromises();
+  expect(ui.get('[role="alert"]').text()).toContain("Kiosk unavailable.");
+  expect(ui.get("[data-action=trim-now]").attributes("disabled")).toBeUndefined();
   ui.unmount();
 });
 

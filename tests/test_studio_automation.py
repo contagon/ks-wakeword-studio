@@ -1,4 +1,5 @@
 from dataclasses import asdict, replace
+import json
 
 import pytest
 
@@ -22,7 +23,11 @@ def test_new_workspace_automation_defaults(tmp_path):
         assert settings_from_dict({**asdict(settings), 'classification': {**asdict(settings.classification),
                                                                          'engine': 'parakeet_onnx'}}) == settings
         assert settings.classification.auto_negatives is True
-        assert settings.classification.promote_close_misses is False
+        assert settings.classification.confirm_activations is True
+        assert settings.classification.promote_close_misses is True
+        assert settings.classification.near_miss_negatives is True
+        assert settings.trimming.enabled is False
+        assert asdict(settings.trimming) == {'enabled': False}
         assert not any(s.enabled for s in (settings.collection, settings.training, settings.deployment))
         assert not settings.classification.enabled
         assert not settings.deployment_policy.after_training
@@ -52,6 +57,77 @@ def test_settings_roundtrip_isolated_and_strict(tmp_path):
         runtime.shutdown()
         runtime = StudioRuntime(tmp_path)
         assert runtime.automation.get(a.id).settings == changed
+    finally:
+        runtime.shutdown()
+
+
+def test_older_settings_preserve_rules_and_default_trimming_off(tmp_path):
+    runtime = StudioRuntime(tmp_path)
+    try:
+        word = runtime.workspaces.create('Cedar', 'en')
+        saved = asdict(runtime.automation.get(word.id).settings)
+        saved.pop('trimming', None)
+        saved.pop('trimming_schedule', None)
+        saved['classification'].update(confirm_activations=False, promote_close_misses=False, near_miss_negatives=False)
+        with api_client(runtime) as api:
+            path = f'/api/studio/wakewords/{word.id}/automation'
+            assert api.put(path, json=saved).status_code == 200
+            loaded = api.get(path).json()['settings']
+            assert loaded['classification'] == saved['classification']
+            assert loaded['trimming'] == {'enabled': False}
+        assert settings_from_dict(saved).trimming.enabled is False
+    finally:
+        runtime.shutdown()
+
+
+def test_trimming_settings_roundtrip_and_validation(tmp_path):
+    runtime = StudioRuntime(tmp_path)
+    try:
+        a = runtime.workspaces.create('Cedar', 'en')
+        b = runtime.workspaces.create('Maple', 'en')
+        with api_client(runtime) as api:
+            path = f'/api/studio/wakewords/{a.id}/automation'
+            saved = api.get(path).json()['settings']
+            saved['trimming'] = {'enabled': True}
+            response = api.put(path, json=saved)
+            assert response.status_code == 200
+            assert response.json()['settings'] == saved
+            assert not any(s['scope'] == 'trim:' + a.id for s in response.json()['schedules'])
+            assert api.get(f'/api/studio/wakewords/{b.id}/automation').json()['settings']['trimming']['enabled'] is False
+            for invalid in ({'enabled': True, 'trigger': 'schedule'}, {'enabled': 1}):
+                assert api.put(path, json={**saved, 'trimming': invalid}).status_code == 422
+            assert api.get(path).json()['settings'] == saved
+        runtime.shutdown()
+        runtime = StudioRuntime(tmp_path)
+        assert runtime.automation.get(a.id).settings.trimming.enabled is True
+        assert 'trimming_schedule' not in asdict(runtime.automation.get(a.id).settings)
+    finally:
+        runtime.shutdown()
+
+
+def test_restart_retires_saved_trim_schedules_and_loads_legacy_settings(tmp_path):
+    from datetime import datetime, timedelta
+    runtime = StudioRuntime(tmp_path)
+    word = runtime.workspaces.create('Cedar', 'en')
+    saved = asdict(runtime.automation.get(word.id).settings)
+    saved['trimming'] = {'enabled': True, 'trigger': 'schedule'}
+    saved['trimming_schedule'] = {'enabled': True, 'cron': '* * * * *', 'timezone': 'UTC'}
+    due = runtime.clock().isoformat()
+    with runtime.jobs.store.transaction() as db:
+        db.execute('INSERT INTO workspace_automation(word_id,settings) VALUES (?,?)', (word.id, json.dumps(saved)))
+        db.execute('INSERT INTO studio_schedules VALUES (?,?,?,?,?)', ('trim:' + word.id, '* * * * *', 'UTC', 1, due))
+    job = runtime.jobs.enqueue('classify', word.id, {'trim_only': True, 'automatic': True})
+    with runtime.jobs.store.transaction() as db:
+        db.execute('UPDATE studio_jobs SET schedule_scope=? WHERE id=?', ('trim:' + word.id, job.id))
+    runtime.shutdown()
+    runtime = StudioRuntime(tmp_path)
+    try:
+        status = runtime.automation.get(word.id)
+        assert asdict(status.settings.trimming) == {'enabled': True}
+        assert 'trimming_schedule' not in asdict(status.settings)
+        assert not runtime.schedules.tick(datetime.fromisoformat(due) + timedelta(hours=1))
+        assert runtime.workers.run_once('gpu')
+        assert runtime.jobs.get(job.id).result == {'skipped': True, 'reason': 'disabled'}
     finally:
         runtime.shutdown()
 

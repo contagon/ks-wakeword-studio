@@ -42,7 +42,8 @@ class StudioWorkflowTests(unittest.TestCase):
         word = self.client.post("/api/studio/wakewords", json={"phrase": "Hello robot", "language": "en", "model_id": "hello_robot"}).json()
         from dataclasses import replace
         policy = self.runtime.automation.get(word['id']).settings
-        self.runtime.automation.save(word['id'], replace(policy, deployment_policy=replace(policy.deployment_policy, after_training=True)))
+        self.runtime.automation.save(word['id'], replace(policy, trimming=replace(policy.trimming, enabled=True),
+            deployment_policy=replace(policy.deployment_policy, after_training=True)))
         second = self.client.post("/api/studio/wakewords", json={"phrase": "Other robot", "language": "en", "model_id": "other_robot"}).json()
         leader = self.client.post("/api/studio/devices", json={"url": self.leader.url, "password": PASSWORD, "role": "leader"}).json()
         discovered = self.client.post(f"/api/studio/devices/{leader['id']}/refresh").json()

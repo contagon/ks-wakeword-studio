@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, Up
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from studio.models import (CollectionRun, Conflict, CredentialsRequired, Device, IdentityMismatch, SourceMapping,
                            RemoteRejected, RemoteUnavailable, NotFound, Page, Recording, Sample, SampleQuery,
@@ -125,10 +125,15 @@ class DeploymentPolicyBody(StrictBody):
     after_training: bool
 
 
+class TrimmingBody(StrictBody):
+    enabled: bool = False
+
+
 class AutomationBody(StrictBody):
     collection: ScheduleBody
     classification: ClassificationBody
     classification_schedule: ScheduleBody
+    trimming: TrimmingBody = Field(default_factory=TrimmingBody)
     training: ScheduleBody
     skip_unchanged: bool
     deployment: ScheduleBody
@@ -454,9 +459,9 @@ def create_router(runtime: StudioRuntime) -> APIRouter:
         require_audio_mime(audio)
         return runtime.samples.import_audio(word_id, label, audio.file)
 
-    @router.post('/wakewords/{word_id}/samples/trim/jobs', response_model=Job, status_code=201)
+    @router.post('/wakewords/{word_id}/trimming/jobs', response_model=Job, status_code=201)
     def trim_positives(word_id: str) -> Job:
-        return runtime.jobs.enqueue('classify', word_id, {'trim_only': True, 'force': True})
+        return runtime.jobs.enqueue('classify', word_id, {'trim_only': True, 'manual': True})
 
     @router.post('/wakewords/{word_id}/samples/capture/preview', response_model=CapturePreview)
     def preview_capture(word_id: str, audio: UploadFile = File(...)) -> CapturePreview:

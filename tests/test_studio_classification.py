@@ -5,6 +5,7 @@ import json
 from studio.models import DiagnosticClip, SampleQuery
 from studio.runtime import StudioRuntime
 from studio_harness import api_client, wav
+import pytest
 
 
 class SpeechRunner:
@@ -131,5 +132,60 @@ def test_manual_run_applies_saved_rules_while_automatic_runs_are_disabled(tmp_pa
             assert api.post(f'/api/studio/wakewords/{word.id}/classification/jobs').status_code == 201
         runtime.workers.run_once('gpu')
         assert runtime.samples.get(sample.id).label == 'negative'
+    finally:
+        runtime.shutdown()
+
+
+def test_classification_followup_recovers_commit_callback_gap_without_recursing(tmp_path):
+    runtime, word, _ = setup_runtime(tmp_path)
+    try:
+        settings = runtime.automation.get(word.id).settings
+        runtime.automation.save(word.id, replace(settings, trimming=replace(settings.trimming, enabled=True)))
+        job = runtime.jobs.enqueue('classify', word.id, {'manual': True})
+        runtime.jobs.claim('gpu', runtime.clock())
+        runtime.jobs.finish(job.id, {'reviewed': 1, 'positive': 1})
+        runtime.automation.reconcile()
+        runtime.automation.reconcile()
+        trims = [j for j in runtime.jobs.list().items if j.payload.get('trim_only')]
+        assert len(trims) == 1
+        runtime.jobs.claim('gpu', runtime.clock())
+        runtime.jobs.finish(trims[0].id, {'trimmed': 1})
+        runtime.automation.reconcile()
+        assert len(runtime.jobs.list().items) == 2
+    finally:
+        runtime.shutdown()
+
+
+def test_enabling_trimming_does_not_replay_historical_classification_jobs(tmp_path):
+    runtime, word, _ = setup_runtime(tmp_path)
+    try:
+        job = runtime.jobs.enqueue('classify', word.id, {})
+        runtime.jobs.claim('gpu', runtime.clock())
+        runtime.jobs.finish(job.id, {'reviewed': 1, 'positive': 1})
+        settings = runtime.automation.get(word.id).settings
+        runtime.automation.save(word.id, replace(settings, trimming=replace(settings.trimming, enabled=True)))
+        runtime.automation.reconcile()
+        assert len(runtime.jobs.list().items) == 1
+    finally:
+        runtime.shutdown()
+
+
+@pytest.mark.parametrize('state,result', [
+    ('failed', {'positive': 1}),
+    ('cancelled', {'positive': 1}),
+    ('interrupted', {'positive': 1}),
+    ('complete', {'positive': 1, 'skipped': True}),
+    ('complete', {'reviewed': 1, 'negative': 1}),
+])
+def test_unsuccessful_or_nonpositive_classification_does_not_trigger_trimming(tmp_path, state, result):
+    runtime, word, _ = setup_runtime(tmp_path)
+    try:
+        settings = runtime.automation.get(word.id).settings
+        runtime.automation.save(word.id, replace(settings, trimming=replace(settings.trimming, enabled=True)))
+        job = runtime.jobs.enqueue('classify', word.id, {})
+        runtime.jobs.claim('gpu', runtime.clock())
+        runtime.jobs.finish(job.id, result, status=state)
+        runtime.automation.reconcile()
+        assert len(runtime.jobs.list().items) == 1
     finally:
         runtime.shutdown()

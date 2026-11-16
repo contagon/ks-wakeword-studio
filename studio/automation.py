@@ -3,7 +3,7 @@ from dataclasses import asdict, replace
 import json
 
 from studio.models import (AutomationSettings, AutomationSchedule, AutomationStatus,
-                           ClassificationPolicy, DeploymentPolicy, ValidationError)
+                           ClassificationPolicy, TrimmingPolicy, DeploymentPolicy, ValidationError)
 from studio.workspaces import require_word
 
 
@@ -12,6 +12,9 @@ def settings_from_dict(data):
         values = dict(data)
         for key in ('collection', 'classification_schedule', 'training', 'deployment'):
             values[key] = AutomationSchedule(**values[key])
+        # Older settings allowed scheduled trimming; only the enabled choice remains.
+        values.pop('trimming_schedule', None)
+        values['trimming'] = TrimmingPolicy(**{k: v for k, v in values.get('trimming', {}).items() if k != 'trigger'})
         # Parakeet was removed; older saved settings still carry the engine choice.
         values['classification'] = ClassificationPolicy(**{k: v for k, v in values['classification'].items() if k != 'engine'})
         values['deployment_policy'] = DeploymentPolicy(**values['deployment_policy'])
@@ -23,6 +26,8 @@ def settings_from_dict(data):
 class AutomationService:
     def __init__(self, store, jobs, schedules, deployment):
         self.store, self.jobs, self.schedules, self.deployment = store, jobs, schedules, deployment
+        with store.transaction() as db:
+            db.execute("UPDATE studio_schedules SET enabled=0 WHERE scope LIKE 'trim:%' AND enabled=1")
 
     @staticmethod
     def settings_in(db, word_id):
@@ -46,8 +51,11 @@ class AutomationService:
                 'SELECT * FROM studio_schedules WHERE scope IN (?,?,?,?)',
                 tuple(kind + ':' + word_id for kind in ('scrape', 'classify', 'train', 'deploy')))]
             last = {}
-            for kind in ('scrape', 'classify', 'train', 'deploy'):
-                row = db.execute('SELECT * FROM studio_jobs WHERE word_id=? AND kind=? ORDER BY rowid DESC LIMIT 1', (word_id, kind)).fetchone()
+            for kind in ('scrape', 'classify', 'trim', 'train', 'deploy'):
+                row = db.execute('SELECT * FROM studio_jobs WHERE word_id=? AND kind=? '
+                    "AND (? NOT IN ('classify','trim') OR COALESCE(json_extract(payload,'$.trim_only'),0)=?) "
+                    'ORDER BY rowid DESC LIMIT 1',
+                    (word_id, 'classify' if kind == 'trim' else kind, kind, int(kind == 'trim'))).fetchone()
                 last[kind] = self.jobs.record(row) if row else None
         return AutomationStatus(settings, schedules, last)
 
@@ -57,12 +65,19 @@ class AutomationService:
         policy = settings.classification
         if (policy.trigger not in ('after_collection', 'schedule')
                 or any(type(value) is not bool for value in (policy.enabled, policy.confirm_activations, policy.auto_negatives,
-                    policy.promote_close_misses, policy.near_miss_negatives, settings.skip_unchanged, settings.deployment_policy.after_training))):
+                    policy.promote_close_misses, policy.near_miss_negatives, settings.trimming.enabled,
+                    settings.skip_unchanged, settings.deployment_policy.after_training))):
             raise ValidationError('Invalid automation policy')
         with self.store.transaction() as db:
-            self.settings_in(db, word_id)
+            previous = self.settings_in(db, word_id)
+            if settings.trimming.enabled and not previous.trimming.enabled:
+                # Enabling follow-ups must not replay historical classifications.
+                db.execute("INSERT OR IGNORE INTO automation_events(event_key,word_id) "
+                    "SELECT 'classification:'||id,word_id FROM studio_jobs WHERE word_id=? AND kind='classify' "
+                    "AND status='complete' AND COALESCE(json_extract(payload,'$.trim_only'),0)=0", (word_id,))
             stages = {'scrape': settings.collection, 'classify': replace(settings.classification_schedule,
-                enabled=policy.enabled and policy.trigger == 'schedule'), 'train': settings.training, 'deploy': settings.deployment}
+                enabled=policy.enabled and policy.trigger == 'schedule'),
+                'train': settings.training, 'deploy': settings.deployment}
             for kind, schedule in stages.items():
                 self.schedules.save_in(db, kind + ':' + word_id, schedule.cron, schedule.timezone, schedule.enabled)
             cursor = db.execute('SELECT COALESCE(MAX(rowid),0) FROM model_versions WHERE word_id=?', (word_id,)).fetchone()[0]
@@ -92,6 +107,17 @@ class AutomationService:
                     if pending:
                         self.jobs.enqueue_in(db, 'classify', row['word_id'], {}, 'collection:' + row['id'], None, self.jobs.clock())
                 db.execute('INSERT INTO automation_events(event_key,word_id) VALUES (?,?)', ('collection:' + row['id'], row['word_id']))
+            rows = db.execute("SELECT * FROM studio_jobs WHERE kind='classify' AND status='complete' AND word_id IS NOT NULL "
+                "AND COALESCE(json_extract(payload,'$.trim_only'),0)=0 "
+                "AND NOT EXISTS (SELECT 1 FROM automation_events WHERE event_key='classification:'||studio_jobs.id)").fetchall()
+            for row in rows:
+                policy = self.settings_in(db, row['word_id']).trimming
+                result = json.loads(row['result'])
+                key = 'classification:' + row['id']
+                if policy.enabled and result.get('positive', 0) > 0 and not result.get('skipped'):
+                    self.jobs.enqueue_in(db, 'classify', row['word_id'], {'trim_only': True, 'automatic': True},
+                                         key, None, self.jobs.clock())
+                db.execute('INSERT INTO automation_events(event_key,word_id) VALUES (?,?)', (key, row['word_id']))
 
     def handle_deploy(self, job, context):
         context.log('Checking deployment policy and available archives')

@@ -17,6 +17,7 @@ from typing import BinaryIO
 from uuid import uuid4
 
 from studio.db import Store
+from studio.automation import AutomationService
 from studio.deletion import source_deleted
 from studio.models import (CaptureMetadata, Conflict, DiagnosticClip, NotFound, Page, Recording, Sample,
                            SampleQuery, ValidationError, check_page, iso_now, utc_now)
@@ -322,9 +323,11 @@ class SampleService:
             if row["label"] == label:
                 raise ValidationError("Label is unchanged")
             sample = self.apply_change(db, row, label, row["audio_id"], "label")
-            if self.jobs is not None and sample.trim_status == 'needs_review' and not self.manually_trimmed(db, row):
+            if (self.jobs is not None and sample.trim_status == 'needs_review'
+                    and not self.manually_trimmed(db, row)
+                    and AutomationService.settings_in(db, sample.word_id).trimming.enabled):
                 self.jobs.enqueue_in(db, 'classify', sample.word_id,
-                    dict(trim_only=True, sample_id=sample.id, revision=sample.revision),
+                    dict(trim_only=True, automatic=True, sample_id=sample.id, revision=sample.revision),
                     f'trim:{sample.id}:{sample.revision}', None, self.jobs.clock())
             return sample
 
@@ -396,12 +399,9 @@ class SampleService:
                           "AND action='trim' AND actor='manual' AND undone=0 LIMIT 1",
                           (row['id'], row['audio_id'])).fetchone() is not None
 
-    def auto_trim(self, db: sqlite3.Connection, row: sqlite3.Row, phrase: str, result: dict, *, force=False) -> Sample:
+    def auto_trim(self, db: sqlite3.Connection, row: sqlite3.Row, phrase: str, result: dict) -> Sample:
         if self.manually_trimmed(db, row):
             return _sample(db, row)
-        if force and row['trim_status'] == 'auto':
-            db.execute('DELETE FROM audio_trim_validation WHERE audio_id=?', (row['audio_id'],))
-            row = self.fetch(db, row['id'])
         if row['trim_status'] != 'needs_review' or not result.get('speech'):
             return _sample(db, row)
         source = db.execute('SELECT a.* FROM recordings r JOIN audio_records a ON a.id=r.audio_id WHERE r.id=?',

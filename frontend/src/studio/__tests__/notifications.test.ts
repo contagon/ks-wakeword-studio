@@ -37,6 +37,7 @@ function transport() {
             collection: schedule,
             classification: { enabled: false, trigger: "after_collection" },
             classification_schedule: schedule,
+            trimming: { enabled: false },
             training: schedule,
             deployment: schedule,
             deployment_policy: { after_training: false },

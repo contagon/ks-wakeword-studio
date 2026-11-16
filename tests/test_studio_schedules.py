@@ -45,6 +45,11 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual([j.kind for j in self.service.tick(utc('2026-01-01T00:05:00'))], ['scrape'])
         self.assertEqual(len(self.service.list()), 2)
 
+    def test_trim_schedules_are_not_supported(self):
+        with self.assertRaises(ValidationError):
+            self.service.save('trim:' + self.word.id, '* * * * *', 'UTC', True)
+        self.assertEqual(self.service.tick(utc('2026-01-01T00:01:00')), [])
+
     def test_restart_coalesces_downtime_and_ticks_are_unique(self):
         self.service.save('scrape', '* * * * *', 'UTC', True)
         self.store.close()

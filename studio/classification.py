@@ -62,8 +62,6 @@ class ClassificationService:
                             raise Conflict('Already reviewed')
                         if outcome != 'pending':
                             self.samples.apply_change(db, current, outcome, current['audio_id'], 'label', actor='auto')
-                            if outcome == 'positive':
-                                self.samples.auto_trim(db, self.samples.fetch(db, current['id']), word['phrase'], result)
                     except (Conflict, NotFound):
                         counts['conflicts'] += 1
                     else:
@@ -108,30 +106,38 @@ class ClassificationService:
         return by_id
 
     def trim_positives(self, job, context):
-        """Explicit backfill or durable follow-up to a manual positive label; never relabel."""
+        """Attempt each positive once, preserving labels and all prior trims."""
         counts = dict(trimmed=0, needs_review=0, conflicts=0)
         root = self.store.scoped_directory('jobs', job.id)
         cursor, batch = '', 0
-        force = job.payload.get('force') is True
+        # Older manual-label follow-ups have a sample target but no automatic flag.
+        automatic = job.payload.get('automatic') is True or 'sample_id' in job.payload
+        if self.automation.scheduled_disabled(job) or (
+                automatic and not self.automation.get(job.word_id).settings.trimming.enabled):
+            return {'skipped': True, 'reason': 'disabled'}
         with self.store.transaction() as db:
             word = db.execute('SELECT * FROM wakewords WHERE id=?', (job.word_id,)).fetchone()
             if word is None:
                 raise NotFound('Workspace not found')
         while not context.cancelled():
+            if self.automation.scheduled_disabled(job) or (
+                    automatic and not self.automation.get(job.word_id).settings.trimming.enabled):
+                return counts
             with self.store.transaction() as db:
                 candidates = db.execute(SAMPLE_SELECT + f" WHERE s.word_id=? AND s.deleted=0 AND r.quarantined=0 "
-                    f"AND s.source='diagnostic' AND s.label='positive' AND (({TRIM_STATUS})='needs_review' OR ?) "
+                    f"AND s.source='diagnostic' AND s.label='positive' AND ({TRIM_STATUS})='needs_review' "
+                    "AND NOT EXISTS (SELECT 1 FROM automation_events e WHERE e.event_key='trim-attempt:'||s.id) "
+                    "AND NOT EXISTS (SELECT 1 FROM sample_history h WHERE h.sample_id=s.id AND h.action='trim') "
                     "AND s.id>? AND (? IS NULL OR s.id=?) "
                     "AND (? IS NULL OR s.revision=?) ORDER BY s.id LIMIT 50",
-                    (job.word_id, force, cursor, job.payload.get('sample_id'), job.payload.get('sample_id'),
-                     job.payload.get('revision'), job.payload.get('revision'))).fetchall()
-            if not candidates:
-                break
-            cursor = candidates[-1]['id']
-            with self.store.transaction() as db:
-                candidates = [row for row in candidates if not self.samples.manually_trimmed(db, row)]
-            if not candidates:
-                continue
+                    (job.word_id, cursor, job.payload.get('sample_id'), job.payload.get('sample_id'),
+                      job.payload.get('revision'), job.payload.get('revision'))).fetchall()
+                if not candidates:
+                    break
+                cursor = candidates[-1]['id']
+                # Claim before inference: even interrupted attempts must not retry.
+                db.executemany('INSERT INTO automation_events(event_key,word_id) VALUES (?,?)',
+                               [('trim-attempt:' + row['id'], job.word_id) for row in candidates])
             context.log(f'Locating wake phrases in batch {batch + 1}: {len(candidates)} positives')
             eligible = [r for r in candidates if not json.loads(r['recording_metadata']).get('blocked_by_vad')]
             results = self.transcribe(context, word, eligible, root, batch, original=True)
@@ -146,7 +152,7 @@ class ClassificationService:
                         current = self.samples.fetch(db, snapshot['id'], job.word_id)
                         self.samples.check_revision(current, snapshot['revision'])
                         self.samples.check_editable(db, current)
-                        updated = self.samples.auto_trim(db, current, word['phrase'], results.get(snapshot['id'], {}), force=force)
+                        updated = self.samples.auto_trim(db, current, word['phrase'], results.get(snapshot['id'], {}))
                     except (Conflict, NotFound):
                         counts['conflicts'] += 1
                     else:

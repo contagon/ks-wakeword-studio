@@ -227,13 +227,13 @@ export function fakeStudio() {
       return json(page(filtered(m[1], q), off, lim));
     }
     if ((m = p.match(/^\/wakewords\/([^/]+)\/samples$/))) return json(page(filtered(m[1], q), off, lim));
-    if ((m = p.match(/^\/wakewords\/([^/]+)\/samples\/trim\/jobs$/))) {
+    if ((m = p.match(/^\/wakewords\/([^/]+)\/trimming\/jobs$/))) {
       const queued: Job = {
         id: `trim-${++created}`,
         kind: "classify",
         word_id: m[1]!,
         resource: "gpu",
-        payload: { trim_only: true, force: true },
+        payload: { trim_only: true, manual: true },
         status: "queued",
         created_at: "2026-03-01T10:00:00Z",
         started_at: null,

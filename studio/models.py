@@ -85,10 +85,15 @@ class ClassificationPolicy:
     enabled: bool = False
     trigger: Literal['after_collection', 'schedule'] = 'after_collection'
     # One switch per (clip kind x what speech recognition heard) cell.
-    confirm_activations: bool = False
+    confirm_activations: bool = True
     auto_negatives: bool = True
-    promote_close_misses: bool = False
-    near_miss_negatives: bool = False
+    promote_close_misses: bool = True
+    near_miss_negatives: bool = True
+
+
+@dataclass(frozen=True)
+class TrimmingPolicy:
+    enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -101,6 +106,7 @@ class AutomationSettings:
     collection: AutomationSchedule = field(default_factory=AutomationSchedule)
     classification: ClassificationPolicy = field(default_factory=ClassificationPolicy)
     classification_schedule: AutomationSchedule = field(default_factory=lambda: AutomationSchedule(cron='0 * * * *'))
+    trimming: TrimmingPolicy = field(default_factory=TrimmingPolicy)
     training: AutomationSchedule = field(default_factory=lambda: AutomationSchedule(cron='0 2 * * *'))
     skip_unchanged: bool = True
     deployment: AutomationSchedule = field(default_factory=lambda: AutomationSchedule(cron='0 4 * * *'))

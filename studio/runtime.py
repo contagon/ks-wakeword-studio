@@ -99,6 +99,7 @@ class StudioRuntime:
                 self._workers.register('classify', 'gpu', self._classification.handle)
                 self._workers.register('deploy', 'collection', self._automation.handle_deploy)
                 self._workers.register_completion('scrape', lambda job: self._automation.reconcile())
+                self._workers.register_completion('classify', lambda job: self._automation.reconcile())
                 self._workers.register_completion('train', lambda job: self._deployment.retry_due(self.clock()))
                 self._jobs.recover()
                 self._deployment.reconcile()

@@ -28,7 +28,7 @@ def test_each_grid_cell_has_its_own_toggle():
     only_near_negatives = ClassificationPolicy(auto_negatives=False, near_miss_negatives=True)
     assert classify_transcript('Hey Cedar', only_near_negatives, speech=False) == 'pending'
     assert classify_transcript('Hey Cedar', only_near_negatives, near_miss=True, speech=False) == 'negative'
-    assert classify_transcript('Hey Cedar', ClassificationPolicy(), speech=True, text='hey cedar') == 'pending'
+    assert classify_transcript('Hey Cedar', ClassificationPolicy(confirm_activations=False), speech=True, text='hey cedar') == 'pending'
     assert classify_transcript('Hey Cedar', ClassificationPolicy(confirm_activations=True), speech=True,
                                text='hey cedar') == 'positive'
 

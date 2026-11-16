@@ -114,15 +114,11 @@ describe("provenance-aware sample library", () => {
     expect(ui.findAll("[data-row-id]").map((r) => r.attributes("data-row-id"))).toEqual(["s0"]);
   });
 
-  it("queues an explicit backfill for only the active workspace", async () => {
+  it("keeps automatic trimming in Automate instead of exposing the retired migration action", async () => {
     const ui = await open();
-    expect(ui.get("[data-action=auto-trim]").text()).toBe("Re-trim all scraped positives");
-    expect(ui.text()).toContain("Manual trims are protected");
-    await ui.get("[data-action=auto-trim]").trigger("click");
-    await settle();
-    expect(server.mutations().at(-1)!.url.pathname).toBe("/api/studio/wakewords/a/samples/trim/jobs");
-    expect(ui.get("[data-samples-status]").text()).toContain("queued");
-    expect(ui.get("[data-action=auto-trim]").attributes("disabled")).toBeDefined();
+    expect(ui.find("[data-action=auto-trim]").exists()).toBe(false);
+    expect(ui.text()).not.toContain("Re-trim all scraped positives");
+    expect(row(ui, "s2").find("[data-action=trim]").exists()).toBe(true);
   });
 
   it("plays the full original and can undo a saved automatic trim", async () => {

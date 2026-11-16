@@ -36,6 +36,8 @@ def fixture(tmp_path):
     runner = TrimRunner()
     runtime = StudioRuntime(tmp_path, runner=runner)
     word = runtime.workspaces.create('Hey Cedar', 'en')
+    settings = runtime.automation.get(word.id).settings
+    runtime.automation.save(word.id, replace(settings, trimming=replace(settings.trimming, enabled=True)))
     yield runtime, word, runner
     runtime.shutdown()
 
@@ -70,20 +72,31 @@ def test_manual_positive_queues_trim_preserves_original_and_undo(fixture):
     assert not runtime.workers.run_once('gpu')
 
 
-def test_classification_reuses_timestamps_for_automatic_positive_trim(fixture):
+@pytest.mark.parametrize('manual', [False, True])
+def test_classification_queues_trimming_as_a_separate_enabled_step(fixture, manual):
     runtime, word, runner = fixture
     runner.words = [{**w, 'probability': .01} for w in runner.words]
     sample = scraped(runtime, word)
     settings = runtime.automation.get(word.id).settings
     runtime.automation.save(word.id, replace(settings, classification=replace(settings.classification,
-        enabled=True, confirm_activations=True)))
-    job = runtime.jobs.enqueue('classify', word.id, {})
+        enabled=not manual, confirm_activations=True), trimming=replace(settings.trimming, enabled=True)))
+    job = runtime.jobs.enqueue('classify', word.id, {'manual': manual})
     runtime.workers.run_once('gpu')
     assert runtime.jobs.get(job.id).status == 'complete'
+    assert runtime.samples.get(sample.id).trim_status == 'needs_review'
+    runtime.automation.reconcile()
+    runtime.automation.reconcile()
+    followups = [j for j in runtime.jobs.list().items if j.payload.get('trim_only')]
+    assert len(followups) == 1
+    assert runtime.workers.run_once('gpu')
     updated = runtime.samples.get(sample.id)
     assert (updated.label, updated.trim_status, updated.labelled_by) == ('positive', 'auto', 'auto')
     assert seconds(runtime, updated) == pytest.approx(.9)
-    assert len(runtime.jobs.list().items) == 1
+    assert len(runtime.jobs.list().items) == 2
+    assert runtime.automation.get(word.id).last_jobs['classify'].id == job.id
+    assert runtime.automation.get(word.id).last_jobs['trim'].id == followups[0].id
+    runtime.automation.reconcile()
+    assert len(runtime.jobs.list().items) == 2
 
 
 @pytest.mark.parametrize('words', [[], [dict(word='Hey Cedar', start=0, end=3, probability=.99)],
@@ -108,8 +121,9 @@ def test_positive_trim_can_use_prompted_fallback_without_relabelling(fixture, tm
     if automatic_label:
         settings = runtime.automation.get(word.id).settings
         runtime.automation.save(word.id, replace(settings, classification=replace(settings.classification,
-            enabled=True, confirm_activations=True)))
+            enabled=True, confirm_activations=True), trimming=replace(settings.trimming, enabled=True)))
         runtime.jobs.enqueue('classify', word.id, {})
+        runtime.workers.run_once('gpu')
     else:
         runtime.samples.set_label(sample.id, 'positive', sample.revision)
     runtime.workers.run_once('gpu')
@@ -118,9 +132,9 @@ def test_positive_trim_can_use_prompted_fallback_without_relabelling(fixture, tm
         'positive', 'auto' if automatic_label else 'manual', 'auto')
     assert seconds(runtime, trimmed) == pytest.approx(.9)
     assert runtime.samples.audio(sample.id, word.id, original=True) == wav(seconds=3)
-    job, = runtime.jobs.list().items
+    job, = [j for j in runtime.jobs.list().items if j.payload.get('trim_only')]
     manifest = json.loads((tmp_path / 'studio/jobs' / job.id / 'classify-0.json').read_text())
-    assert manifest['positive'] is not automatic_label
+    assert manifest['positive'] is True
 
 
 def test_successful_unprompted_crop_wins_over_prompted_alternative(fixture):
@@ -156,6 +170,20 @@ def test_manual_trim_during_inference_wins(fixture):
     assert seconds(runtime, updated) == pytest.approx(.2)
 
 
+def test_undone_manual_trim_is_never_automatically_reprocessed(fixture):
+    runtime, word, _ = fixture
+    sample = scraped(runtime, word)
+    with runtime.jobs.store.transaction() as db:
+        db.execute("UPDATE samples SET label='positive' WHERE id=?", (sample.id,))
+    manual = runtime.samples.trim(sample.id, .1, .3, sample.revision)
+    restored = runtime.samples.undo(sample.id, manual.revision)
+    assert restored.trim_status == 'needs_review'
+    job = runtime.jobs.enqueue('classify', word.id, {'trim_only': True, 'manual': True})
+    assert runtime.workers.run_once('gpu')
+    assert runtime.jobs.get(job.id).result == dict(trimmed=0, needs_review=0, conflicts=0)
+    assert runtime.samples.get(sample.id).audio_id == sample.audio_id
+
+
 def test_even_an_overlong_manual_selection_is_not_automatically_overwritten(fixture):
     runtime, word, _ = fixture
     sample = scraped(runtime, word)
@@ -169,13 +197,19 @@ def test_even_an_overlong_manual_selection_is_not_automatically_overwritten(fixt
     assert runtime.samples.get(sample.id).audio_id == manual.audio_id
 
 
-def test_backfill_is_explicit_scoped_and_skips_manual_trims_and_imports(fixture):
+def test_run_now_is_scoped_and_skips_manual_trims_and_imports(fixture):
     runtime, word, _ = fixture
+    settings = runtime.automation.get(word.id).settings
+    runtime.automation.save(word.id, replace(settings, trimming=replace(settings.trimming, enabled=False)))
     sample = scraped(runtime, word)
     # Simulate an existing positive from before this feature, without triggering new-label processing.
     with runtime.jobs.store.transaction() as db:
         db.execute("UPDATE samples SET label='positive' WHERE id=?", (sample.id,))
     imported = runtime.samples.import_audio(word.id, 'positive', io.BytesIO(wav(2)))
+    other_word = runtime.workspaces.create('Hey Maple', 'en')
+    other = scraped(runtime, other_word, 'other')
+    with runtime.jobs.store.transaction() as db:
+        db.execute("UPDATE samples SET label='positive' WHERE id=?", (other.id,))
     negative = scraped(runtime, word, 'negative')
     runtime.samples.set_label(negative.id, 'negative', negative.revision)
     manual = scraped(runtime, word, 'manual')
@@ -185,10 +219,11 @@ def test_backfill_is_explicit_scoped_and_skips_manual_trims_and_imports(fixture)
     with api_client(runtime) as api:
         path = f'/api/studio/wakewords/{word.id}/samples'
         assert api.get(path, params={'trim_status': 'needs_review'}).json()['total'] == 1
-        response = api.post(path + '/trim/jobs')
+        response = api.post(f'/api/studio/wakewords/{word.id}/trimming/jobs')
         assert response.status_code == 201
         job_id = response.json()['id']
-        assert api.post('/api/studio/wakewords/missing/samples/trim/jobs').status_code == 404
+        assert api.post('/api/studio/wakewords/missing/trimming/jobs').status_code == 404
+        assert api.post(path + '/trim/jobs').status_code == 404
         assert api.get(path, params={'trim_status': 'bogus'}).status_code == 422
     runtime.workers.run_once('gpu')
     assert runtime.jobs.get(job_id).status == 'complete'
@@ -196,6 +231,7 @@ def test_backfill_is_explicit_scoped_and_skips_manual_trims_and_imports(fixture)
     assert runtime.samples.get(manual.id).trim_status == 'manual'
     assert runtime.samples.get(imported.id).audio_id == imported.audio_id
     assert runtime.samples.get(negative.id).audio_id == negative.audio_id
+    assert runtime.samples.get(other.id).audio_id == other.audio_id
 
 
 def test_training_excludes_unresolved_scraped_positives_but_not_other_audio(fixture, tmp_path):
@@ -269,7 +305,7 @@ def test_classification_discards_results_for_a_changed_workspace(fixture, change
 
 
 @pytest.mark.parametrize('previous_policy', [None, 2])
-def test_legacy_automatic_crops_need_revalidation_from_full_original(fixture, tmp_path, previous_policy):
+def test_legacy_automatic_crops_are_not_reprocessed_and_still_need_manual_review(fixture, tmp_path, previous_policy):
     runtime, word, runner = fixture
     augmentation_fixture(tmp_path)
     runtime.datasets.select(word.id, [])
@@ -287,64 +323,132 @@ def test_legacy_automatic_crops_need_revalidation_from_full_original(fixture, tm
     assert runtime.training.counts(word.id)['positive'] == 0
     job = runtime.jobs.enqueue('classify', word.id, {'trim_only': True})
     runtime.workers.run_once('gpu')
-    assert runtime.jobs.get(job.id).result['trimmed'] == 1
-    repaired = runtime.samples.get(sample.id)
-    assert repaired.trim_status == 'auto'
-    assert seconds(runtime, repaired) == pytest.approx(.9)
-    manifest = json.loads((tmp_path / 'studio/jobs' / job.id / 'classify-0.json').read_text())
-    assert manifest['samples'][0]['path'].endswith(sample.normalized_hash)
-    with runtime.jobs.store.transaction() as db:
-        assert db.execute('SELECT parent_id FROM audio_records WHERE id=?', (repaired.audio_id,)).fetchone()[0] == sample.audio_id
+    assert runtime.jobs.get(job.id).result == dict(trimmed=0, needs_review=0, conflicts=0)
+    assert runtime.samples.get(sample.id).audio_id == legacy.audio_id
+    assert runtime.samples.get(sample.id).trim_status == 'needs_review'
     assert runtime.samples.audio(sample.id, word.id, original=True) == wav(seconds=3)
-    assert runtime.samples.undo(sample.id, repaired.revision).trim_status == 'needs_review'
 
 
-def test_button_forces_all_automatic_crops_from_original_but_protects_manual(fixture, tmp_path):
+def test_run_now_never_reprocesses_automatic_crops_even_after_undo(fixture):
     runtime, word, runner = fixture
     sample = scraped(runtime, word)
     runtime.samples.set_label(sample.id, 'positive', sample.revision)
     runtime.workers.run_once('gpu')
     previous = runtime.samples.get(sample.id)
-    manual = scraped(runtime, word, 'manual')
-    manual = runtime.samples.trim(manual.id, .1, .3, manual.revision)
-    manual = runtime.samples.set_label(manual.id, 'positive', manual.revision)
-    imported = runtime.samples.import_audio(word.id, 'positive', io.BytesIO(wav(2)))
-    runner.words = [dict(word='Hey', start=.5, end=.7, probability=.95),
-                    dict(word='Cedar', start=.8, end=1.2, probability=.95),
-                    dict(word='lights', start=1.5, end=1.8, probability=.95)]
-    runner.speech_segments = [dict(start=.5, end=1.2), dict(start=1.5, end=1.8)]
     with api_client(runtime) as api:
-        response = api.post(f'/api/studio/wakewords/{word.id}/samples/trim/jobs')
+        response = api.post(f'/api/studio/wakewords/{word.id}/trimming/jobs')
         assert response.status_code == 201
         job = response.json()
-        assert job['payload']['force'] is True
+        assert 'force' not in job['payload']
     runtime.workers.run_once('gpu')
-    assert runtime.jobs.get(job['id']).result == dict(trimmed=1, needs_review=0, conflicts=0)
-    updated = runtime.samples.get(sample.id)
-    assert updated.audio_id != previous.audio_id
-    assert updated.trim_status == 'auto'
-    assert seconds(runtime, updated) == pytest.approx(1, abs=1 / 16000)
-    manifest = json.loads((tmp_path / 'studio/jobs' / job['id'] / 'classify-0.json').read_text())
-    assert [entry['id'] for entry in manifest['samples']] == [sample.id]
-    assert manifest['samples'][0]['path'].endswith(sample.normalized_hash)
-    assert runtime.samples.get(manual.id).audio_id == manual.audio_id
-    assert runtime.samples.get(imported.id).audio_id == imported.audio_id
+    assert runtime.jobs.get(job['id']).result == dict(trimmed=0, needs_review=0, conflicts=0)
+    assert runtime.samples.get(sample.id).audio_id == previous.audio_id
+    runtime.samples.undo(sample.id, previous.revision)
+    # Persisted jobs from the retired migration path cannot force another attempt.
+    job = runtime.jobs.enqueue('classify', word.id, {'trim_only': True, 'force': True})
+    runtime.workers.run_once('gpu')
+    assert runtime.jobs.get(job.id).result == dict(trimmed=0, needs_review=0, conflicts=0)
+    assert runtime.samples.get(sample.id).audio_id == sample.audio_id
 
 
-def test_forced_recheck_does_not_keep_uncertain_old_crop_training_ready(fixture):
+def test_failed_trim_is_not_retried_after_restart_but_new_samples_are_processed(fixture, tmp_path):
+    runtime, word, runner = fixture
+    sample = scraped(runtime, word)
+    runner.words = []
+    runtime.samples.set_label(sample.id, 'positive', sample.revision)
+    runtime.workers.run_once('gpu')
+    assert runtime.samples.get(sample.id).trim_status == 'needs_review'
+    runtime.shutdown()
+    runtime = StudioRuntime(tmp_path, runner=TrimRunner())
+    try:
+        fresh = scraped(runtime, word, 'fresh')
+        with runtime.jobs.store.transaction() as db:
+            db.execute("UPDATE samples SET label='positive' WHERE id=?", (fresh.id,))
+        with api_client(runtime) as api:
+            job = api.post(f'/api/studio/wakewords/{word.id}/trimming/jobs').json()
+        runtime.workers.run_once('gpu')
+        assert runtime.jobs.get(job['id']).result == dict(trimmed=1, needs_review=0, conflicts=0)
+        assert runtime.samples.get(fresh.id).trim_status == 'auto'
+        assert runtime.samples.get(sample.id).audio_id == sample.audio_id
+        assert runtime.samples.get(sample.id).trim_status == 'needs_review'
+    finally:
+        runtime.shutdown()
+
+
+def test_interrupted_trim_attempt_is_not_retried(fixture):
     runtime, word, runner = fixture
     sample = scraped(runtime, word)
     runtime.samples.set_label(sample.id, 'positive', sample.revision)
+
+    def fail():
+        raise RuntimeError('Speech process failed')
+
+    runner.before_result = fail
     runtime.workers.run_once('gpu')
-    previous = runtime.samples.get(sample.id)
-    runner.words = []
+    runner.before_result = None
     with api_client(runtime) as api:
-        job = api.post(f'/api/studio/wakewords/{word.id}/samples/trim/jobs').json()
+        job = api.post(f'/api/studio/wakewords/{word.id}/trimming/jobs').json()
     runtime.workers.run_once('gpu')
-    updated = runtime.samples.get(sample.id)
-    assert (updated.trim_status, updated.audio_id) == ('needs_review', previous.audio_id)
-    assert runtime.jobs.get(job['id']).result == dict(trimmed=0, needs_review=1, conflicts=0)
+    assert runtime.jobs.get(job['id']).result == dict(trimmed=0, needs_review=0, conflicts=0)
+    assert runtime.samples.get(sample.id).audio_id == sample.audio_id
     assert runtime.training.counts(word.id)['positive'] == 0
+
+
+def test_classification_leaves_positives_for_trim_when_automation_is_disabled(fixture):
+    runtime, word, _ = fixture
+    settings = runtime.automation.get(word.id).settings
+    runtime.automation.save(word.id, replace(settings, trimming=replace(settings.trimming, enabled=False)))
+    sample = scraped(runtime, word)
+    runtime.jobs.enqueue('classify', word.id, {'manual': True})
+    runtime.workers.run_once('gpu')
+    assert runtime.samples.get(sample.id).label == 'positive'
+    assert runtime.samples.get(sample.id).trim_status == 'needs_review'
+    assert len(runtime.jobs.list().items) == 1
+
+
+def test_manual_label_does_not_queue_trimming_when_disabled(fixture):
+    runtime, word, _ = fixture
+    settings = runtime.automation.get(word.id).settings
+    runtime.automation.save(word.id, replace(settings, trimming=replace(settings.trimming, enabled=False)))
+    sample = scraped(runtime, word)
+    positive = runtime.samples.set_label(sample.id, 'positive', sample.revision)
+    assert positive.trim_status == 'needs_review'
+    assert not runtime.jobs.list().items
+
+
+def test_manual_label_followup_respects_disabling_before_execution(fixture):
+    runtime, word, _ = fixture
+    sample = scraped(runtime, word)
+    runtime.samples.set_label(sample.id, 'positive', sample.revision)
+    job, = runtime.jobs.list().items
+    settings = runtime.automation.get(word.id).settings
+    runtime.automation.save(word.id, replace(settings, trimming=replace(settings.trimming, enabled=False)))
+    assert runtime.workers.run_once('gpu')
+    assert runtime.jobs.get(job.id).result == {'skipped': True, 'reason': 'disabled'}
+    assert runtime.samples.get(sample.id).audio_id == sample.audio_id
+
+
+def test_legacy_manual_label_followup_respects_disabled_policy_after_restart(fixture, tmp_path):
+    runtime, word, _ = fixture
+    sample = scraped(runtime, word)
+    settings = runtime.automation.get(word.id).settings
+    runtime.automation.save(word.id, replace(settings, trimming=replace(settings.trimming, enabled=False)))
+    with runtime.jobs.store.transaction() as db:
+        db.execute("UPDATE samples SET label='positive' WHERE id=?", (sample.id,))
+    legacy = runtime.jobs.enqueue('classify', word.id,
+        {'trim_only': True, 'sample_id': sample.id, 'revision': sample.revision})
+    runtime.shutdown()
+    runtime = StudioRuntime(tmp_path, runner=TrimRunner())
+    try:
+        assert runtime.workers.run_once('gpu')
+        assert runtime.jobs.get(legacy.id).result == {'skipped': True, 'reason': 'disabled'}
+        assert runtime.samples.get(sample.id).audio_id == sample.audio_id
+        with api_client(runtime) as api:
+            manual = api.post(f'/api/studio/wakewords/{word.id}/trimming/jobs').json()
+        assert runtime.workers.run_once('gpu')
+        assert runtime.jobs.get(manual['id']).result == dict(trimmed=1, needs_review=0, conflicts=0)
+    finally:
+        runtime.shutdown()
 
 
 def test_full_length_editor_uses_absolute_bounds_and_can_expand_nested_crops(fixture):
